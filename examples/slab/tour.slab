@@ -1,0 +1,97 @@
+// A tour of the whole syntax (docs/lang/syntax.md). It only has to parse for now.
+
+const MAX_PLAYERS: int = 8;
+const GREETING: str = "welcome";
+
+struct Config {
+    a: int,
+    tags: list<int>,
+}
+
+struct Arena {
+    name: str,
+    round: int,
+    winners: list<str>,
+}
+
+objective kills = "playerKillCount";
+objective points = "dummy";
+
+global ticks: int = 0;
+global arena: Arena = Arena { name: "main", round: 0, winners: [] };
+global settings: list<int> = [1, 2, 3];
+
+#[load]
+fn setup() {
+    ticks = 0;
+    arena.round = 1;
+    print(GREETING);
+}
+
+#[tick]
+fn step() {
+    ticks += 1;
+}
+
+#[every(1s)]
+fn heartbeat() {
+    as @a[tag=ready, distance=..50, scores={kills=1..}] at @s {
+        effect.give(@s, "minecraft:speed", 10s);
+        points[@s] += 1;
+        if points[@s] >= 10 && !tag.has(@s, "winner") {
+            tag.add(@s, "winner");
+            arena.winners.push("someone");
+        }
+    }
+}
+
+#[every(5)]
+fn floor_check() {
+    as @a at @s positioned ~ ~-1 ~ align xyz {
+        if exists(@e[type=minecraft:item, distance=..1]) {
+            kill(@s);
+        }
+    }
+
+    in "minecraft:the_nether" rotated 0 90 facing 0 64 0 anchored eyes {
+        summon("minecraft:marker", ~, ~, ~);
+    }
+}
+
+fn count_up(limit: int) -> int {
+    let mut total = 0;
+    for i in 0..limit {
+        if i % 2 == 0 { continue; }
+        total += i;
+    }
+    for i in 1..=3 { total += i; }
+    loop {
+        total -= 1;
+        if total < 100 { break; }
+    }
+    return total;
+}
+
+fn describe(a: Arena) -> str {
+    if a.round == 0 {
+        return "not started";
+    } else if a.round < 3 {
+        return "early";
+    } else {
+        return "late";
+    }
+}
+
+fn lists_and_compounds() {
+    let mut names = ["ann", "bob"];
+    names.push("cy");
+    let n = names.len();
+    let cfg = Config { a: 1, tags: [1, 2] };
+    let other: Config = { a: 2, tags: [] };
+    let pos = (n + 1) * 2 - -3;
+    { let scoped = pos; }
+    let first = names[0];
+    print(first);
+    print(f"first={first} n={n} cfg.a={cfg.a} {{done}}");
+    print(cfg.a + other.a + n + pos);
+}

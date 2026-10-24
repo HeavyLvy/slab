@@ -1,0 +1,258 @@
+[
+ {
+  "cmd": "scoreboard players get #g.loaded e2e",
+  "matches": "has [12] \\[e2e\\]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_fib e2e",
+  "expect": "has 55 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_clamp_hi e2e",
+  "expect": "has 50 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_clamp_lo e2e",
+  "expect": "has 0 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_even e2e",
+  "expect": "has 10 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_loop_break e2e",
+  "expect": "has 64 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_for_jump e2e",
+  "expect": "has 18 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_fact e2e",
+  "expect": "has 120 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_for_list e2e",
+  "expect": "has 1202 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_nested e2e",
+  "expect": "has 8 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_first_square e2e",
+  "expect": "has 8 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_cond_call e2e",
+  "expect": "has 5 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_div e2e",
+  "expect": "has -4 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_mod e2e",
+  "expect": "has 1 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_compound e2e",
+  "expect": "has 3 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_logic e2e",
+  "expect": "has 1 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_score e2e",
+  "expect": "has 24 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_struct_ret e2e",
+  "expect": "has 4 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_pair e2e",
+  "expect": "has 60 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_list_sum e2e",
+  "expect": "has 140 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_len e2e",
+  "expect": "has 4 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_dynlist e2e",
+  "expect": "has 200 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_recur_data e2e",
+  "expect": "has 6 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_shadow e2e",
+  "expect": "has 21 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_arena e2e",
+  "expect": "has 203 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_arena_len e2e",
+  "expect": "has 2 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #alice pts",
+  "expect": "has 8 [pts]"
+ },
+ {
+  "cmd": "scoreboard players get #bob pts",
+  "expect": "has 16 [pts]"
+ },
+ {
+  "cmd": "data get storage e2e:globals greeting",
+  "expect": "\"hello\""
+ },
+ {
+  "cmd": "data get storage e2e:globals names",
+  "expect": "[\"hello\", \"world\"]"
+ },
+ {
+  "cmd": "scoreboard players get #g.ticks e2e",
+  "matches": "has [1-9][0-9]* \\[e2e\\]",
+  "wait": 2
+ },
+ {
+  "cmd": "scoreboard players get #g.every_count e2e",
+  "matches": "has [1-9][0-9]* \\[e2e\\]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_entities e2e",
+  "expect": "has 3 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_exists e2e",
+  "expect": "has 1 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_tagged e2e",
+  "expect": "has 2 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_dyn_index e2e",
+  "expect": "has 40025099 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_dyn_struct e2e",
+  "expect": "has 1302 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_dyn_loop e2e",
+  "expect": "has 15 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_dyn_neg e2e",
+  "expect": "has 5 [e2e]"
+ },
+ {
+  "cmd": "execute if block 8 65 8 minecraft:gold_block",
+  "expect": "Test passed"
+ },
+ {
+  "cmd": "execute if block 8 66 8 minecraft:diamond_block",
+  "expect": "Test passed"
+ },
+ {
+  "cmd": "execute if entity @e[type=minecraft:marker,x=8,y=70,z=8,distance=..1]",
+  "expect": "Test passed"
+ },
+ {
+  "cmd": "data get storage e2e:macro",
+  "absent": "h0"
+ },
+ {
+  "cmd": "data get storage e2e:vars run_all.v_xs",
+  "expect": "Found no elements"
+ },
+ {
+  "cmd": "data get storage e2e:vars run_all.v_pr",
+  "expect": "Found no elements"
+ },
+ {
+  "cmd": "data get storage e2e:vars run_all.v_iter",
+  "expect": "Found no elements"
+ },
+ {
+  "cmd": "data get storage e2e:vars echo.v_s",
+  "expect": "Found no elements"
+ },
+ {
+  "cmd": "data get storage e2e:vars count_chars.v_label",
+  "expect": "Found no elements"
+ },
+ {
+  "cmd": "data get storage e2e:vars mathx__make_pair.v_tmp",
+  "expect": "Found no elements"
+ },
+ {
+  "cmd": "data get storage e2e:ret v",
+  "expect": "Found no elements"
+ },
+ {
+  "cmd": "data get storage e2e:globals greeting",
+  "expect": "\"hello\""
+ },
+ {
+  "cmd": "summon minecraft:marker 8 64 8 {Tags:[\"seen\"]}",
+  "expect": "Summoned"
+ },
+ {
+  "cmd": "execute if entity @e[tag=e2e.owned]",
+  "expect": "Test passed"
+ },
+ {
+  "cmd": "execute if entity @e[tag=seen]",
+  "expect": "Test passed"
+ },
+ {
+  "cmd": "scoreboard objectives list",
+  "matches": "\\[e2e\\].*\\[pts\\]|\\[pts\\].*\\[e2e\\]"
+ },
+ {
+  "cmd": "function e2e:_uninstall"
+ },
+ {
+  "cmd": "execute if entity @e[tag=e2e.owned]",
+  "expect": "Test failed"
+ },
+ {
+  "cmd": "execute if entity @e[tag=seen]",
+  "expect": "Test failed"
+ },
+ {
+  "cmd": "execute if entity @e[type=minecraft:marker]",
+  "expect": "Test passed"
+ },
+ {
+  "cmd": "scoreboard objectives list",
+  "absent": "[e2e]"
+ },
+ {
+  "cmd": "scoreboard objectives list",
+  "absent": "[pts]"
+ },
+ {
+  "cmd": "data get storage e2e:globals",
+  "absent": "greeting"
+ },
+ {
+  "cmd": "data get storage e2e:vars",
+  "absent": "run_all"
+ },
+ {
+  "cmd": "data get storage e2e:ret",
+  "absent": "hello"
+ }
+]

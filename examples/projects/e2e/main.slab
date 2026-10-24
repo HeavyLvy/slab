@@ -1,0 +1,270 @@
+// End-to-end test project: every result lands in a global that tools/verify_pack.py reads back
+// from the running game (see checks.json).
+import mathx;
+import game::arena;
+import mathx::{Pair, square};
+
+objective pts = "dummy";
+
+global r_fib: int = 0;
+global r_clamp_hi: int = 0;
+global r_clamp_lo: int = 0;
+global r_loop_break: int = 0;
+global r_for_jump: int = 0;
+global r_fact: int = 0;
+global r_for_list: int = 0;
+global r_nested: int = 0;
+global r_first_square: int = 0;
+global r_cond_call: int = 0;
+global r_div: int = 0;
+global r_mod: int = 0;
+global r_compound: int = 0;
+global r_logic: int = 0;
+global r_score: int = 0;
+global r_struct_ret: int = 0;
+global r_list_sum: int = 0;
+global r_dynlist: int = 0;
+global r_len: int = 0;
+global r_recur_data: int = 0;
+global r_even: int = 0;
+global r_shadow: int = 0;
+global r_arena: int = 0;
+global r_arena_len: int = 0;
+global r_pair: int = 0;
+global ticks: int = 0;
+global every_count: int = 0;
+global loaded: int = 0;
+global r_dyn_index: int = 0;
+global r_dyn_struct: int = 0;
+global r_dyn_loop: int = 0;
+global r_dyn_neg: int = 0;
+global r_entities: int = 0;
+global r_exists: int = 0;
+global r_tagged: int = 0;
+global greeting: str = "unset";
+global names: list<str> = [];
+
+#[load]
+fn run_all() {
+    loaded += 1;
+    names = [];
+
+    r_fib = mathx::fib(10);
+    r_clamp_hi = mathx::clamp(100, 0, 50);
+    r_clamp_lo = mathx::clamp(-5, 0, 50);
+    r_even = mathx::is_even(10) * 10 + mathx::is_even(7);
+
+    // loop with break and continue: odd numbers up to 20, stopping after 15
+    let mut i = 0;
+    let mut s = 0;
+    loop {
+        i += 1;
+        if i > 20 { break; }
+        if i % 2 == 0 { continue; }
+        if i > 15 { break; }
+        s += i;
+    }
+    r_loop_break = s;
+
+    // for with continue and break: 0+1+2+4+5+6
+    let mut t = 0;
+    for k in 0..10 {
+        if k == 3 { continue; }
+        if k == 7 { break; }
+        t += k;
+    }
+    r_for_jump = t;
+
+    // inclusive range, 5!
+    let mut p = 1;
+    for k in 1..=5 { p *= k; }
+    r_fact = p;
+
+    // for over lists, including an early break
+    let mut ls = 0;
+    for x in [3, 4, 5] { ls += x; }
+    let mut cnt = 0;
+    for name in ["ann", "bob", "cy", "dee"] {
+        if name.len() > 2 { cnt += 1; }
+        if cnt == 2 { break; }
+    }
+    r_for_list = ls * 100 + cnt;
+
+    // nested loops: break only leaves the inner one
+    let mut n = 0;
+    for _a in 0..4 {
+        for b in 0..4 {
+            if b == 2 { break; }
+            n += 1;
+        }
+    }
+    r_nested = n;
+
+    r_first_square = first_square_over(50);
+
+    // a call in the loop condition is re-evaluated each iteration
+    let mut c = 0;
+    while mathx::lt(c, 5) { c += 1; }
+    r_cond_call = c;
+
+    // floored division and modulo (runtime values, not folded)
+    let mut a = -7;
+    let b = 2;
+    r_div = a / b;
+    r_mod = a % b;
+    a *= 3;
+    a /= 2;
+    a %= 7;
+    r_compound = a;
+
+    // boolean logic
+    let x = 3;
+    let y = 7;
+    let mut l = 0;
+    if x < 5 && y > 5 || x == 100 { l += 1; }
+    if !(x < 5 && y > 5) { l += 10; }
+    if x != 3 || y != 7 { l += 100; }
+    r_logic = l;
+
+    // scoreboard objective with fake players
+    pts["#alice"] = 5;
+    pts["#alice"] += 3;
+    pts["#bob"] = pts["#alice"] * 2;
+    r_score = pts["#alice"] + pts["#bob"];
+
+    // structs: returned from calls, field of a call result
+    r_struct_ret = mathx::make_pair(3, 4).b;
+    let pr = mathx::make_pair(5, 6);
+    r_pair = pr.a * 10 + pr.b + square(2);
+
+    // lists: dynamic literal, push, len, constant indices
+    let base = 10;
+    let mut xs = [base, base + 1, base * 2];
+    xs.push(99);
+    r_list_sum = xs[0] + xs[1] + xs[2] + xs[3];
+    r_len = xs.len();
+    let words = ["x", "yy"];
+    r_dynlist = words.len() * 100 + names.len();
+
+    // strings through calls
+    greeting = echo("hello");
+    names.push(greeting);
+    names.push("world");
+
+    // data parameters survive recursion
+    r_recur_data = count_chars(3, "ab");
+
+    // shadowing
+    let sh = 1;
+    {
+        let sh = sh + 1;
+        r_shadow = sh;
+    }
+    r_shadow = r_shadow * 10 + sh;
+
+    // variable list indices (a macro under the hood): read, write, compound assignment, expression index
+    let mut ys = [10, 20, 30, 40];
+    let ix = 2;
+    ys[ix] = 99;
+    ys[ix - 1] += 5;
+    r_dyn_index = ys[ix] + ys[ix - 1] * 1000 + ys[ix + 1] * 1000000;
+
+    // an element that is a struct: read and update one of its fields
+    let mut ps = [mathx::make_pair(1, 2), mathx::make_pair(3, 4)];
+    let j = 1;
+    ps[j].a += 10;
+    r_dyn_struct = ps[j].a * 100 + ps[0].b;
+
+    // a loop over a list by index, and a negative index counting from the end
+    let zs = [1, 2, 3, 4, 5];
+    let mut zk = 0;
+    let mut zt = 0;
+    while zk < zs.len() {
+        zt += zs[zk];
+        zk += 1;
+    }
+    r_dyn_loop = zt;
+    let neg = 0 - 1;
+    r_dyn_neg = zs[neg];
+
+    // f-strings: text with embedded values (numbers, strings, lists, struct fields, expressions)
+    print(f"fib={r_fib} greeting={greeting} names={names} pair={pr.a},{pr.b} sum={ys[ix] + 1} {{braces}}");
+
+    // another module's globals and structs
+    arena::reset();
+    arena::advance();
+    arena::advance();
+    r_arena = arena::seconds * 100 + arena::round_number();
+    r_arena_len = arena::scores_len();
+}
+
+fn echo(s: str) -> str {
+    return s;
+}
+
+// every call needs the previous result and the label to survive the recursive call
+fn count_chars(n: int, label: str) -> int {
+    if n == 0 { return 0; }
+    let before = label.len();
+    let rest = count_chars(n - 1, label);
+    return rest + before;
+}
+
+fn first_square_over(limit: int) -> int {
+    for i in 0..1000 {
+        if i * i > limit { return i; }
+    }
+    return -1;
+}
+
+#[tick]
+fn step() {
+    ticks += 1;
+}
+
+#[every(10)]
+fn tenth() {
+    every_count += 1;
+}
+
+// Not an entry point: the harness runs it with `/function e2e:world_test`.
+fn world_test() {
+    // explicit coordinates: the console runs at the world spawn, which differs per world, so
+    // "here" may not be in the chunk the harness force-loads (chunk 0 0)
+    kill(@e[type=minecraft:marker]);
+    summon("minecraft:marker", 8, 64, 8);
+    summon("minecraft:marker", 8, 64, 8);
+    summon("minecraft:marker", 8, 64, 8);
+
+    let mut n = 0;
+    as @e[type=minecraft:marker] { n += 1; }
+    r_entities = n;
+
+    if exists(@e[type=minecraft:marker]) { r_exists = 1; }
+
+    as @e[type=minecraft:marker, limit=2] { tag.add(@s, "seen"); }
+    let mut t = 0;
+    as @e[type=minecraft:marker] at @s {
+        if tag.has(@s, "seen") { t += 1; }
+    }
+    r_tagged = t;
+    kill(@e[type=minecraft:marker]);
+
+    // variable coordinates: blocks and a context block positioned by variables
+    let level = 1;
+    let bx = 4 * 2;
+    setblock(bx, 64 + level, bx, "minecraft:gold_block");
+    positioned bx 64 bx {
+        setblock(~, ~2, ~, "minecraft:diamond_block");
+    }
+
+    // one owned entity is left alive on purpose: `_uninstall` must remove it
+    summon("minecraft:marker", bx, 64, bx);
+    // ...and moved with variable coordinates
+    let ty = 70;
+    tp(@e[tag=e2e.owned, limit=1], bx, ty, bx);
+
+    // variable effect duration (ticks) and amplifier; nobody is online, but the command must parse
+    let secs = 3;
+    effect.give(@a, "minecraft:speed", secs * 20, level);
+}

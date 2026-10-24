@@ -1,0 +1,27 @@
+// A small multi-file project: main.slab is the entry point, everything else is a module.
+import util;
+import game::arena;
+
+global ticks: int = 0;
+global boots: int = 0;
+
+#[load]
+fn boot() {
+    boots += 1;
+    arena::reset();
+    print("hello from slab");
+}
+
+#[tick]
+fn step() {
+    ticks += 1;
+}
+
+#[every(1s)]
+fn second() {
+    arena::advance();
+}
+
+fn answer() -> int {
+    return util::fib(10) + util::clamp(100, 0, 50);
+}

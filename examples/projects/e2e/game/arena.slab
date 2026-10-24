@@ -1,0 +1,29 @@
+import mathx;
+
+struct Round {
+    number: int,
+    scores: list<int>,
+}
+
+global current: Round = Round { number: 0, scores: [] };
+pub global seconds: int = 0;
+
+pub fn reset() {
+    current.number = 1;
+    current.scores = [];
+    seconds = 0;
+}
+
+pub fn advance() {
+    seconds += 1;
+    current.number = mathx::clamp(current.number + 1, 1, 5);
+    current.scores.push(seconds * 10);
+}
+
+pub fn round_number() -> int {
+    return current.number;
+}
+
+pub fn scores_len() -> int {
+    return current.scores.len();
+}

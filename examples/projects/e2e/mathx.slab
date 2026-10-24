@@ -1,0 +1,37 @@
+pub struct Pair {
+    a: int,
+    b: int,
+}
+
+pub fn make_pair(a: int, b: int) -> Pair {
+    return Pair { a: a, b: b };
+}
+
+pub fn square(x: int) -> int {
+    return x * x;
+}
+
+pub fn clamp(x: int, lo: int, hi: int) -> int {
+    if x < lo { return lo; }
+    if x > hi { return hi; }
+    return x;
+}
+
+pub fn lt(a: int, b: int) -> bool {
+    return a < b;
+}
+
+pub fn fib(n: int) -> int {
+    if n < 2 { return n; }
+    return fib(n - 1) + fib(n - 2);
+}
+
+pub fn is_even(n: int) -> int {
+    if n == 0 { return 1; }
+    return is_odd(n - 1);
+}
+
+fn is_odd(n: int) -> int {
+    if n == 0 { return 0; }
+    return is_even(n - 1);
+}

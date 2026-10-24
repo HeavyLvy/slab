@@ -1,0 +1,20 @@
+import util;
+
+pub struct Round {
+    number: int,
+    scores: list<int>,
+}
+
+global current: Round = Round { number: 0, scores: [] };
+pub global seconds: int = 0;
+
+pub fn reset() {
+    current.number = 1;
+    seconds = 0;
+}
+
+pub fn advance() {
+    seconds += 1;
+    current.number = util::clamp(current.number + 1, 1, 5);
+    current.scores.push(seconds);
+}

@@ -1,0 +1,21 @@
+// Recursion, a loop and an early return.
+fn fib(n: int) -> int {
+    if n < 2 { return n; }
+    return fib(n - 1) + fib(n - 2);
+}
+
+fn first_square_over(limit: int) -> int {
+    let mut i = 0;
+    while i < 1000 {
+        if i * i > limit { return i; }
+        i += 1;
+    }
+    return -1;
+}
+
+global answer: int = 0;
+
+#[load]
+fn main() {
+    answer = fib(10);
+}
