@@ -274,3 +274,45 @@ fn the_examples_parse_and_the_e2e_project_checks() {
         let _ = doc;
     }
 }
+
+#[test]
+fn hover_shows_doc_comments() {
+    // on the declaration, on a call of it, on a global, and the file's //! doc on the module
+    let text = "//! Utilities.\n\n/// Adds one.\n/// (and only that)\nfn add1(a: int) -> int {\n    return a + 1;\n}\n\n/// a counter\nglobal count: int = 0;\n\nfn main() {\n    let n = add1(1);\n    count += n;\n}\n";
+    let d = Dir::new("docs", &[("main.slab", text)]);
+    let mut ws = Workspace::default();
+    let uri = file_uri(&d.0.join("main.slab"));
+    ws.open(&uri, text, 1);
+
+    let (state, _doc, module) = ws.locate(&uri).unwrap();
+    let module = module.unwrap();
+
+    // on the declaration
+    let at = text.find("add1").unwrap();
+    let hover = state.hover(module, at).unwrap();
+    assert!(hover.contains("Adds one."), "{hover}");
+    assert!(hover.contains("(and only that)"), "{hover}");
+
+    // on a call of it
+    let at = text.find("add1(1)").unwrap();
+    let hover = state.hover(module, at).unwrap();
+    assert!(hover.contains("Adds one."), "{hover}");
+
+    // on a use of the documented global
+    let at = text.find("count += n").unwrap();
+    let hover = state.hover(module, at).unwrap();
+    assert!(hover.contains("a counter"), "{hover}");
+
+    // the module doc: another file whose//!-documented module is imported
+    let d2 = Dir::new("docs-mod", &[
+        ("main.slab", "import other;\n\nfn go() {\n    other::helper();\n}\n"),
+        ("other.slab", "//! A module of its own.\n\npub fn helper() {}\n"),
+    ]);
+    let mut ws2 = Workspace::default();
+    let uri3 = file_uri(&d2.0.join("main.slab"));
+    ws2.open(&uri3, "import other;\n\nfn go() {\n    other::helper();\n}\n", 1);
+    let (state2, _doc2, module2) = ws2.locate(&uri3).unwrap();
+    let at = "import other;\n\nfn go() {\n    other::helper();\n}\n".find("other::helper").unwrap();
+    let hover = state2.hover(module2.unwrap(), at).unwrap();
+    assert!(hover.contains("A module of its own."), "{hover}");
+}

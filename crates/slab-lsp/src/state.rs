@@ -215,7 +215,11 @@ fn build_project(key: PathBuf, root_file: &Path, standalone: bool, docs: &HashMa
                 .map(|m| ModuleInfo {
                     name: m.name.clone(),
                     file_idx: m.file,
-                    defs: DefIndex::build(&m.program),
+                    defs: {
+                        let mut defs = DefIndex::build(&m.program);
+                        defs.attach_docs(&project.sources.files[m.file].text);
+                        defs
+                    },
                     program: m.program,
                 })
                 .collect();

@@ -251,13 +251,21 @@ impl ProjectState {
                 let def = self.modules[module].defs.defs().iter().find(|d| d.field_spans.contains(&span))?;
                 let i = def.field_spans.iter().position(|s| *s == span)?;
                 let (n, t) = &def.fields[i];
-                Some(format!("```slab\n{n}: {t}\n```\nfield of `struct {}`", def.name))
+                let doc = self.docs_of(module, def.field_spans[i]);
+                Some(match doc {
+                    Some(d) => format!("```slab\n{n}: {t}\n```\nfield of `struct {}`\n\n{d}", def.name),
+                    None => format!("```slab\n{n}: {t}\n```\nfield of `struct {}`", def.name),
+                })
             }
             Role::FieldInitName => None,
             Role::Param => {
-                let text = format!("{}: {}", hit.name, param_type(program, offset)?);
+                let sig = format!("{}: {}", hit.name, param_type(program, offset)?);
                 let owner = self.modules[module].defs.defs().iter().find(|d| d.kind == DefKind::Fn && analysis::contains(d.full_span, offset))?;
-                Some(format!("```slab\n{text}\n```\na parameter of `{}`", owner.detail))
+                let doc = self.docs_of(module, hit.span);
+                Some(match doc {
+                    Some(d) => format!("```slab\n{sig}\n```\na parameter of `{}`\n\n{d}", owner.detail),
+                    None => format!("```slab\n{sig}\n```\na parameter of `{}`", owner.detail),
+                })
             }
             Role::LetName => {
                 if let Some(hir) = &self.hir
@@ -265,7 +273,11 @@ impl ProjectState {
                 {
                     let l = hir.fns.get(fi)?.locals.get(li)?;
                     let mutable = if l.mutable { "mut " } else { "" };
-                    return Some(format!("```slab\nlet {mutable}{}: {}\n```\na local variable", l.name, analysis::ty_string(&l.ty, hir)));
+                    let doc = self.docs_of(module, l.span);
+                    return Some(match doc {
+                        Some(d) => format!("```slab\nlet {mutable}{}: {}\n```\na local variable\n\n{d}", l.name, analysis::ty_string(&l.ty, hir)),
+                        None => format!("```slab\nlet {mutable}{}: {}\n```\na local variable", l.name, analysis::ty_string(&l.ty, hir)),
+                    });
                 }
                 Some(format!("a local variable `{}`", hit.name))
             }
@@ -286,7 +298,11 @@ impl ProjectState {
                 let (mi, def, i) = self.field_decl(hir, &ctx, *index)?;
                 let (n, t) = &def.fields[i];
                 let _ = mi;
-                Some(format!("```slab\n{n}: {t}\n```\nfield of `struct {}`", def.name))
+                let doc = self.docs_of(mi, *def.field_spans.get(i)?);
+                return Some(match doc {
+                    Some(d) => format!("```slab\n{n}: {t}\n```\nfield of `struct {}`\n\n{d}", def.name),
+                    None => format!("```slab\n{n}: {t}\n```\nfield of `struct {}`", def.name),
+                });
             }
             Role::TypeName => {
                 let (mi, def) = self.struct_by_name(module, program, &hit.name)?;
@@ -297,7 +313,8 @@ impl ProjectState {
                     return Some(format!("```slab\n{}\n```\na builtin module; its functions are called dotted, like `{0}.give(...)`", hit.name));
                 }
                 let target = self.import_target(program, &hit)?;
-                Some(module_hover(&self.modules[target]))
+                let text = self.module_text(self.modules[target].file_idx);
+                Some(module_hover(&self.modules[target], text))
             }
             Role::ImportItem => {
                 let d = self.imported_item_def(program, &hit)?;
@@ -333,7 +350,9 @@ impl ProjectState {
                 let sig = fn_signature(f, hir);
                 let mod_name = hir.modules.get(f.module)?.clone();
                 let entry = f.entry.as_ref().map(entry_label).unwrap_or_default();
-                Some(format!("```slab\n{sig}\n```\nin module `{mod_name}`{entry}"))
+                let entry = if entry.is_empty() { String::new() } else { format!("\nin module `{mod_name}`  —  entry point `#[{entry}]`") };
+                let docs = named_def_docs(self, hir, f.module, &f.name).map_or_else(String::new, |d| format!("\n\n{d}"));
+                Some(if entry.is_empty() { format!("```slab\n{sig}\n```\nin module `{mod_name}`{docs}") } else { format!("```slab\n{sig}\n```{entry}{docs}") })
             }
             HirKind::Builtin { name, .. } => Some(builtin_hover(builtins::lookup(name)?)),
             HirKind::Method { kind, .. } => Some(method_text(*kind)),
@@ -348,15 +367,18 @@ impl ProjectState {
                     "a local variable"
                 };
                 let mutable = if l.mutable { "mut " } else { "" };
-                Some(format!("```slab\nlet {mutable}{}: {}\n```\n{kind}", l.name, ty(&l.ty)))
+                let docs = self.docs_of(module, l.span).map_or_else(String::new, |d| format!("\n\n{d}"));
+                Some(format!("```slab\nlet {mutable}{}: {}\n```\n{kind}{docs}", l.name, ty(&l.ty)))
             }
             HirKind::Global(id) => {
                 let g = hir.globals.get(id.0)?;
-                Some(format!("```slab\nglobal {}: {}\n```\na global (persists across ticks and `/reload`)", g.name, ty(&g.ty)))
+                let docs = named_def_docs(self, hir, g.module, &g.name).map_or_else(String::new, |d| format!("\n\n{d}"));
+                Some(format!("```slab\nglobal {}: {}\n```\na global (persists across ticks and `/reload`){docs}", g.name, ty(&g.ty)))
             }
             HirKind::Score { objective, .. } => {
                 let o = hir.objectives.get(objective.0)?;
-                Some(format!("```slab\nobjective {}\n```\na scoreboard score; read or write with `{}[holder]`", o.name, o.name))
+                let docs = named_def_docs(self, hir, o.module, &o.name).map_or_else(String::new, |d| format!("\n\n{d}"));
+                Some(format!("```slab\nobjective {}\n```\na scoreboard score; read or write with `{}[holder]`{docs}", o.name, o.name))
             }
             HirKind::Selector(_) => {
                 let raw = self.expr_text(module, &ctx.expr);
@@ -401,6 +423,23 @@ impl ProjectState {
             .unwrap_or("")
             .to_owned()
     }
+
+    /// The `///` documentation above a span in a module's source.
+    fn docs_of(&self, module: usize, span: slab::diag::Span) -> Option<String> {
+        let text = self.module_text(self.modules[module].file_idx);
+        crate::docs::doc_before(text, span.start as usize)
+    }
+
+    /// The source text of a module's file.
+    fn module_text(&self, file_idx: usize) -> &str {
+        &self.sources.files[file_idx].text
+    }
+}
+
+/// A declaration's documentation resolved through a module's own index.
+fn named_def_docs<'a>(state: &'a ProjectState, hir: &shir::Hir, module: usize, name: &str) -> Option<&'a str> {
+    let mi = state.module_by_name(&hir.modules[module])?;
+    state.modules[mi].defs.by_name(name)?.docs.as_deref()
 }
 
 // ------------------------------------------------------------------ helpers
@@ -454,10 +493,15 @@ fn def_hover(def: &Def, module_name: &str, kind: DefKind) -> String {
         _ => module_name.to_owned(),
     };
     let vis = if def.public { " `pub`" } else { "" };
-    format!("```slab\n{}\n```{vis}\nin `{scope}`", def.detail)
+    let mut out = format!("```slab\n{}\n```{vis}\nin `{scope}`", def.detail);
+    if let Some(docs) = &def.docs {
+        out.push_str("\n\n");
+        out.push_str(docs);
+    }
+    out
 }
 
-fn module_hover(m: &crate::state::ModuleInfo) -> String {
+fn module_hover(m: &crate::state::ModuleInfo, text: &str) -> String {
     let items: Vec<&str> = m
         .defs
         .defs()
@@ -466,7 +510,8 @@ fn module_hover(m: &crate::state::ModuleInfo) -> String {
         .map(|d| d.detail.as_str())
         .collect();
     let body = if items.is_empty() { "(no public items)".to_owned() } else { items.join("\n") };
-    format!("**module** `{}`\n```slab\n{body}\n```", m.name)
+    let doc = crate::docs::module_doc(text).map_or_else(String::new, |d| format!("\n\n{d}"));
+    format!("**module** `{}`{doc}\n```slab\n{body}\n```", m.name)
 }
 
 /// The type of the parameter declaration at `offset`.

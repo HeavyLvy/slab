@@ -6,6 +6,12 @@
   "name": "slab",
   "patterns": [
     {
+      "include": "#doc-comment"
+    },
+    {
+      "include": "#module-comment"
+    },
+    {
       "include": "#line-comment"
     },
     {
@@ -182,6 +188,11 @@
       "match": "\\b(?:pub|import|let)\\b",
       "name": "keyword.declaration.slab"
     },
+    "doc-comment": {
+      "comment": "/// documentation of the item below",
+      "match": "///.*$",
+      "name": "comment.line.documentation.slab"
+    },
     "expr": {
       "comment": "what an f-string hole may contain",
       "patterns": [
@@ -273,6 +284,11 @@
     "modifier-keyword": {
       "match": "\\b(?:mut)\\b",
       "name": "storage.modifier.slab"
+    },
+    "module-comment": {
+      "comment": "//! documentation of the file (module)",
+      "match": "//!.*$",
+      "name": "comment.line.documentation.module.slab"
     },
     "numbers": {
       "comment": "hex `0x…`, `_` separators, floats, and time literals ending in one of tsd",

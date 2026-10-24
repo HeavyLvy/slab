@@ -27,6 +27,8 @@ pub fn tm_language() -> Value {
         "scopeName": "source.slab",
         "fileTypes": ["slab"],
         "patterns": [
+            { "include": "#doc-comment" },
+            { "include": "#module-comment" },
             { "include": "#line-comment" },
             { "include": "#block-comment" },
             { "include": "#declaration-names" },
@@ -56,6 +58,23 @@ pub fn tm_language() -> Value {
 
 fn repository() -> Map<String, Value> {
     let mut r = Map::new();
+
+    r.insert(
+        "doc-comment".into(),
+        json!({
+            "comment": "/// documentation of the item below",
+            "match": r"///.*$",
+            "name": "comment.line.documentation.slab",
+        }),
+    );
+    r.insert(
+        "module-comment".into(),
+        json!({
+            "comment": "//! documentation of the file (module)",
+            "match": r"//!.*$",
+            "name": "comment.line.documentation.module.slab",
+        }),
+    );
 
     r.insert(
         "line-comment".into(),

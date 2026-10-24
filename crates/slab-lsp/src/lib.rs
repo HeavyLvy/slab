@@ -8,6 +8,7 @@
 pub mod analysis;
 pub mod completion;
 pub mod defs;
+pub mod docs;
 pub mod grammar;
 pub mod lines;
 pub mod resolve;

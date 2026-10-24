@@ -60,7 +60,7 @@ fn module_items(state: &ProjectState, module: usize, chain: &[String]) -> Option
             if only_pub && !def.public {
                 continue;
             }
-            out.push(Item { label: def.name.clone(), kind: item_kind(def), detail: Some(def.detail.clone()), docs: None, insert: None });
+            out.push(Item { label: def.name.clone(), kind: item_kind(def), detail: Some(def.detail.clone()), docs: def.docs.clone(), insert: None });
         }
     }
     dedupe(&mut out);
@@ -102,7 +102,7 @@ fn plain_items(state: &ProjectState, module: usize) -> Option<Vec<Item>> {
             if m.name != state.modules[module].name && !def.public {
                 continue;
             }
-            out.push(Item { label: def.name.clone(), kind: item_kind(def), detail: Some(def.detail.clone()), docs: None, insert: None });
+            out.push(Item { label: def.name.clone(), kind: item_kind(def), detail: Some(def.detail.clone()), docs: def.docs.clone(), insert: None });
         }
     }
     dedupe(&mut out);

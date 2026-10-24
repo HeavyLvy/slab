@@ -7,9 +7,12 @@ data packs (see `README.md` in the repository root).
 
 * **Instant highlighting** of keywords, strings, f-strings (with their `{holes}`), entity
   selectors (`@e[type=zombie]`), relative coordinates (`~`, `^2`), time literals (`10s`),
-  attributes (`#[load]`) and more — no server needed.
+  attributes (`#[load]`), doc comments (`///`, `//!`) and more — no server needed.
 * **Diagnostics in real time**: errors and warnings exactly where `slab check` reports them,
   across every module of the project.
+* **Documentation** written as `///` comment runs above functions, globals, structs and
+  their fields, `const`s, parameters and `let` bindings (and `//!` at the top of a file for
+  the module), shown on hover — also at use sites, other files, and completion lists.
 * **Hover** with types, function signatures and builtin documentation.
 * **Go to definition** for functions, globals, structs, fields, locals and imports —
   across module files.

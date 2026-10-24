@@ -26,6 +26,8 @@ pub struct Def {
     /// `Some("load")` for `#[load]`, `"tick"`, `"every"`.
     pub entry: Option<String>,
     pub detail: String,
+    /// The `///` documentation attached to the declaration, when present.
+    pub docs: Option<String>,
     /// For structs: field (name, type as written).
     pub fields: Vec<(String, String)>,
     /// For structs: the field name spans, aligned with [`Def::fields`].
@@ -50,6 +52,7 @@ impl DefIndex {
                 public: item.public,
                 entry: entry.clone(),
                 detail: String::new(),
+                docs: None,
                 fields: Vec::new(),
                 field_spans: Vec::new(),
             };
@@ -127,6 +130,13 @@ impl DefIndex {
 
     pub fn by_kind(&self, kind: DefKind) -> impl Iterator<Item = &Def> {
         self.defs.iter().filter(move |d| d.kind == kind)
+    }
+
+    /// Attaches the `///` documentation above every declaration in this source text.
+    pub fn attach_docs(&mut self, text: &str) {
+        for def in &mut self.defs {
+            def.docs = crate::docs::doc_before(text, def.name_span.start as usize);
+        }
     }
 }
 
