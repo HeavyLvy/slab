@@ -53,6 +53,19 @@ Copy the folder (or zip) into `<world>/datapacks/` and `/reload`. To remove ever
 
 Limits worth knowing: no floats, no string concatenation (f-strings can only be printed), and a loop can run about 21,000 iterations per tick (Minecraft's command limit).
 
+## Editor support
+
+```
+cargo build --release           # builds slab (compiler) and slab-lsp (language server)
+code --install-extension editors/vscode/slab-vscode-0.1.0.vsix   # after `npm run vsix` once (editors/vscode)
+```
+
+The VS Code extension highlights `.slab` files immediately (TextMate grammar) and, with
+`slab-lsp` on hand, adds live errors and warnings from the real compiler, hover with types
+and builtin docs, go to definition, completion (builtins with snippets, struct fields,
+module items, import paths), and an outline. The grammar is generated: `crates/slab-lsp`
+writes it from the compiler's own keyword/builtin lists, and a test fails if it goes stale.
+
 ## Learn more
 
 * `docs/lang/` - the language: syntax, semantics, modules, how it compiles.

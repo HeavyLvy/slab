@@ -1,0 +1,4 @@
+# editor-local: dependencies, build output and the packaged extension
+node_modules/
+dist/
+*.vsix

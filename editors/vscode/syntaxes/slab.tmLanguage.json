@@ -1,0 +1,345 @@
+{
+  "__generated__": "by `slab-lsp grammar` from the compiler's definitions — regenerate, never edit",
+  "fileTypes": [
+    "slab"
+  ],
+  "name": "slab",
+  "patterns": [
+    {
+      "include": "#line-comment"
+    },
+    {
+      "include": "#block-comment"
+    },
+    {
+      "include": "#declaration-names"
+    },
+    {
+      "include": "#decl-fn"
+    },
+    {
+      "include": "#decl-struct"
+    },
+    {
+      "include": "#decl-global"
+    },
+    {
+      "include": "#decl-const"
+    },
+    {
+      "include": "#decl-objective"
+    },
+    {
+      "include": "#modifier-keyword"
+    },
+    {
+      "include": "#attribute"
+    },
+    {
+      "include": "#fstring"
+    },
+    {
+      "include": "#string"
+    },
+    {
+      "include": "#selector"
+    },
+    {
+      "include": "#relative-coordinate"
+    },
+    {
+      "include": "#control-keywords"
+    },
+    {
+      "include": "#context-keywords"
+    },
+    {
+      "include": "#boolean-keywords"
+    },
+    {
+      "include": "#builtins"
+    },
+    {
+      "include": "#builtin-modules"
+    },
+    {
+      "include": "#numbers"
+    },
+    {
+      "include": "#operators"
+    }
+  ],
+  "repository": {
+    "attribute": {
+      "captures": {
+        "1": {
+          "name": "entity.name.decorator.slab"
+        },
+        "2": {
+          "name": "meta.attribute-arguments.slab"
+        }
+      },
+      "comment": "#[load], #[tick], #[every(1s)]",
+      "match": "#\\s*\\[([A-Za-z_]\\w*)(?:\\([^)]*\\))?\\s*\\]",
+      "name": "meta.attribute.slab"
+    },
+    "block-comment": {
+      "begin": "/\\*",
+      "comment": "nesting is not modelled (the lexer accepts nested block comments)",
+      "end": "\\*/",
+      "name": "comment.block.slab"
+    },
+    "boolean-keywords": {
+      "match": "\\b(?:true|false)\\b",
+      "name": "constant.language.boolean.slab"
+    },
+    "builtin-modules": {
+      "comment": "the heads of dotted builtins: effect., tag.",
+      "match": "\\b(?:effect|tag)\\b(?=\\s*\\.)",
+      "name": "support.namespace.slab"
+    },
+    "builtins": {
+      "comment": "builtin functions in call position, longest names first",
+      "match": "\\b(?:effect\\.clear|effect\\.give|tag\\.remove|tag\\.add|tag\\.has|setblock|exists|summon|print|kill|say|tp)\\b(?=\\s*\\()",
+      "name": "support.function.slab"
+    },
+    "call": {
+      "captures": {
+        "1": {
+          "name": "entity.name.function.slab"
+        }
+      },
+      "comment": "any call-looking identifier, user function or method",
+      "match": "\\b([A-Za-z_]\\w*)\\b(?=\\s*\\()"
+    },
+    "context-keywords": {
+      "match": "\\b(?:as|at|positioned|rotated|facing|align|anchored)\\b",
+      "name": "keyword.control.context.slab"
+    },
+    "control-keywords": {
+      "match": "\\b(?:if|else|while|loop|for|in|return|break|continue)\\b",
+      "name": "keyword.control.slab"
+    },
+    "decl-const": {
+      "captures": {
+        "1": {
+          "name": "keyword.declaration.slab"
+        },
+        "2": {
+          "name": "variable.other.slab"
+        }
+      },
+      "match": "\\b(const)\\s+[A-Za-z_]\\w*"
+    },
+    "decl-fn": {
+      "captures": {
+        "1": {
+          "name": "keyword.declaration.slab"
+        },
+        "2": {
+          "name": "entity.name.function.slab"
+        }
+      },
+      "match": "\\b(fn)\\s+[A-Za-z_]\\w*"
+    },
+    "decl-global": {
+      "captures": {
+        "1": {
+          "name": "keyword.declaration.slab"
+        },
+        "2": {
+          "name": "variable.other.slab"
+        }
+      },
+      "match": "\\b(global)\\s+[A-Za-z_]\\w*"
+    },
+    "decl-objective": {
+      "captures": {
+        "1": {
+          "name": "keyword.declaration.slab"
+        },
+        "2": {
+          "name": "entity.name.objective.slab"
+        }
+      },
+      "match": "\\b(objective)\\s+[A-Za-z_]\\w*"
+    },
+    "decl-struct": {
+      "captures": {
+        "1": {
+          "name": "keyword.declaration.slab"
+        },
+        "2": {
+          "name": "entity.name.type.slab"
+        }
+      },
+      "match": "\\b(struct)\\s+[A-Za-z_]\\w*"
+    },
+    "declaration-names": {
+      "match": "\\b(?:pub|import|let)\\b",
+      "name": "keyword.declaration.slab"
+    },
+    "expr": {
+      "comment": "what an f-string hole may contain",
+      "patterns": [
+        {
+          "include": "#string-escape"
+        },
+        {
+          "include": "#string"
+        },
+        {
+          "include": "#selector"
+        },
+        {
+          "include": "#relative-coordinate"
+        },
+        {
+          "include": "#control-keywords"
+        },
+        {
+          "include": "#boolean-keywords"
+        },
+        {
+          "include": "#builtins"
+        },
+        {
+          "include": "#builtin-modules"
+        },
+        {
+          "include": "#numbers"
+        },
+        {
+          "include": "#operators"
+        },
+        {
+          "include": "#call"
+        }
+      ]
+    },
+    "fstring": {
+      "begin": "f\"",
+      "beginCaptures": {
+        "0": {
+          "name": "punctuation.definition.string.begin.slab"
+        }
+      },
+      "comment": "f\"text {expression} text\"; {{ and }} are literal braces",
+      "end": "\"|(?=\\n)",
+      "endCaptures": {
+        "0": {
+          "name": "punctuation.definition.string.end.slab"
+        }
+      },
+      "name": "string.interpolated.slab",
+      "patterns": [
+        {
+          "include": "#string-escape"
+        },
+        {
+          "match": "\\{\\{|\\}\\}",
+          "name": "constant.character.escape.slab"
+        },
+        {
+          "begin": "\\{",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.definition.interpolation.begin.slab"
+            }
+          },
+          "end": "\\}|(?=\\n)",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.definition.interpolation.end.slab"
+            }
+          },
+          "name": "meta.interpolation.slab",
+          "patterns": [
+            {
+              "include": "#expr"
+            }
+          ]
+        }
+      ]
+    },
+    "line-comment": {
+      "comment": "// to end of line",
+      "match": "//.*$",
+      "name": "comment.line.double-slash.slab"
+    },
+    "modifier-keyword": {
+      "match": "\\b(?:mut)\\b",
+      "name": "storage.modifier.slab"
+    },
+    "numbers": {
+      "comment": "hex `0x…`, `_` separators, floats, and time literals ending in one of tsd",
+      "patterns": [
+        {
+          "match": "\\b0[xX][0-9a-fA-F_]+(?![\\w])",
+          "name": "constant.numeric.hex.slab"
+        },
+        {
+          "match": "\\b\\d[\\d_]*[tsd](?![\\w])",
+          "name": "constant.numeric.time.slab"
+        },
+        {
+          "match": "\\b\\d[\\d_]*\\.\\d[\\d_]*",
+          "name": "constant.numeric.float.slab"
+        },
+        {
+          "match": "\\b\\d[\\d_]*\\b",
+          "name": "constant.numeric.slab"
+        }
+      ]
+    },
+    "operators": {
+      "comment": "every operator token, longest first",
+      "match": "\\.\\.=|==|!=|<=|>=|\\+=|-=|\\*=|/=|%=|&&|\\|\\||->|\\.\\.|=|<|>|\\+|-|\\*|/|%|!",
+      "name": "keyword.operator.slab"
+    },
+    "relative-coordinate": {
+      "comment": "~, ~1, ~-2.5, ^3 (also matched inside f-string holes)",
+      "match": "[~^](?:-?\\d+(?:\\.\\d+)?)?",
+      "name": "constant.other.coordinate.slab"
+    },
+    "selector": {
+      "captures": {
+        "1": {
+          "name": "entity.name.selector.slab"
+        },
+        "2": {
+          "name": "meta.selector-arguments.slab"
+        }
+      },
+      "comment": "@aeprsn with optional [args]: @e[type=zombie, distance=..10, tag=!boss]",
+      "match": "(@[aeprsn])(\\[(?:[^\\[\\]{}\"'\\n]|\"[^\"\\n]*\"|'[^'\\n]*'|\\{[^{}]*\\})*\\])?",
+      "name": "meta.selector.slab"
+    },
+    "string": {
+      "begin": "\"",
+      "beginCaptures": {
+        "0": {
+          "name": "punctuation.definition.string.begin.slab"
+        }
+      },
+      "comment": "strings may not contain a raw newline",
+      "end": "\"|(?=\\n)",
+      "endCaptures": {
+        "0": {
+          "name": "punctuation.definition.string.end.slab"
+        }
+      },
+      "name": "string.quoted.double.slab",
+      "patterns": [
+        {
+          "include": "#string-escape"
+        }
+      ]
+    },
+    "string-escape": {
+      "match": "\\\\u\\{[0-9a-fA-F_]+\\}|\\\\[ntr0\\\\\"']",
+      "name": "constant.character.escape.slab"
+    }
+  },
+  "scopeName": "source.slab"
+}

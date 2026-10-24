@@ -1,0 +1,71 @@
+{
+  "name": "slab-vscode",
+  "displayName": "slab",
+  "description": "slab language support: syntax highlighting and a language server (diagnostics, hover, go to definition, completion, outline) for .slab programs",
+  "version": "0.1.0",
+  "publisher": "cayden",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.84.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [],
+  "contributes": {
+    "languages": [
+      {
+        "id": "slab",
+        "aliases": ["slab", "slab"],
+        "extensions": [".slab"],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "slab",
+        "scopeName": "source.slab",
+        "path": "./syntaxes/slab.tmLanguage.json"
+      }
+    ],
+    "snippets": [
+      {
+        "language": "slab",
+        "path": "./snippets/slab.json"
+      }
+    ],
+    "configuration": {
+      "title": "slab",
+      "properties": {
+        "slab.server.path": {
+          "type": "string",
+          "default": "",
+          "description": "Path of the slab-lsp executable. Empty: uses target/release/slab-lsp in the workspace, then slab-lsp from PATH."
+        },
+        "slab.trace.server": {
+          "type": "string",
+          "enum": ["off", "messages", "verbose"],
+          "default": "off",
+          "description": "Traces the communication with slab-lsp."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p .",
+    "watch": "tsc -w -p .",
+    "grammar": "cargo run -q -p slab-lsp -- grammar syntaxes",
+    "package": "npm run compile && vsce package --no-dependencies",
+    "vsix": "npm run package && code --install-extension slab-vscode-0.1.0.vsix"
+  },
+  "devDependencies": {
+    "@types/node": "^22",
+    "@types/vscode": "^1.84.0",
+    "typescript": "^5.6",
+    "@vscode/vsce": "^3"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  }
+}

@@ -55,6 +55,7 @@ The frontend, `codegen` and `lower` must never `format!` a command, SNBT, JSON o
 - `cargo test` (unit + integration), `cargo clippy --all-targets` (kept at zero warnings).
 - `slab build [PATH] [-o DIR] [--zip] [--namespace NS]`, `slab check [PATH]`, `slab parse FILE`. Examples: `examples/slab/*.slab` (single files, must parse + check), `examples/projects/hello` (small multi-file project), `examples/projects/e2e` (the end-to-end test project).
 - A language feature touches several places: grammar doc -> parser (+ tests) -> checker rules (+ `docs/lang/semantics.md`, + tests in `src/sema/tests.rs`) -> `codegen` (+ `docs/lang/codegen.md`, + tests in `src/compile.rs`) -> IR/lowering if it needs a runtime construct -> **a case in `examples/projects/e2e` with an expected value in `checks.json`**.
+- Adding a keyword, operator, builtin or selector letter is visible to the editor tooling: run `cargo run -p slab-lsp -- grammar` to regenerate the extension's TextMate grammar (a drift test in `crates/slab-lsp` fails until you do).
 
 ## Verifying output against the real game
 
@@ -80,5 +81,13 @@ tools/verify_all.sh          # builds and checks all three packs below; prints z
 ## Project layout
 
 - `src/lib.rs` + modules above; `src/main.rs` the CLI.
+- `crates/slab-lsp/` the language server (`slab-lsp` stdio; a workspace member): diagnostics
+  from the *tolerant* checker (`sema::check_modules_tolerant`), hover, definition,
+  completion, document symbols, semantic tokens; `crates/slab-lsp/src/grammar.rs` generates
+  the extension's TextMate grammar from `Kw::ALL`/`BUILTINS`/lexer consts, and
+  `tests/lsp.rs` has the drift test + feature tests.
+- `editors/vscode/` the VS Code extension (grammar, snippets, `vscode-languageclient`
+  wrapper; `npm run vsix` packages + installs it). The server binary is found at
+  `<workspace>/target/release/slab-lsp`, `slab.server.path`, or PATH.
 - `docs/mc/` Minecraft 26.3 reference. `docs/lang/` language design (`syntax`, `semantics`, `modules`, `codegen`, `ir`, `memory`, `entities`).
 - `examples/` and `tools/` (`verify_pack.py`, `verify_all.sh`); `tests/` integration tests (`projects.rs` drives the `slab` binary).
