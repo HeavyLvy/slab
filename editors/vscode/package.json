@@ -17,8 +17,13 @@
     "languages": [
       {
         "id": "slab",
-        "aliases": ["slab", "slab"],
-        "extensions": [".slab"],
+        "aliases": [
+          "slab",
+          "slab"
+        ],
+        "extensions": [
+          ".slab"
+        ],
         "configuration": "./language-configuration.json"
       }
     ],
@@ -45,7 +50,11 @@
         },
         "slab.trace.server": {
           "type": "string",
-          "enum": ["off", "messages", "verbose"],
+          "enum": [
+            "off",
+            "messages",
+            "verbose"
+          ],
           "default": "off",
           "description": "Traces the communication with slab-lsp."
         }
@@ -53,8 +62,9 @@
     }
   },
   "scripts": {
-    "compile": "tsc -p .",
-    "watch": "tsc -w -p .",
+    "compile": "tsc -p . --noEmit && esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --platform=node --format=cjs --target=node18",
+    "watch": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --platform=node --format=cjs --target=node18 --watch",
+    "typecheck": "tsc -p . --noEmit",
     "grammar": "cargo run -q -p slab-lsp -- grammar syntaxes",
     "package": "npm run compile && vsce package --no-dependencies",
     "vsix": "npm run package && code --install-extension slab-vscode-0.1.0.vsix"
@@ -62,8 +72,9 @@
   "devDependencies": {
     "@types/node": "^22",
     "@types/vscode": "^1.84.0",
-    "typescript": "^5.6",
-    "@vscode/vsce": "^3"
+    "@vscode/vsce": "^3",
+    "esbuild": "^0.28.2",
+    "typescript": "^5.6"
   },
   "dependencies": {
     "vscode-languageclient": "^9.0.1"
