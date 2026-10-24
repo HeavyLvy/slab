@@ -89,7 +89,7 @@ pub enum Expr {
     EntityExists(Selector),
     /// Bool: whether the command succeeded (`execute store success`). With `args` the command
     /// contains holes and runs through a macro function. Costs nothing unless the value is used.
-    CommandSuccess { command: Command, args: Vec<(Hole, Expr)> },
+    CommandSuccess { command: Box<Command>, args: Vec<(Hole, Expr)> },
 }
 
 impl Expr {

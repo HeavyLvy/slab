@@ -277,6 +277,8 @@ fn holes() -> Function {
         source: ModifySource::From { source: DataTarget::Storage(rl("zoo:vars")), path: Some(xs(1)) },
     }));
     f.push(Command::execute().clause(Clause::Positioned(Pos::new(h(0), Coord::Abs(64.0), h(1)))).clause(Clause::Rotated(Rotation { yaw: h(0), pitch: Coord::Abs(0.0) })).run(Command::say("held")));
+    f.push(Command::Kill(Some(Selector::entity_id(word("zoo_id"), Hole(0)))));
+    f.push(Command::Teleport { targets: Selector::entity_id(word("zoo_id"), Hole(1)).tag(word("zoo_dummy")), dest: Pos::here() });
     f
 }
 

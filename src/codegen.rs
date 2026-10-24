@@ -618,7 +618,7 @@ impl<'a> Gen<'a> {
                 other => {
                     let mut holes = Holes::default();
                     match self.builtin_command(other, args, e.span, &mut holes) {
-                        Some(command) if datapack::Check::check(&command).is_ok() => ir::Expr::CommandSuccess { command, args: holes.args },
+                        Some(command) if datapack::Check::check(&command).is_ok() => ir::Expr::CommandSuccess { command: Box::new(command), args: holes.args },
                         Some(command) => {
                             let msg = datapack::Check::check(&command).unwrap_err().message().to_owned();
                             self.err(e.span, msg);

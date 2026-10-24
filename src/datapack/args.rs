@@ -372,6 +372,9 @@ pub enum SelectorArg {
     YRotation(FloatRange),
     /// `scores={obj=range,...}`
     Scores(Vec<(Objective, IntRange)>),
+    /// `scores={obj=$(hN)}`: the one entity whose id score is the number supplied at run time
+    /// (an entity handle). Matches at most one entity.
+    EntityId { objective: Objective, hole: Hole },
     Tag { name: Word, negated: bool },
     Team { name: Word, negated: bool },
     /// Plain-text entity name (not JSON).
@@ -418,7 +421,7 @@ impl SelectorArg {
             SelectorArg::Distance(_) => "distance",
             SelectorArg::XRotation(_) => "x_rotation",
             SelectorArg::YRotation(_) => "y_rotation",
-            SelectorArg::Scores(_) => "scores",
+            SelectorArg::Scores(_) | SelectorArg::EntityId { .. } => "scores",
             SelectorArg::Tag { .. } => "tag",
             SelectorArg::Team { .. } => "team",
             SelectorArg::Name { .. } => "name",
@@ -481,6 +484,7 @@ impl fmt::Display for SelectorArg {
                 }
                 f.write_char('}')
             }
+            SelectorArg::EntityId { objective, hole } => write!(f, "scores={{{objective}={hole}}}"),
             SelectorArg::Tag { name, negated } => write!(f, "tag={}{name}", bang(*negated)),
             SelectorArg::Team { name, negated } => write!(f, "team={}{name}", bang(*negated)),
             SelectorArg::Name { name, negated } => {
@@ -579,6 +583,11 @@ impl Selector {
         self.arg(SelectorArg::Limit(n))
     }
 
+    /// The entity whose `objective` score equals the run-time value of `hole`.
+    pub fn entity_id(objective: Objective, hole: Hole) -> Self {
+        Selector::e().arg(SelectorArg::EntityId { objective, hole })
+    }
+
     pub fn score(self, objective: Objective, range: IntRange) -> Self {
         self.arg(SelectorArg::score(objective, range))
     }
@@ -591,7 +600,7 @@ impl Selector {
                 // `@n[limit=2]` is allowed and then matches several.
                 !self.args.iter().any(|a| matches!(a, SelectorArg::Limit(n) if *n > 1))
             }
-            SelectorVar::A | SelectorVar::E => self.args.iter().any(|a| matches!(a, SelectorArg::Limit(1))),
+            SelectorVar::A | SelectorVar::E => self.args.iter().any(|a| matches!(a, SelectorArg::Limit(1) | SelectorArg::EntityId { .. })),
         }
     }
 }
@@ -790,6 +799,16 @@ mod tests {
         assert!(Selector::a().limit(0).check().is_err());
         assert!(Selector::a().limit(1).limit(2).check().is_err());
         assert!(Selector::e().tag(word("a")).tag(word("b")).check().is_ok());
+    }
+
+    #[test]
+    fn entity_id_selectors() {
+        let s = Selector::entity_id(word("ns_id"), Hole(0)).tag(word("mine"));
+        assert_eq!(s.to_string(), "@e[scores={ns_id=$(h0)},tag=mine]");
+        assert!(s.is_single(), "an id matches at most one entity");
+        assert!(s.check().is_ok());
+        // it uses the `scores` option, which may appear only once
+        assert!(Selector::entity_id(word("ns_id"), Hole(0)).score(word("pts"), IntRange::at_least(1)).check().is_err());
     }
 
     #[test]

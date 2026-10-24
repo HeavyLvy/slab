@@ -728,10 +728,10 @@ impl<'a> Lower<'a> {
                 // `execute store` writes nothing if the chain ends early, so clear first
                 self.set_const(&d, 0);
                 if args.is_empty() {
-                    let cmd = Command::execute().store(StoreKind::Success, StoreTarget::Score { targets: fake(&d), objective: self.obj.clone() }).run(command.clone());
+                    let cmd = Command::execute().store(StoreKind::Success, StoreTarget::Score { targets: fake(&d), objective: self.obj.clone() }).run((**command).clone());
                     self.emit(cmd);
                 } else {
-                    self.call_macro(command.clone(), args, Some(&d))?;
+                    self.call_macro((**command).clone(), args, Some(&d))?;
                 }
                 Ok(IntVal::Holder(d, true))
             }
