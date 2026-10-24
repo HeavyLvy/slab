@@ -12,6 +12,8 @@ pub enum BParam {
     Printable,
     /// A string literal or string constant, known at compile time.
     ConstStr,
+    /// Any string expression; a computed one is passed to the command at run time (a macro).
+    Str,
     /// An integer literal or constant, known at compile time.
     ConstInt,
     /// Any integer expression; a variable is passed to the command at run time (a macro).
@@ -51,17 +53,17 @@ use BParam::*;
 
 pub const BUILTINS: &[Builtin] = &[
     Builtin { name: "print", params: &[Printable], min_args: 1, ret: BRet::Unit },
-    Builtin { name: "say", params: &[ConstStr], min_args: 1, ret: BRet::Unit },
+    Builtin { name: "say", params: &[Str], min_args: 1, ret: BRet::Unit },
     Builtin { name: "kill", params: &[Selector], min_args: 1, ret: BRet::Bool },
     Builtin { name: "exists", params: &[Selector], min_args: 1, ret: BRet::Bool },
-    Builtin { name: "tag.add", params: &[Selector, ConstStr], min_args: 2, ret: BRet::Bool },
-    Builtin { name: "tag.remove", params: &[Selector, ConstStr], min_args: 2, ret: BRet::Bool },
+    Builtin { name: "tag.add", params: &[Selector, Str], min_args: 2, ret: BRet::Bool },
+    Builtin { name: "tag.remove", params: &[Selector, Str], min_args: 2, ret: BRet::Bool },
     Builtin { name: "tag.has", params: &[Selector, ConstStr], min_args: 2, ret: BRet::Bool },
-    Builtin { name: "effect.give", params: &[Selector, ConstStr, Int, Int], min_args: 2, ret: BRet::Bool },
+    Builtin { name: "effect.give", params: &[Selector, Str, Int, Int], min_args: 2, ret: BRet::Bool },
     Builtin { name: "effect.clear", params: &[Selector], min_args: 1, ret: BRet::Bool },
     Builtin { name: "tp", params: &[Selector, Coord, Coord, Coord], min_args: 4, ret: BRet::Bool },
-    Builtin { name: "setblock", params: &[Coord, Coord, Coord, ConstStr], min_args: 4, ret: BRet::Bool },
-    Builtin { name: "summon", params: &[ConstStr, Coord, Coord, Coord], min_args: 1, ret: BRet::Entity },
+    Builtin { name: "setblock", params: &[Coord, Coord, Coord, Str], min_args: 4, ret: BRet::Bool },
+    Builtin { name: "summon", params: &[Str, Coord, Coord, Coord], min_args: 1, ret: BRet::Entity },
 ];
 
 /// Names that act as a namespace for builtins (`effect.give`, `tag.add`).

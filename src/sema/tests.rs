@@ -166,7 +166,9 @@ fn shadowing_uses_the_outer_value_in_the_initialiser() {
 fn operators_are_type_checked() {
     ok(&in_fn("let a = 1 + 2 * 3 % 4 - 5 / 6; let b = a < 2 && a >= 1 || !(a == 3); print(b);"));
     one_error(&in_fn("let a = 1 + true; print(a);"), "cannot apply `+` to `int` and `bool`");
-    one_error(&in_fn("let a = \"a\" + \"b\"; print(a);"), "cannot apply `+` to `str` and `str`");
+    ok(&in_fn("let a = \"a\" + \"b\"; print(a);"));
+    one_error(&in_fn("let a = \"a\" + 1; print(a);"), "cannot apply `+` to `str` and `int`");
+    one_error(&in_fn("let a = \"a\" - \"b\"; print(a);"), "cannot apply `-` to `str` and `str`");
     one_error(&in_fn("let a = 1 && 2; print(a);"), "cannot apply `&&`");
     one_error(&in_fn("let a = !1; print(a);"), "`!` needs `bool`");
     one_error(&in_fn("let a = -true; print(a);"), "`-` needs `int`");
@@ -203,7 +205,9 @@ fn mutability() {
 
 #[test]
 fn compound_assignment_needs_ints() {
-    one_error(&in_fn("let mut s = \"a\"; s += \"b\";"), "needs an `int` target");
+    ok(&in_fn("let mut s = \"a\"; s += \"b\";"));
+    one_error(&in_fn("let mut s = \"a\"; s += 1;"), "expected `str`, found `int`");
+    one_error(&in_fn("let mut s = \"a\"; s -= \"b\";"), "needs an `int` target");
     one_error(&in_fn("let mut n = 1; n += true;"), "expected `int`, found `bool`");
     one_error(&in_fn("let mut n = 1; n = \"x\";"), "expected `int`, found `str`");
 }
@@ -354,14 +358,17 @@ fn builtins() {
     one_error(&in_fn("summon(\"Bad Id\");"), "invalid id");
     one_error(&in_fn("effect.give(@s, \"speed\", 0);"), "between 1 and 20000000 ticks");
     one_error(&in_fn("effect.give(@s, \"speed\", 10, 300);"), "amplifier");
+    // text arguments may be computed at run time; a literal is still checked now
+    ok(&in_fn("let m = \"a\"; say(m); tag.add(@s, m); setblock(~, ~, ~, m); summon(m);"));
+    one_error(&in_fn("tag.add(@s, \"bad tag\");"), "tag");
     // arguments that must be known at compile time reject runtime values
-    one_error(&in_fn("let m = \"a\"; say(m);"), "`m` is not a constant");
+    one_error(&in_fn("let m = \"a\"; if tag.has(@s, m) { }"), "`m` is not a constant");
 }
 
 #[test]
 fn builtin_const_arguments_accept_constants() {
     ok("const MSG: str = \"hello\"; const T: int = 5s; fn f() { say(MSG); effect.give(@s, \"speed\", T); }");
-    one_error("global g: str = \"a\"; fn f() { say(g); }", "is a global, not a constant");
+    ok("global g: str = \"a\"; fn f() { say(g); }");
 }
 
 #[test]
@@ -498,8 +505,8 @@ fn f_strings_are_text_for_print() {
     ok("struct P { n: str, hp: int } fn f(p: P, xs: list<int>, ok: bool) { print(f\"{p.n} has {p.hp} hp, {xs.len()} items, {xs}, {ok}, {p.hp * 2 + 1}\"); }");
     // a hole is any storable expression, including calls
     ok("fn g() -> int { return 1; } fn f() { print(f\"{g()}\"); }");
-    one_error(&in_fn("let t = f\"a\"; print(1);"), "an f-string cannot be stored");
-    one_error(&in_fn("say(f\"a\");"), "not a constant expression");
+    // an f-string is a string: it can be stored, joined and passed to string arguments
+    ok(&in_fn("let n = 1; let t = f\"a{n}\"; say(t); say(f\"a{n}\" + \"!\");"));
     one_error("fn g() {} fn f() { print(f\"{g()}\"); }", "cannot format a value of type `()`");
     one_error(&in_fn("print(f\"{@a}\");"), "cannot format a value of type `selector`");
     one_error(&in_fn("print(f\"{nope}\");"), "cannot find `nope`");
@@ -507,7 +514,7 @@ fn f_strings_are_text_for_print() {
     one_error(&in_fn("print(f\"{1 + true}\");"), "cannot apply `+`");
     let c = ok(&in_fn("let n = 1; print(f\"n = {n}\");"));
     match &c.hir.fns[0].body.stmts[1] {
-        Stmt::Expr(Expr { kind: ExprKind::Builtin { name: "print", args }, .. }) => assert_eq!(args[0].ty, Ty::Text),
+        Stmt::Expr(Expr { kind: ExprKind::Builtin { name: "print", args }, .. }) => assert_eq!(args[0].ty, Ty::Str),
         other => panic!("{other:?}"),
     }
 }

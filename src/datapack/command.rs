@@ -59,14 +59,14 @@ keyword_enum!(ScoreOp {
 /// `stone[facing=north]{...}` for placing (`setblock`).
 #[derive(Clone, Debug, PartialEq)]
 pub struct BlockState {
-    pub id: ResourceLocation,
+    pub id: Arg<ResourceLocation>,
     pub props: Vec<(Word, Word)>,
     pub nbt: Option<Compound>,
 }
 
 impl BlockState {
-    pub fn new(id: ResourceLocation) -> Self {
-        BlockState { id, props: Vec::new(), nbt: None }
+    pub fn new(id: impl Into<Arg<ResourceLocation>>) -> Self {
+        BlockState { id: id.into(), props: Vec::new(), nbt: None }
     }
 
     pub fn prop(mut self, key: Word, value: Word) -> Self {
@@ -238,7 +238,7 @@ pub enum Clause {
     Anchored(Anchor),
     In(ResourceLocation),
     On(Relation),
-    Summon(ResourceLocation),
+    Summon(Arg<ResourceLocation>),
     Store(StoreKind, StoreTarget),
     If(Condition),
     Unless(Condition),
@@ -642,12 +642,22 @@ pub enum ModifyOp {
     Insert(i32),
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum TemplatePart {
+    Lit(String),
+    Hole(Hole),
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum ModifySource {
     From { source: DataTarget, path: Option<NbtPath> },
     /// Substring of a string (or number) tag; `end` requires `start`, `start` requires `path`.
     String { source: DataTarget, path: Option<NbtPath>, start: Option<i32>, end: Option<i32> },
     Value(super::nbt::Nbt),
+    /// `value "text $(h0) text"`: a string built at run time from literal text and holes (string
+    /// concatenation). Hole values are substituted as-is inside the quotes, so a value that
+    /// contains `"` or `\` breaks the command.
+    Template(Vec<TemplatePart>),
     /// 26.3: evaluate a number provider into an int tag.
     ComputeInt { ctx: ComputeContext, provider: Provider },
     /// 26.3: evaluate a number provider into a float tag.
@@ -697,6 +707,16 @@ impl fmt::Display for Data {
                         Ok(())
                     }
                     ModifySource::Value(v) => write!(f, "value {v}"),
+                    ModifySource::Template(parts) => {
+                        f.write_str("value \"")?;
+                        for p in parts {
+                            match p {
+                                TemplatePart::Lit(s) => super::nbt::write_quoted_body(f, s)?,
+                                TemplatePart::Hole(h) => write!(f, "{h}")?,
+                            }
+                        }
+                        f.write_char('"')
+                    }
                     ModifySource::ComputeInt { ctx, provider } => write!(f, "compute {ctx} integer {provider}"),
                     ModifySource::ComputeFloat { ctx, provider } => write!(f, "compute {ctx} float {provider}"),
                 }
@@ -758,6 +778,11 @@ impl Check for Data {
                             bail!("`data modify ... merge value` needs a compound");
                         }
                     }
+                    ModifySource::Template(_) => {
+                        if !matches!(op, ModifyOp::Set) {
+                            bail!("a string template is only supported with `data modify ... set`");
+                        }
+                    }
                     ModifySource::ComputeInt { ctx, provider } | ModifySource::ComputeFloat { ctx, provider } => {
                         match ctx {
                             ComputeContext::Block(p) => p.check_block()?,
@@ -816,8 +841,8 @@ pub enum Schedule {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum TagAction {
-    Add(Word),
-    Remove(Word),
+    Add(Arg<Word>),
+    Remove(Arg<Word>),
     List,
 }
 
@@ -836,6 +861,48 @@ pub enum GameRuleValue {
 }
 
 // --------------------------------------------------------------------- effect
+
+/// A command argument that is either known when the program is compiled or filled in at run
+/// time (a macro hole, rendered `$(hN)`). Run-time text is substituted as-is, so the value must
+/// be valid where it lands (see docs/lang/codegen.md, "String values").
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Arg<T> {
+    Lit(T),
+    Hole(Hole),
+}
+
+impl<T: fmt::Display> fmt::Display for Arg<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Arg::Lit(t) => write!(f, "{t}"),
+            Arg::Hole(h) => write!(f, "{h}"),
+        }
+    }
+}
+
+impl From<ResourceLocation> for Arg<ResourceLocation> {
+    fn from(v: ResourceLocation) -> Self {
+        Arg::Lit(v)
+    }
+}
+
+impl From<Word> for Arg<Word> {
+    fn from(v: Word) -> Self {
+        Arg::Lit(v)
+    }
+}
+
+impl From<String> for Arg<String> {
+    fn from(v: String) -> Self {
+        Arg::Lit(v)
+    }
+}
+
+impl From<&str> for Arg<String> {
+    fn from(v: &str) -> Self {
+        Arg::Lit(v.to_owned())
+    }
+}
 
 /// A non-negative number argument: a literal, or a run-time hole (macro argument).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -863,9 +930,9 @@ impl From<u32> for Num {
 pub enum Effect {
     /// `amplifier` needs `seconds`, and `hide_particles` needs `amplifier`, because the
     /// command's arguments are positional. A hole's range can only be checked at run time.
-    Give { targets: Selector, effect: ResourceLocation, seconds: Option<Num>, amplifier: Option<Num>, hide_particles: bool },
+    Give { targets: Selector, effect: Arg<ResourceLocation>, seconds: Option<Num>, amplifier: Option<Num>, hide_particles: bool },
     /// `effect clear [<targets> [<effect>]]`; an effect needs targets.
-    Clear { targets: Option<Selector>, effect: Option<ResourceLocation> },
+    Clear { targets: Option<Selector>, effect: Option<Arg<ResourceLocation>> },
 }
 
 impl fmt::Display for Effect {
@@ -1021,10 +1088,10 @@ pub enum Command {
     Return(Return),
     Schedule(Schedule),
     Tag { targets: Selector, action: TagAction },
-    Say(String),
+    Say(Arg<String>),
     Tellraw { targets: Selector, message: Text },
     Kill(Option<Selector>),
-    Summon { entity: ResourceLocation, pos: Option<Pos>, nbt: Option<Compound> },
+    Summon { entity: Arg<ResourceLocation>, pos: Option<Pos>, nbt: Option<Compound> },
     Setblock { pos: Pos, block: BlockState, mode: Option<SetblockMode> },
     /// `gamerule <rule> [<value>]`; no value queries.
     Gamerule { rule: ResourceLocation, value: Option<GameRuleValue> },
@@ -1047,7 +1114,7 @@ impl Command {
     }
 
     pub fn say(msg: impl Into<String>) -> Command {
-        Command::Say(msg.into())
+        Command::Say(Arg::Lit(msg.into()))
     }
 
     pub fn tellraw(targets: Selector, message: impl Into<Text>) -> Command {
@@ -1220,7 +1287,8 @@ impl Check for Command {
             }
             Command::Schedule(Schedule::Clear(_)) => Ok(()),
             Command::Tag { targets, .. } => targets.check(),
-            Command::Say(m) => {
+            Command::Say(Arg::Hole(_)) => Ok(()),
+            Command::Say(Arg::Lit(m)) => {
                 single_line("say message", m)?;
                 if m.contains("$(") {
                     bail!("a `say` message cannot contain `$(` (it would be read as a macro placeholder)");
@@ -1484,7 +1552,7 @@ mod tests {
         let give = |seconds: Option<u32>, amplifier: Option<u32>, hide| {
             Command::Effect(Effect::Give {
                 targets: Selector::s(),
-                effect: rl("speed"),
+                effect: rl("speed").into(),
                 seconds: seconds.map(Num::Lit),
                 amplifier: amplifier.map(Num::Lit),
                 hide_particles: hide,
@@ -1500,7 +1568,7 @@ mod tests {
         assert!(give(Some(0), None, false).check().is_err());
         assert!(give(Some(1_000_001), None, false).check().is_err());
         assert!(give(Some(5), Some(256), false).check().is_err());
-        let clear = |t: Option<Selector>, e: Option<ResourceLocation>| Command::Effect(Effect::Clear { targets: t, effect: e });
+        let clear = |t: Option<Selector>, e: Option<ResourceLocation>| Command::Effect(Effect::Clear { targets: t, effect: e.map(Arg::Lit) });
         assert_eq!(clear(None, None).to_string(), "effect clear");
         assert_eq!(clear(Some(Selector::a()), None).to_string(), "effect clear @a");
         assert_eq!(clear(Some(Selector::a()), Some(rl("speed"))).to_string(), "effect clear @a minecraft:speed");
@@ -1523,7 +1591,7 @@ mod tests {
         assert_eq!(nested.render_line(), "$execute as @a run teleport @s $(h0) 64 $(h1)");
         let eff = Command::Effect(Effect::Give {
             targets: Selector::s(),
-            effect: rl("speed"),
+            effect: rl("speed").into(),
             seconds: Some(Num::Hole(Hole(0))),
             amplifier: Some(Num::Hole(Hole(1))),
             hide_particles: false,
@@ -1537,11 +1605,64 @@ mod tests {
     }
 
     #[test]
+    fn text_arguments_can_be_holes() {
+        fn h<T>(n: u16) -> Arg<T> {
+            Arg::Hole(Hole(n))
+        }
+        let tag = Command::Tag { targets: Selector::s(), action: TagAction::Add(h(0)) };
+        assert!(tag.is_macro());
+        assert_eq!(tag.render_line(), "$tag @s add $(h0)");
+        let summon = Command::Summon { entity: h(0), pos: Some(Pos::here()), nbt: None };
+        assert_eq!(summon.render_line(), "$summon $(h0) ~ ~ ~");
+        let block = Command::Setblock { pos: Pos::block(1, 2, 3), block: BlockState::new(h(1)), mode: None };
+        assert_eq!(block.render_line(), "$setblock 1 2 3 $(h1)");
+        let clear = Command::Effect(Effect::Clear { targets: Some(Selector::a()), effect: Some(h(0)) });
+        assert_eq!(clear.render_line(), "$effect clear @a $(h0)");
+        let in_exec = Command::execute().clause(Clause::Summon(h(0))).run(Command::say("x"));
+        assert_eq!(in_exec.render_line(), "$execute summon $(h0) run say x");
+        assert_eq!(Command::Say(h(0)).render_line(), "$say $(h0)");
+        assert!(Command::Say(h(0)).check().is_ok());
+        let mut vars = vec![];
+        block.macro_vars(&mut vars);
+        assert_eq!(vars, ["h1"]);
+    }
+
+    #[test]
+    fn string_templates_escape_literal_text_only() {
+        let data = |parts| {
+            Command::Data(Data::Modify {
+                target: DataTarget::Storage(rl("t:vars")),
+                path: NbtPath::new().key("s"),
+                op: ModifyOp::Set,
+                source: ModifySource::Template(parts),
+            })
+        };
+        let joined = data(vec![TemplatePart::Lit("a\"b $(c) ".into()), TemplatePart::Hole(Hole(0)), TemplatePart::Lit("!".into())]);
+        // quotes and `$` in the literal parts are escaped, so only the hole is a placeholder
+        assert_eq!(joined.render_line(), r#"$data modify storage t:vars s set value "a\"b \u0024(c) $(h0)!""#);
+        let mut vars = vec![];
+        joined.macro_vars(&mut vars);
+        assert_eq!(vars, ["h0"]);
+        assert!(joined.check().is_ok());
+        // a template without holes is an ordinary command
+        let plain = data(vec![TemplatePart::Lit("x".into())]);
+        assert!(!plain.is_macro());
+        assert_eq!(plain.to_string(), r#"data modify storage t:vars s set value "x""#);
+        let append = Command::Data(Data::Modify {
+            target: DataTarget::Storage(rl("t:vars")),
+            path: NbtPath::new().key("s"),
+            op: ModifyOp::Append,
+            source: ModifySource::Template(vec![]),
+        });
+        assert!(append.check().is_err());
+    }
+
+    #[test]
     fn misc_commands() {
         assert_eq!(Command::Kill(None).to_string(), "kill");
-        let t = Command::Tag { targets: Selector::s(), action: TagAction::Add(word("done")) };
+        let t = Command::Tag { targets: Selector::s(), action: TagAction::Add(word("done").into()) };
         assert_eq!(t.to_string(), "tag @s add done");
-        let s = Command::Summon { entity: rl("marker"), pos: Some(Pos::here()), nbt: Some(Compound::new().with("Tags", vec![super::super::nbt::Nbt::str("m")])) };
+        let s = Command::Summon { entity: rl("marker").into(), pos: Some(Pos::here()), nbt: Some(Compound::new().with("Tags", vec![super::super::nbt::Nbt::str("m")])) };
         assert_eq!(s.to_string(), r#"summon minecraft:marker ~ ~ ~ {Tags:["m"]}"#);
         let sb = Command::Setblock {
             pos: Pos::block(0, 64, 0),

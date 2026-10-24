@@ -22,8 +22,6 @@ pub enum Ty {
     Selector,
     /// A relative coordinate such as `~` or `^2`. Not storable either.
     Coord,
-    /// An f-string (`f"x = {x}"`): text built from parts, usable with `print` only.
-    Text,
     /// A type that already produced an error; compatible with everything so one mistake is
     /// reported once.
     Error,
@@ -39,7 +37,7 @@ impl Ty {
         match self {
             Ty::Int | Ty::Bool | Ty::Str | Ty::Struct(_) | Ty::Entity => true,
             Ty::List(t) => t.is_storable(),
-            Ty::Unit | Ty::Selector | Ty::Coord | Ty::Text => false,
+            Ty::Unit | Ty::Selector | Ty::Coord => false,
             Ty::Error => true,
         }
     }
@@ -76,7 +74,6 @@ impl fmt::Display for TyDisplay<'_> {
             Ty::Entity => f.write_str("entity"),
             Ty::Selector => f.write_str("selector"),
             Ty::Coord => f.write_str("coordinate"),
-            Ty::Text => f.write_str("text"),
             Ty::Error => f.write_str("{error}"),
         }
     }

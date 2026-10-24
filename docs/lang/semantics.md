@@ -10,12 +10,11 @@ slab is statically typed with local inference: every expression has a type known
 |---|---|---|
 | `int` | 32-bit signed, wrapping at runtime, `/` and `%` floored | scoreboard |
 | `bool` | `true`/`false` (0/1) | scoreboard |
-| `str` | text | command storage |
+| `str` | text; `+`/`+=` join, f-strings build one | command storage |
 | `list<T>` | list of any storable `T` | command storage |
 | `Name` | a `struct`, a compound of storable fields | command storage |
 | `()` | no value (statements, functions without `->`) | - |
 | entity | a reference to one entity (`docs/lang/entities.md`) | scoreboard (an int id) |
-| text | an f-string, `f"x = {x}"` | **not storable**: only `print` accepts it |
 | selector | `@a[...]` literal | **not storable** (expression only) |
 | coordinate | `~`, `~1`, `^2` | **not storable** (expression only) |
 
@@ -34,7 +33,7 @@ Semantic analysis runs over the whole project at once: it first registers every 
 
 ## Compile-time constants
 
-`const` values, `global` initialisers, `#[every(N)]` arguments and the "constant" parameters of builtins (`say("...")`, tag names, ids, effect durations) are evaluated by the compiler: literals, other consts, arithmetic (checked: overflow and division by zero are errors, `/` `%` floored), comparisons, `&& || !`, lists and struct literals. A global initialiser cannot mention another global or call a function. A `const` that depends on itself is an error.
+`const` values, `global` initialisers, `#[every(N)]` arguments and the "constant" parameters of builtins (selector tags in `tag.has`, `#[every]` periods) are evaluated by the compiler: literals, other consts, arithmetic (checked: overflow and division by zero are errors, `/` `%` floored), comparisons, `&& || !`, lists and struct literals. A global initialiser cannot mention another global or call a function. A `const` that depends on itself is an error.
 
 ## Statements and flow
 
@@ -55,15 +54,16 @@ Builtins that act on the world return `bool`: **did the command work?** `if !tp(
 | Call | Returns | Notes |
 |---|---|---|
 | `print(v)` | `()` | any storable value, or an f-string |
-| `say("text")` | `()` | text known at compile time |
+| `say(text)` | `()` | any `str`; a computed one is passed at run time |
 | `kill(sel)` | `bool` | |
 | `exists(sel)` | `bool` | any entity matches |
-| `tag.add(sel, "t")` `tag.remove` `tag.has` | `bool` | tag name is `[A-Za-z0-9_.+-]+` |
-| `effect.give(sel, "id", ticks [, amplifier])` | `bool` | duration in **ticks** (`10s` = ten seconds), amplifier 0..=255; both may be variables |
+| `tag.add(sel, name)` `tag.remove` | `bool` | any `str`; tag name is `[A-Za-z0-9_.+-]+` |
+| `tag.has(sel, "t")` | `bool` | the tag must be a compile-time constant |
+| `effect.give(sel, id, ticks [, amplifier])` | `bool` | duration in **ticks** (`10s` = ten seconds), amplifier 0..=255; both may be variables |
 | `effect.clear(sel)` | `bool` | |
 | `tp(sel, x, y, z)` | `bool` | each coordinate is any `int` expression or `~`/`^` |
-| `setblock(x, y, z, "id")` | `bool` | |
-| `summon("id" [, x, y, z])` | `bool` | |
+| `setblock(x, y, z, id)` | `bool` | `id` is any `str` |
+| `summon(id [, x, y, z])` | entity | `id` is any `str` |
 
 Methods: `list.push(x)` (needs a mutable place), `list.len()`, `str.len()`. Whether the *backend* can lower each builtin yet is separate from this table; a builtin the backend lacks is reported by the lowering, not here.
 

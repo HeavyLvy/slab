@@ -143,6 +143,12 @@ fn is_bare_key(s: &str) -> bool {
 /// spans lines in a `.mcfunction` file.
 pub(crate) fn write_quoted(out: &mut impl Write, s: &str) -> fmt::Result {
     out.write_char('"')?;
+    write_quoted_body(out, s)?;
+    out.write_char('"')
+}
+
+/// The escaped contents of a quoted SNBT string, without the quotes.
+pub(crate) fn write_quoted_body(out: &mut impl Write, s: &str) -> fmt::Result {
     for c in s.chars() {
         match c {
             '"' => out.write_str("\\\"")?,
@@ -156,7 +162,7 @@ pub(crate) fn write_quoted(out: &mut impl Write, s: &str) -> fmt::Result {
             c => out.write_char(c)?,
         }
     }
-    out.write_char('"')
+    Ok(())
 }
 
 fn write_key(out: &mut impl Write, key: &str) -> fmt::Result {

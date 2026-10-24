@@ -47,7 +47,13 @@ Mechanism (`codegen.rs` collects `Holes`, `lower.rs::call_macro` emits):
 
 Constant arguments never use this: `tp(@s, 1, 64, 2)` is the plain command `teleport @s 1 64 2`. A macro call costs about `2n + 3` commands for `n` variables. Values are int tags, which substitute as plain decimals (including negatives). A hole's range can only be checked at run time: an out-of-range duration or a bad index makes that one command fail silently.
 
-String values are *not* substituted into commands (a `"` or `\` in a string would break the line); only numbers are. Text with variables goes through **f-strings** instead.
+## String values
+
+`str` values can be used where a command takes text. Which arguments take a run-time string: `say`, `tag.add`/`tag.remove` (tag name), `effect.give` (effect id), `setblock` (block id), `summon` (entity type). A literal (or a join of literals, folded by the checker) is validated at compile time and rendered into the command as before; anything else becomes a macro hole (`Arg::Hole`, `$(hN)`) whose value is the string stored in `<ns>:macro`. Not yet: selector parts (`tag=` in `@e[..]`), `tag.has`, score-holder names, `pts["name"]`: those still need compile-time text.
+
+`a + b` and `s += x` on strings, and f-strings used as values, become `ir::Expr::Concat(parts)`. The lowering builds the string with one macro: `$data modify storage <ns>:vars <tmp> set value "lit$(h0)lit$(h1)"` (`ModifySource::Template`). A literal part is escaped (`"`, `\`, `$`, control characters); an `int`/`bool`/`entity` part is substituted as its number (`true` is `1`, an entity is its id); a `list` or `struct` part is a compile error. Adjacent literals are merged, nested joins flattened, and an all-literal join is a plain string literal.
+
+**Injection caveat:** macro values are pasted into the command text. A *string value* containing `"` or `\` breaks the one `Concat` command it is joined in (the line fails to parse and, being a macro, fails silently, leaving the target unchanged), and a run-time id or tag that is not valid for its place makes that one command fail (the builtin returns `false`). Nothing outside that command is affected. `print(f"...")` keeps using `tellraw` components, which have no such restriction. Tags added with a run-time name are not recorded for `_uninstall`.
 
 ## Entity handles
 
@@ -67,7 +73,7 @@ A world-acting builtin used as a value becomes `ir::Expr::CommandSuccess`: `set 
 |---|---|
 | `push` onto a list selected by a variable index (`xs[i].push(v)`) | would modify a copy |
 | a score holder must be a selector or string literal (`pts[name]` with a variable `name`) | strings are not substituted into commands |
-| string `==`, string concatenation, storing an f-string in a variable | would need string macros |
+| string `==`, string indexing/slicing, selector parts or score-holder names chosen at run time | commands need those at compile time (or a bigger macro design) |
 | a loop runs at most ~21,000 iterations per tick | `max_command_sequence_length` = 65536 commands; the game stops the whole call chain (docs/mc/05-verified-by-slab.md) |
 | no floats | `/compute` is not used yet |
 

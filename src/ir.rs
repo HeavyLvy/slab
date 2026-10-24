@@ -91,6 +91,10 @@ pub enum Expr {
     /// Int: runs `command`, which creates an entity and ends in `function <ns>:_new_entity`, and
     /// gives the handle of the new entity (0 if the command failed). Needs `Program::entities`.
     NewEntity { command: Box<Command>, args: Vec<(Hole, Expr)> },
+    /// Data: a string made of the parts in order. A string literal part is copied as is; any other
+    /// part is substituted as text (a string as it is, an int or bool as its number). Built with a
+    /// macro, so a part that contains `"` or `\\` breaks the command (see docs/lang/codegen.md).
+    Concat(Vec<Expr>),
     /// Bool: whether any entity matches the selector (`execute if entity`).
     EntityExists(Selector),
     /// Bool: whether the command succeeded (`execute store success`). With `args` the command

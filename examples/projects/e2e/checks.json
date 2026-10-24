@@ -217,6 +217,22 @@
   "expect": "has 1 [e2e]"
  },
  {
+  "cmd": "data get storage e2e:globals r_str_cat",
+  "expect": "\"a-mark-7\""
+ },
+ {
+  "cmd": "scoreboard players get #g.r_str_tag e2e",
+  "expect": "has 1 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_str_tag_n e2e",
+  "expect": "has 1 [e2e]"
+ },
+ {
+  "cmd": "execute if block 14 63 14 minecraft:emerald_block",
+  "expect": "Test passed"
+ },
+ {
   "cmd": "scoreboard players get #g.r_ent_stale_tp e2e",
   "expect": "has 1 [e2e]"
  },

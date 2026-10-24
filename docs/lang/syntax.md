@@ -38,7 +38,7 @@ fn fib(n: int) -> int {
 * Integers: decimal with `_` separators (`1_000`), or hex `0xFF`. They are `i64` in the AST and range-checked to `i32` later.
 * **Time literals**: an integer directly followed by `t` (ticks), `s` (seconds, x20) or `d` (days, x24000): `5t`, `10s`, `1d`. They are plain integers (ticks) with no separate type.
 * Floats (`1.5`) lex, but are rejected by the type checker until floats exist.
-* **F-strings**: `f"text {expression} more"` (no space between `f` and the quote). Any expression may sit between the braces (`{n + 1}`, `{p.name}`, `{xs.len()}`); `{{` and `}}` write a brace. They have the type `text` and can only be passed to `print` for now.
+* **F-strings**: `f"text {expression} more"` (no space between `f` and the quote). Any expression may sit between the braces (`{n + 1}`, `{p.name}`, `{xs.len()}`); `{{` and `}}` write a brace. They have the type `str` (a string built at run time); `print(f"..")` is shown as one `tellraw`, any other use joins the parts into a string (see `docs/lang/codegen.md`, "String values").
 * Strings: `"..."` with escapes `\n \t \r \\ \" \' \0 \u{1F600}`. Strings may not contain a raw newline.
 * **Selector literals**: `@p @r @a @e @s @n`, optionally followed *directly* by `[args]`: `@e[type=zombie, distance=..10, tag=!boss]`. The lexer captures the bracket contents verbatim (it tracks nested `[] {} ()` and quotes); the parser splits them into `key=value` pairs; values keep their raw text and are checked/converted during type checking, because they have their own mini-grammar (`1..5`, `!tag`, `{kills=1..}`).
 * **Relative coordinates**: `~` and `^`, optionally *directly* followed by a number: `~`, `~1`, `~-2.5`, `^3`. Used where a position is expected (`positioned ~ ~1 ~ { }`, `setblock(~, ~-1, ~, ...)`).
@@ -128,7 +128,7 @@ Precedence, loosest to tightest: range, `||`, `&&`, comparison, `+ -`, `* / %`, 
 
 ## Open questions
 
-* String interpolation / formatting (`f"score: {x}"`) needs macros; deferred.
+* `str` supports `+` and `+=` (both sides `str`; use an f-string to mix in numbers), but no `==`, indexing or slicing yet.
 * Floats (via `/compute`), enums, `match`, modules/imports, generics beyond `list<T>`.
 * Whether `if` becomes an expression (`let x = if c { a } else { b };`).
 * `for e in @a { ... }` as sugar for `as @a { ... }`.

@@ -48,6 +48,9 @@ global r_ent_score: int = 0;
 global r_ent_list: int = 0;
 global r_ent_fn: int = 0;
 global r_ent_struct: int = 0;
+global r_str_cat: str = "";
+global r_str_tag: int = 0;
+global r_str_tag_n: int = 0;
 global r_results: int = 0;
 global r_gone: int = 0;
 global r_entities: int = 0;
@@ -271,6 +274,7 @@ fn world_test() {
     }
 
     entity_test();
+    string_test();
 
     // one owned entity is left alive on purpose: `_uninstall` must remove it
     summon("minecraft:marker", bx, 64, bx);
@@ -319,6 +323,27 @@ fn spawn_at(x: int) -> entity {
 }
 
 // Entity values: a variable holds an entity and acts on it. Run by the harness after world_test.
+// Strings: joining, f-strings as values, and strings chosen at run time as command arguments.
+fn string_test() {
+    let kind = "mark";
+    let n = 7;
+    let mut s = "a-" + kind;
+    s += f"-{n}";
+    r_str_cat = s;
+
+    // an entity type, a tag name and a block id built at run time
+    let ty = "marker";
+    let m = summon("minecraft:" + ty, 14, 64, 14);
+    if tag.add(m, f"t_{n}") { r_str_tag = 1; }
+    let mut c = 0;
+    as @e[type=minecraft:marker, tag=t_7] { c += 1; }
+    r_str_tag_n = c;
+    let mat = "emerald";
+    setblock(14, 63, 14, "minecraft:" + mat + "_block");
+    say(f"string test done, n = {n}");
+    kill(m);
+}
+
 fn entity_test() {
     let a = summon("minecraft:marker", 8, 64, 8);
     let b = summon("minecraft:marker", 9, 64, 9);

@@ -78,6 +78,12 @@ Results read back with `scoreboard players get` / `data get` (`--checks`), all 2
 * A macro line that fails to parse at call time is **silent** inside a function: no `Failed to instantiate` in the log and no abort, the command just doesn't run. Only the result (here a score reading 0) reveals it, so selectors built into macro lines must be valid for the argument they are used in.
 * `execute summon <type> run function <f>` runs `<f>` as the new entity; `scoreboard players operation @s <obj> = #counter <main>` inside it gives that entity an id score. Scores on non-player entities are keyed by UUID and disappear with the entity.
 
+## Strings in macros (checked on the real server)
+
+* A string tag substituted by `$(h0)` is pasted as its raw text (no quotes), so it works as a resource id (`summon $(h0)`, `setblock .. $(h0)`), a tag name (`tag @e[..] add $(h1)`) and inside a quoted template (`data modify storage <s> <path> set value "minecraft:$(h0)_block"`). An int tag substitutes as a plain decimal, so numbers and strings can be joined in one template.
+* In the template, a literal `$(` must be written `\u0024(` in the quoted text, otherwise it is taken as a placeholder; `write_quoted` escapes it.
+* **UNVERIFIED**: a string value containing `"` or `\` should break only the template command it lands in (the line fails to parse; macro parse failures are silent, see above). The e2e project does not test it.
+
 ## Harness behaviour worth knowing
 
 * Commands inside functions give **no feedback** to the console, so runtime failures aren't visible; the harness mainly proves *parsing/loading*. To assert runtime behaviour, write functions that `execute store ... score` a result and print it with `say`/`tellraw`, or read it with `scoreboard players get`.

@@ -175,11 +175,20 @@ impl<'a> Gen<'a> {
     /// again (`xs[i] += 1` reads and writes the same element), so anything but a literal or a
     /// variable is first bound to a temporary.
     fn hole_ir(&mut self, holes: &mut Holes, v: ir::Expr) -> Hole {
+        self.hole_of(holes, v, ir::Kind::Int)
+    }
+
+    /// Like [`Self::hole_ir`] for a string value.
+    fn hole_str(&mut self, holes: &mut Holes, v: ir::Expr) -> Hole {
+        self.hole_of(holes, v, ir::Kind::Data)
+    }
+
+    fn hole_of(&mut self, holes: &mut Holes, v: ir::Expr, kind: ir::Kind) -> Hole {
         let v = match v {
             ir::Expr::Int(_) | ir::Expr::Var(_) | ir::Expr::Global(_) => v,
             other => {
                 let t = self.fresh("hv");
-                self.pre.push(ir::Stmt::Let { name: t.clone(), kind: ir::Kind::Int, init: Some(other) });
+                self.pre.push(ir::Stmt::Let { name: t.clone(), kind, init: Some(other) });
                 ir::Expr::var(&t)
             }
         };
@@ -214,7 +223,7 @@ impl<'a> Gen<'a> {
         }
         for t in &self.added_tags {
             if let Ok(tag) = Word::new(t) {
-                cmds.push(Command::Tag { targets: Selector::e().tag(tag.clone()), action: TagAction::Remove(tag) });
+                cmds.push(Command::Tag { targets: Selector::e().tag(tag.clone()), action: TagAction::Remove(tag.into()) });
             }
         }
         cmds
@@ -525,7 +534,7 @@ impl<'a> Gen<'a> {
                         ir::VarRef::Local(n) => ir::Expr::var(n),
                         ir::VarRef::Global(n) => ir::Expr::global(n),
                     };
-                    v = ir::Expr::bin(bop, cur, v);
+                    v = if target.ty == Ty::Str { self.concat(vec![cur, v]) } else { ir::Expr::bin(bop, cur, v) };
                 }
                 self.flush(out);
                 out.push(ir::Stmt::Assign { target: var, value: v });
@@ -536,7 +545,7 @@ impl<'a> Gen<'a> {
                 let mut v = self.expr(value);
                 if let Some(bop) = bop {
                     let cur = self.read_place(&var, &path, &holes, &target.ty);
-                    v = ir::Expr::bin(bop, cur, v);
+                    v = if target.ty == Ty::Str { self.concat(vec![cur, v]) } else { ir::Expr::bin(bop, cur, v) };
                 }
                 let v = to_data(v, &target.ty);
                 self.flush(out);
@@ -587,9 +596,15 @@ impl<'a> Gen<'a> {
             h::ExprKind::Int(n) => ir::Expr::Int(*n),
             h::ExprKind::Bool(b) => ir::Expr::Bool(*b),
             h::ExprKind::Str(s) => ir::Expr::Data(Nbt::String(s.clone())),
-            h::ExprKind::Format(_) => {
-                self.err(e.span, "an f-string can only be passed to `print` for now");
-                ir::Expr::Int(0)
+            h::ExprKind::Format(parts) => {
+                let parts = parts
+                    .iter()
+                    .map(|p| match p {
+                        h::FormatPart::Lit(s) => ir::Expr::Data(Nbt::String(s.clone())),
+                        h::FormatPart::Expr(e) => self.text_part(e),
+                    })
+                    .collect();
+                self.concat(parts)
             }
             h::ExprKind::List(_) | h::ExprKind::Struct { .. } => self.aggregate(e),
             h::ExprKind::Local(id) => ir::Expr::var(&self.local_names[id.0]),
@@ -604,6 +619,11 @@ impl<'a> Gen<'a> {
                     AstUn::Neg => ir::Expr::negate(v),
                     AstUn::Not => ir::Expr::logical_not(v),
                 }
+            }
+            h::ExprKind::Binary { op: AstBin::Add, lhs, rhs } if lhs.ty == Ty::Str => {
+                let l = self.expr(lhs);
+                let r = self.expr(rhs);
+                self.concat(vec![l, r])
             }
             h::ExprKind::Binary { op, lhs, rhs } => {
                 let l = self.expr(lhs);
@@ -931,7 +951,12 @@ impl<'a> Gen<'a> {
                 self.flush(out);
                 out.push(ir::Stmt::Print(v));
             }
-            "say" => self.push_cmd(Command::Say(const_str(&args[0]).unwrap_or_default()), Holes::default(), span, out),
+            "say" => {
+                let mut holes = Holes::default();
+                if let Some(msg) = self.str_arg(&args[0], &mut holes, |s| Ok(s.to_owned())) {
+                    self.push_cmd(Command::Say(msg), holes, span, out);
+                }
+            }
             // value-producing builtins used as statements have no effect
             "exists" | "tag.has" => {}
             other => {
@@ -953,13 +978,7 @@ impl<'a> Gen<'a> {
     /// and has the helper give it an id and mark it as ours.
     fn new_entity_command(&mut self, args: &[h::Expr], span: Span, holes: &mut Holes) -> Option<Command> {
         let _ = span;
-        let id = match ResourceLocation::parse(&const_str(&args[0]).unwrap_or_default()) {
-            Ok(r) => r,
-            Err(e) => {
-                self.err(args[0].span, e.message().to_owned());
-                return None;
-            }
-        };
+        let id = self.str_arg(&args[0], holes, ResourceLocation::parse)?;
         let mut exec = Command::execute();
         if args.len() == 4 {
             exec = exec.positioned(self.pos(&args[1..4], holes)?);
@@ -970,33 +989,80 @@ impl<'a> Gen<'a> {
         Some(exec.clause(Clause::Summon(id)).run(Command::call(helper)))
     }
 
+    /// A string argument of a command: a literal checked now by `parse`, or a hole filled at run
+    /// time (the text is substituted as is, so it must be valid where it lands).
+    fn str_arg<T>(&mut self, e: &h::Expr, holes: &mut Holes, parse: impl FnOnce(&str) -> datapack::Result<T>) -> Option<datapack::Arg<T>> {
+        match const_str(e) {
+            Some(s) => match parse(&s) {
+                Ok(v) => Some(datapack::Arg::Lit(v)),
+                Err(err) => {
+                    self.err(e.span, err.message().to_owned());
+                    None
+                }
+            },
+            None => {
+                let v = self.expr(e);
+                Some(datapack::Arg::Hole(self.hole_str(holes, v)))
+            }
+        }
+    }
+
+    /// `a + b` on strings. Nested joins are flattened, and neighbouring literals merged.
+    fn concat(&mut self, parts: Vec<ir::Expr>) -> ir::Expr {
+        let mut flat: Vec<ir::Expr> = Vec::new();
+        for p in parts {
+            let inner = match p {
+                ir::Expr::Concat(inner) => inner,
+                other => vec![other],
+            };
+            for q in inner {
+                match (flat.last_mut(), &q) {
+                    (Some(ir::Expr::Data(Nbt::String(prev))), ir::Expr::Data(Nbt::String(s))) => prev.push_str(s),
+                    _ => flat.push(q),
+                }
+            }
+        }
+        match flat.as_slice() {
+            [lit @ ir::Expr::Data(Nbt::String(_))] => lit.clone(),
+            _ => ir::Expr::Concat(flat),
+        }
+    }
+
+    /// A value spliced into a string: text as it is, ints and bools as numbers, an entity as its id.
+    fn text_part(&mut self, e: &h::Expr) -> ir::Expr {
+        match &e.ty {
+            Ty::List(_) | Ty::Struct(_) => {
+                self.err(e.span, "a list or struct cannot be put into a string (print it with `print` instead)");
+                ir::Expr::Data(Nbt::String(String::new()))
+            }
+            _ => self.expr(e),
+        }
+    }
+
     /// The command a world-acting builtin runs. Run-time values go into `holes`.
     fn builtin_command(&mut self, name: &str, args: &[h::Expr], span: Span, holes: &mut Holes) -> Option<Command> {
         let _ = span;
-        let s = |i: usize| const_str(&args[i]).unwrap_or_default();
         let n = |i: usize| match args.get(i).map(|a| &a.kind) {
             Some(h::ExprKind::Int(n)) => Some(*n),
             _ => None,
         };
-        let rl = |this: &mut Self, i: usize| match ResourceLocation::parse(&s(i)) {
-            Ok(r) => Some(r),
-            Err(e) => {
-                this.err(args[i].span, e.message().to_owned());
-                None
-            }
-        };
         Some(match name {
             "kill" => Command::Kill(Some(self.target(&args[0], holes)?)),
             "tag.add" | "tag.remove" => {
-                let (sel, tag) = (self.target(&args[0], holes)?, Word::new(&s(1)).ok()?);
-                if name == "tag.add" {
-                    self.added_tags.insert(tag.as_str().to_owned());
+                let sel = self.target(&args[0], holes)?;
+                let tag = self.str_arg(&args[1], holes, Word::new)?;
+                // a tag chosen at run time can't be removed again by `_uninstall`
+                if name == "tag.add"
+                    && let datapack::Arg::Lit(t) = &tag
+                {
+                    self.added_tags.insert(t.as_str().to_owned());
                 }
                 let action = if name == "tag.add" { TagAction::Add(tag) } else { TagAction::Remove(tag) };
                 Command::Tag { targets: sel, action }
             }
             "effect.give" => {
-                let (sel, id) = (self.target(&args[0], holes)?, rl(self, 1)?);
+                let sel = self.target(&args[0], holes)?;
+                let id = self.str_arg(&args[1], holes, ResourceLocation::parse)?;
                 // the duration argument is in ticks; the game takes whole seconds, rounded up
                 let seconds = match n(2) {
                     Some(t) => Num::Lit((t.max(1) as u32).div_ceil(20)),
@@ -1019,10 +1085,11 @@ impl<'a> Gen<'a> {
             }
             "setblock" => {
                 let pos = self.pos(&args[0..3], holes)?;
-                Command::Setblock { pos, block: datapack::BlockState::new(rl(self, 3)?), mode: None }
+                let block = self.str_arg(&args[3], holes, ResourceLocation::parse)?;
+                Command::Setblock { pos, block: datapack::BlockState::new(block), mode: None }
             }
             "summon" => {
-                let id = rl(self, 0)?;
+                let id = self.str_arg(&args[0], holes, ResourceLocation::parse)?;
                 let pos = if args.len() == 4 { Some(self.pos(&args[1..4], holes)?) } else { None };
                 // every summoned entity is tagged as ours so `_uninstall` can remove it; an NBT
                 // argument needs an explicit position, and `~ ~ ~` is "here"

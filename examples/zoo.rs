@@ -63,7 +63,7 @@ fn execute() -> Function {
     let say = || Command::say("ok");
     let ex = Command::execute;
 
-    f.push(Command::Summon { entity: rl("marker"), pos: Some(Pos::here()), nbt: Some(Compound::new().with("Tags", vec![Nbt::str("zoo_dummy")])) });
+    f.push(Command::Summon { entity: rl("marker").into(), pos: Some(Pos::here()), nbt: Some(Compound::new().with("Tags", vec![Nbt::str("zoo_dummy")])) });
     f.push(ex().as_(Selector::a()).at(s()).run(say()));
     f.push(ex().positioned(Pos::abs(0.0, 64.0, 0.0)).clause(Clause::PositionedAs(marker().limit(1))).run(say()));
     f.push(ex().clause(Clause::PositionedOver(Heightmap::WorldSurface)).run(say()));
@@ -77,7 +77,7 @@ fn execute() -> Function {
     for rel in [Relation::Attacker, Relation::Controller, Relation::Leasher, Relation::Origin, Relation::Owner, Relation::Passengers, Relation::Target, Relation::Vehicle] {
         f.push(ex().as_(marker()).clause(Clause::On(rel)).run(say()));
     }
-    f.push(ex().clause(Clause::Summon(rl("pig"))).run(Command::Kill(Some(s()))));
+    f.push(ex().clause(Clause::Summon(rl("pig").into())).run(Command::Kill(Some(s()))));
 
     // store: all targets
     f.push(ex().store(StoreKind::Result, StoreTarget::Score { targets: fake("#r"), objective: obj() }).run(Command::Data(Data::Get { target: storage(), path: None, scale: None })));
@@ -205,12 +205,12 @@ fn misc() -> Function {
     let mut f = Function::new();
     f.comment("tag, messages, world");
     let s = Selector::s;
-    f.push(Command::Tag { targets: s(), action: TagAction::Add(word("t1")) });
+    f.push(Command::Tag { targets: s(), action: TagAction::Add(word("t1").into()) });
     f.push(Command::Tag { targets: s(), action: TagAction::List });
-    f.push(Command::Tag { targets: s(), action: TagAction::Remove(word("t1")) });
+    f.push(Command::Tag { targets: s(), action: TagAction::Remove(word("t1").into()) });
     f.push(Command::say("hello from the zoo"));
-    f.push(Command::Summon { entity: rl("pig"), pos: None, nbt: None });
-    f.push(Command::Summon { entity: rl("pig"), pos: Some(Pos::local(0.0, 0.0, 2.0)), nbt: Some(Compound::new().with("NoAI", true).with("Tags", vec![Nbt::str("zoo_dummy")])) });
+    f.push(Command::Summon { entity: rl("pig").into(), pos: None, nbt: None });
+    f.push(Command::Summon { entity: rl("pig").into(), pos: Some(Pos::local(0.0, 0.0, 2.0)), nbt: Some(Compound::new().with("NoAI", true).with("Tags", vec![Nbt::str("zoo_dummy")])) });
     f.push(Command::Kill(Some(Selector::e().tag(word("zoo_dummy")).entity_type(rl("pig")))));
     for mode in [None, Some(SetblockMode::Destroy), Some(SetblockMode::Keep), Some(SetblockMode::Replace), Some(SetblockMode::Strict)] {
         f.push(Command::Setblock { pos: Pos::block(0, -60, 0), block: BlockState::new(rl("oak_stairs")).prop(word("facing"), word("north")), mode });
@@ -221,11 +221,11 @@ fn misc() -> Function {
     f.push(Command::Gamerule { rule: rl("random_tick_speed"), value: Some(GameRuleValue::Int(3)) });
     f.push(Command::Raw("list".into()));
     for (seconds, amp, hide) in [(None, None, false), (Some(30), None, false), (Some(30), Some(2), false), (Some(30), Some(2), true)] {
-        f.push(Command::Effect(Effect::Give { targets: Selector::a(), effect: rl("speed"), seconds: seconds.map(Num::Lit), amplifier: amp.map(Num::Lit), hide_particles: hide }));
+        f.push(Command::Effect(Effect::Give { targets: Selector::a(), effect: rl("speed").into(), seconds: seconds.map(Num::Lit), amplifier: amp.map(Num::Lit), hide_particles: hide }));
     }
     f.push(Command::Effect(Effect::Clear { targets: None, effect: None }));
     f.push(Command::Effect(Effect::Clear { targets: Some(Selector::a()), effect: None }));
-    f.push(Command::Effect(Effect::Clear { targets: Some(Selector::a()), effect: Some(rl("speed")) }));
+    f.push(Command::Effect(Effect::Clear { targets: Some(Selector::a()), effect: Some(rl("speed").into()) }));
     f.push(Command::Teleport { targets: Selector::s(), dest: Pos::rel(0.0, 1.0, 0.0) });
     f.push(Command::Teleport { targets: Selector::a(), dest: Pos::abs(0.0, 64.0, 0.0) });
     f.push(Command::Teleport { targets: Selector::s(), dest: Pos::local(0.0, 0.0, 2.0) });
@@ -267,8 +267,8 @@ fn holes() -> Function {
     f.comment("every kind of hole the command AST supports");
     f.push(Command::Teleport { targets: Selector::a(), dest: Pos::new(h(0), Coord::Abs(64.0), h(1)) });
     f.push(Command::Setblock { pos: Pos::new(h(0), h(1), h(0)), block: BlockState::new(rl("stone")), mode: None });
-    f.push(Command::Summon { entity: rl("marker"), pos: Some(Pos::new(h(0), h(1), h(0))), nbt: Some(Compound::new().with("Tags", vec![Nbt::str("zoo_dummy")])) });
-    f.push(Command::Effect(Effect::Give { targets: Selector::a(), effect: rl("speed"), seconds: Some(Num::Hole(Hole(0))), amplifier: Some(Num::Hole(Hole(1))), hide_particles: false }));
+    f.push(Command::Summon { entity: rl("marker").into(), pos: Some(Pos::new(h(0), h(1), h(0))), nbt: Some(Compound::new().with("Tags", vec![Nbt::str("zoo_dummy")])) });
+    f.push(Command::Effect(Effect::Give { targets: Selector::a(), effect: rl("speed").into(), seconds: Some(Num::Hole(Hole(0))), amplifier: Some(Num::Hole(Hole(1))), hide_particles: false }));
     let xs = |n: u16| NbtPath::new().key("xs").index_hole(Hole(n));
     f.push(Command::Data(Data::Modify {
         target: DataTarget::Storage(rl("zoo:vars")),
@@ -277,6 +277,24 @@ fn holes() -> Function {
         source: ModifySource::From { source: DataTarget::Storage(rl("zoo:vars")), path: Some(xs(1)) },
     }));
     f.push(Command::execute().clause(Clause::Positioned(Pos::new(h(0), Coord::Abs(64.0), h(1)))).clause(Clause::Rotated(Rotation { yaw: h(0), pitch: Coord::Abs(0.0) })).run(Command::say("held")));
+    // text chosen at run time: ids, tag names, a say message and a joined string
+    fn s<T>(n: u16) -> Arg<T> {
+        Arg::Hole(Hole(n))
+    }
+    f.push(Command::Setblock { pos: Pos::block(0, 64, 0), block: BlockState::new(s(0)), mode: None });
+    f.push(Command::Summon { entity: s(0), pos: Some(Pos::here()), nbt: Some(Compound::new().with("Tags", vec![Nbt::str("zoo_dummy")])) });
+    f.push(Command::Tag { targets: Selector::s(), action: TagAction::Add(s(0)) });
+    f.push(Command::Tag { targets: Selector::s(), action: TagAction::Remove(s(1)) });
+    f.push(Command::Effect(Effect::Give { targets: Selector::a(), effect: s(0), seconds: None, amplifier: None, hide_particles: false }));
+    f.push(Command::Effect(Effect::Clear { targets: Some(Selector::a()), effect: Some(s(0)) }));
+    f.push(Command::execute().clause(Clause::Summon(s(0))).run(Command::say("summoned")));
+    f.push(Command::Say(s(0)));
+    f.push(Command::Data(Data::Modify {
+        target: DataTarget::Storage(rl("zoo:vars")),
+        path: NbtPath::new().key("joined"),
+        op: ModifyOp::Set,
+        source: ModifySource::Template(vec![TemplatePart::Lit("a \"quoted\" $(not a hole) ".into()), TemplatePart::Hole(Hole(0)), TemplatePart::Lit("-".into()), TemplatePart::Hole(Hole(1))]),
+    }));
     f.push(Command::Kill(Some(Selector::entity_id(word("zoo_id"), Hole(0)))));
     f.push(Command::Teleport { targets: Selector::entity_id(word("zoo_id"), Hole(1)).tag(word("zoo_dummy")), dest: Pos::here() });
     f

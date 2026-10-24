@@ -902,6 +902,7 @@ impl<'a> Checker<'a> {
                 BinOp::Ge => Some((Bool(a >= b), Ty::Bool)),
                 BinOp::And | BinOp::Or => bad(self),
             },
+            (Str(a), Str(b)) if op == BinOp::Add => Some((Str(a + &b), Ty::Str)),
             (Bool(a), Bool(b)) => match op {
                 BinOp::And => Some((Bool(a && b), Ty::Bool)),
                 BinOp::Or => Some((Bool(a || b), Ty::Bool)),
@@ -1035,9 +1036,7 @@ impl<'a> Checker<'a> {
                     }
                     None => value.ty.clone(),
                 };
-                if ty == Ty::Text {
-                    self.error_hint(init.span, "an f-string cannot be stored in a variable yet", "pass it straight to `print(f\"...\")`");
-                } else if !ty.is_storable() {
+                if !ty.is_storable() {
                     let msg = if ty == Ty::Unit { "this expression has no value to store".to_owned() } else { format!("a value of type `{}` cannot be stored in a variable", self.tn(&ty)) };
                     self.error(init.span, msg);
                 }
@@ -1050,6 +1049,7 @@ impl<'a> Checker<'a> {
                 let v = self.expr(value, Some(&t.ty));
                 match op {
                     AssignOp::Assign => self.mismatch(v.span, &t.ty, &v.ty),
+                    AssignOp::Add if t.ty == Ty::Str => self.mismatch(v.span, &Ty::Str, &v.ty),
                     _ => {
                         if !t.ty.is_error() && t.ty != Ty::Int {
                             // one mistake, one error: don't also complain about the value
@@ -1324,7 +1324,12 @@ impl<'a> Checker<'a> {
                         }
                     }
                 }
-                mk(ExprKind::Format(out), Ty::Text)
+                if out.iter().all(|p| matches!(p, FormatPart::Lit(_))) {
+                    // nothing to compute: an ordinary string
+                    let text = out.iter().map(|p| if let FormatPart::Lit(s) = p { s.as_str() } else { "" }).collect::<String>();
+                    return mk(ExprKind::Str(text), Ty::Str);
+                }
+                mk(ExprKind::Format(out), Ty::Str)
             }
             K::Ident(name) => self.ident(name, span),
             K::List(items) => self.list_lit(items, expected, span),
@@ -1493,6 +1498,13 @@ impl<'a> Checker<'a> {
         let r = self.expr(rhs, None);
         let poisoned = l.ty.is_error() || r.ty.is_error();
         let result = match op {
+            BinOp::Add if !poisoned && l.ty == Ty::Str && r.ty == Ty::Str => {
+                // two literals join at compile time
+                if let (ExprKind::Str(a), ExprKind::Str(b)) = (&l.kind, &r.kind) {
+                    return Expr { kind: ExprKind::Str(format!("{a}{b}")), ty: Ty::Str, span };
+                }
+                Ty::Str
+            }
             BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Rem => {
                 if !poisoned && (l.ty != Ty::Int || r.ty != Ty::Int) {
                     self.bin_error(op, &l.ty, &r.ty, span);
@@ -1729,7 +1741,7 @@ impl<'a> Checker<'a> {
             let h = match p {
                 BParam::Printable => {
                     let h = self.expr(a, None);
-                    if !h.ty.is_storable() && h.ty != Ty::Text {
+                    if !h.ty.is_storable() {
                         let msg = format!("cannot print a value of type `{}`", self.tn(&h.ty));
                         self.error(h.span, msg);
                     }
@@ -1737,6 +1749,11 @@ impl<'a> Checker<'a> {
                 }
                 BParam::Selector => self.selector_operand(a),
                 BParam::Coord => self.coord_operand(a),
+                BParam::Str => {
+                    let h = self.expr(a, Some(&Ty::Str));
+                    self.mismatch(h.span, &Ty::Str, &h.ty);
+                    h
+                }
                 BParam::ConstStr => match self.const_expr(a, Some(&Ty::Str)) {
                     Some((ConstVal::Str(s), _)) => Expr { kind: ExprKind::Str(s), ty: Ty::Str, span: a.span },
                     Some((_, t)) => {
