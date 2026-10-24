@@ -3,7 +3,8 @@
   "displayName": "slab",
   "description": "slab language support: syntax highlighting and a language server (diagnostics, hover, go to definition, completion, outline) for .slab programs",
   "version": "0.1.0",
-  "publisher": "cayden",
+  "author": "HeavyLvy",
+  "publisher": "heavylvy",
   "license": "MIT",
   "engines": {
     "vscode": "^1.84.0"
