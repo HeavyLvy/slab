@@ -181,6 +181,50 @@
   "expect": "has 1 [e2e]"
  },
  {
+  "cmd": "scoreboard players get #g.r_ent_distinct e2e",
+  "expect": "has 1 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_ent_alive e2e",
+  "expect": "has 1 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_ent_same e2e",
+  "expect": "has 1 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_ent_list e2e",
+  "expect": "has 3 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_ent_struct e2e",
+  "expect": "has 1 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_ent_fn e2e",
+  "expect": "has 1 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_ent_ctx e2e",
+  "expect": "has 1 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_ent_score e2e",
+  "expect": "has 8 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_ent_after_kill e2e",
+  "expect": "has 1 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_ent_stale_tp e2e",
+  "expect": "has 1 [e2e]"
+ },
+ {
+  "cmd": "scoreboard objectives list",
+  "matches": "\\[e2e_id\\]"
+ },
+ {
   "cmd": "data get storage e2e:vars run_all.v_xs",
   "expect": "Found no elements"
  },
@@ -262,5 +306,9 @@
  {
   "cmd": "data get storage e2e:ret",
   "absent": "hello"
+ },
+ {
+  "cmd": "scoreboard objectives list",
+  "absent": "[e2e_id]"
  }
 ]

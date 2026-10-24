@@ -49,6 +49,10 @@ Constant arguments never use this: `tp(@s, 1, 64, 2)` is the plain command `tele
 
 String values are *not* substituted into commands (a `"` or `\` in a string would break the line); only numbers are. Text with variables goes through **f-strings** instead.
 
+## Entity handles
+
+An `entity` is an `int` in the IR. A single-entity selector becomes `Expr::EntityOf(selector)` (runs `_ensure_id` as that entity and reads `#new_id`), `summon(..)` as a value becomes `Expr::NewEntity` (`execute [positioned ..] summon <type> run function <ns>:_new_entity`), and a handle used as a target becomes `Selector::entity_id(<ns>_id, hole)` with its value as a macro hole (`@e[scores={<ns>_id=$(h0)},limit=1]`), so any command, `execute` clause or score holder can address it. Details and lifetime: `docs/lang/entities.md`.
+
 ## Command results
 
 A world-acting builtin used as a value becomes `ir::Expr::CommandSuccess`: `set tmp 0; execute store success score tmp run <command>` (cleared first because `store` writes nothing if the chain ends early). With run-time values the macro helper is `$return run <command>` so the command's own success flows out of the function call, and the call is wrapped in the same `execute store success`. As a statement the result is not computed: the command is emitted unchanged.

@@ -14,6 +14,9 @@ pub enum Ty {
     Unit,
     List(Box<Ty>),
     Struct(StructId),
+    /// A reference to one entity (a handle). Stored as an int id under the hood, so it can live in
+    /// variables, lists and structs and be passed and returned; the entity may have died since.
+    Entity,
     /// An entity selector such as `@a[tag=x]`. Only usable where the language expects one
     /// (builtin arguments, context blocks, objective indexing); it cannot be stored.
     Selector,
@@ -34,7 +37,7 @@ impl Ty {
     /// Whether a value of this type can live in a variable, field or list.
     pub fn is_storable(&self) -> bool {
         match self {
-            Ty::Int | Ty::Bool | Ty::Str | Ty::Struct(_) => true,
+            Ty::Int | Ty::Bool | Ty::Str | Ty::Struct(_) | Ty::Entity => true,
             Ty::List(t) => t.is_storable(),
             Ty::Unit | Ty::Selector | Ty::Coord | Ty::Text => false,
             Ty::Error => true,
@@ -70,6 +73,7 @@ impl fmt::Display for TyDisplay<'_> {
             Ty::Unit => f.write_str("()"),
             Ty::List(t) => write!(f, "list<{}>", t.display(self.structs)),
             Ty::Struct(id) => f.write_str(self.structs.get(id.0).map_or("?", String::as_str)),
+            Ty::Entity => f.write_str("entity"),
             Ty::Selector => f.write_str("selector"),
             Ty::Coord => f.write_str("coordinate"),
             Ty::Text => f.write_str("text"),

@@ -37,6 +37,9 @@ pub fn generate(hir: &h::Hir, namespace: &str, description: &str) -> Result<ir::
     program.functions.append(&mut g.extra_fns);
     program.globals.append(&mut g.extra_globals);
     program.uninstall = g.uninstall_commands();
+    if g.entities {
+        program.entities = Some(ir::EntityConfig { objective: g.id_objective(), owned_tag: g.owned_tag() });
+    }
     if g.errors.is_empty() { Ok(program) } else { Err(g.errors) }
 }
 
@@ -58,14 +61,15 @@ fn unique(used: &mut HashSet<String>, base: String) -> String {
 
 fn kind_of(ty: &Ty) -> ir::Kind {
     match ty {
-        Ty::Int => ir::Kind::Int,
+        // an entity handle is an int id
+        Ty::Int | Ty::Entity => ir::Kind::Int,
         Ty::Bool => ir::Kind::Bool,
         _ => ir::Kind::Data,
     }
 }
 
 fn is_scalar(ty: &Ty) -> bool {
-    matches!(ty, Ty::Int | Ty::Bool)
+    matches!(ty, Ty::Int | Ty::Bool | Ty::Entity)
 }
 
 fn bin_op(op: AstBin) -> ir::BinOp {
@@ -114,6 +118,8 @@ struct Gen<'a> {
     namespace: String,
     /// The program summoned an entity, which `summon` tagged as ours.
     uses_summon: bool,
+    /// The program uses entity handles (needs the id objective and helper functions).
+    entities: bool,
     /// Tags the program adds to entities (`tag.add`), removed again by `_uninstall`.
     added_tags: BTreeSet<String>,
     fn_names: Vec<String>,
@@ -134,7 +140,7 @@ struct Gen<'a> {
 
 impl<'a> Gen<'a> {
     fn new(hir: &'a h::Hir, namespace: &str) -> Self {
-        let mut used_fns = HashSet::from(["_init".to_owned(), "_uninstall".to_owned()]);
+        let mut used_fns = HashSet::from(["_init", "_uninstall", "_alloc_id", "_new_entity", "_ensure_id"].map(str::to_owned));
         let fn_names = hir.fns.iter().map(|f| unique(&mut used_fns, format!("{}{}", module_prefix(&hir.modules[f.module]), sanitize(&f.name)))).collect();
         let mut used_globals = HashSet::new();
         let global_names = hir.globals.iter().map(|g| unique(&mut used_globals, format!("{}{}", module_prefix(&hir.modules[g.module]), sanitize(&g.name)))).collect();
@@ -147,6 +153,7 @@ impl<'a> Gen<'a> {
             hir,
             namespace: namespace.to_owned(),
             uses_summon: false,
+            entities: false,
             added_tags: BTreeSet::new(),
             fn_names,
             global_names,
@@ -184,6 +191,11 @@ impl<'a> Gen<'a> {
     fn hole(&mut self, holes: &mut Holes, e: &h::Expr) -> Hole {
         let v = self.expr(e);
         self.hole_ir(holes, v)
+    }
+
+    /// The objective that holds entity ids.
+    fn id_objective(&self) -> String {
+        format!("{}_id", self.namespace)
     }
 
     /// The tag put on every entity the program summons, so `_uninstall` can find them again.
@@ -536,10 +548,11 @@ impl<'a> Gen<'a> {
             }
             h::ExprKind::Score { objective, holder } => {
                 let obj = self.objective_names[objective.0].clone();
-                let holder = self.holder(holder);
+                let mut holes = Holes::default();
+                let holder = self.holder(holder, &mut holes);
                 let v = self.expr(value);
                 self.flush(out);
-                out.push(ir::Stmt::SetScore { objective: obj, holder, op: bop, value: v });
+                out.push(ir::Stmt::SetScore { objective: obj, holder, op: bop, value: v, args: holes.args });
             }
             _ => self.err(target.span, "cannot assign to this expression"),
         }
@@ -602,14 +615,36 @@ impl<'a> Gen<'a> {
                 ir::Expr::Call(self.fn_names[func.0].clone(), args)
             }
             h::ExprKind::Builtin { name, args } => match *name {
-                "exists" => match self.selector(&args[0]) {
-                    Some(sel) => ir::Expr::EntityExists(sel),
-                    None => ir::Expr::Bool(false),
-                },
-                "tag.has" => match (self.selector(&args[0]), const_str(&args[1]).and_then(|t| Word::new(&t).ok())) {
-                    (Some(sel), Some(tag)) => ir::Expr::EntityExists(sel.tag(tag)),
-                    _ => ir::Expr::Bool(false),
-                },
+                "exists" | "tag.has" => {
+                    let mut holes = Holes::default();
+                    let Some(mut sel) = self.target(&args[0], &mut holes) else { return ir::Expr::Bool(false) };
+                    if *name == "tag.has" {
+                        match const_str(&args[1]).and_then(|t| Word::new(&t).ok()) {
+                            Some(tag) => sel = sel.tag(tag),
+                            None => return ir::Expr::Bool(false),
+                        }
+                    }
+                    if holes.args.is_empty() {
+                        ir::Expr::EntityExists(sel)
+                    } else {
+                        // an entity value is found by its id, which is only known at run time
+                        match Command::execute().if_(datapack::Condition::Entity(sel)).into_test() {
+                            Ok(command) => ir::Expr::CommandSuccess { command: Box::new(command), args: holes.args },
+                            Err(err) => {
+                                self.err(e.span, err.message().to_owned());
+                                ir::Expr::Bool(false)
+                            }
+                        }
+                    }
+                }
+                // `summon` as a value is the new entity's handle
+                "summon" => {
+                    let mut holes = Holes::default();
+                    match self.new_entity_command(args, e.span, &mut holes) {
+                        Some(command) => ir::Expr::NewEntity { command: Box::new(command), args: holes.args },
+                        None => ir::Expr::Int(0),
+                    }
+                }
                 "print" | "say" => {
                     self.err(e.span, format!("`{}` does not produce a value", name));
                     ir::Expr::Int(0)
@@ -643,7 +678,18 @@ impl<'a> Gen<'a> {
                 let (var, path) = self.place(e, &mut holes);
                 self.read_place(&var, &path, &holes, &e.ty)
             }
-            h::ExprKind::Score { objective, holder } => ir::Expr::PlayerScore { objective: self.objective_names[objective.0].clone(), holder: self.holder(holder) },
+            h::ExprKind::Score { objective, holder } => {
+                let mut holes = Holes::default();
+                let holder = self.holder(holder, &mut holes);
+                ir::Expr::PlayerScore { objective: self.objective_names[objective.0].clone(), holder, args: holes.args }
+            }
+            h::ExprKind::ToEntity(inner) => match self.selector(inner) {
+                Some(sel) => {
+                    self.entities = true;
+                    ir::Expr::EntityOf(sel)
+                }
+                None => ir::Expr::Int(0),
+            },
             h::ExprKind::Error => ir::Expr::Int(0),
         }
     }
@@ -746,6 +792,23 @@ impl<'a> Gen<'a> {
 
     // ------------------------------------------------- builtins, selectors, context
 
+    /// A target for a command: a selector literal, or an entity handle, which selects the entity
+    /// whose id is the handle's value (a hole filled at run time).
+    fn target(&mut self, e: &h::Expr, holes: &mut Holes) -> Option<Selector> {
+        match &e.kind {
+            h::ExprKind::Selector(s) => Some(s.clone()),
+            _ if e.ty == Ty::Entity => {
+                self.entities = true;
+                let hole = self.hole(holes, e);
+                Some(Selector::entity_id(Word::new(&self.id_objective()).ok()?, hole))
+            }
+            _ => {
+                self.err(e.span, "expected a selector such as `@a[tag=x]` or an entity");
+                None
+            }
+        }
+    }
+
     fn selector(&mut self, e: &h::Expr) -> Option<Selector> {
         match &e.kind {
             h::ExprKind::Selector(s) => Some(s.clone()),
@@ -756,9 +819,13 @@ impl<'a> Gen<'a> {
         }
     }
 
-    fn holder(&mut self, e: &h::Expr) -> ScoreHolder {
+    fn holder(&mut self, e: &h::Expr, holes: &mut Holes) -> ScoreHolder {
         match &e.kind {
             h::ExprKind::Selector(s) => ScoreHolder::Selector(s.clone()),
+            _ if e.ty == Ty::Entity => match self.target(e, holes) {
+                Some(sel) => ScoreHolder::Selector(sel),
+                None => ScoreHolder::All,
+            },
             h::ExprKind::Str(s) => match HolderName::new(s) {
                 Ok(n) => ScoreHolder::Name(n),
                 Err(err) => {
@@ -800,8 +867,8 @@ impl<'a> Gen<'a> {
 
     fn clause(&mut self, c: &h::CtxClause, holes: &mut Holes) -> Option<Clause> {
         Some(match c {
-            h::CtxClause::As(e) => Clause::As(self.selector(e)?),
-            h::CtxClause::At(e) => Clause::At(self.selector(e)?),
+            h::CtxClause::As(e) => Clause::As(self.target(e, holes)?),
+            h::CtxClause::At(e) => Clause::At(self.target(e, holes)?),
             h::CtxClause::In(s) => Clause::In(ResourceLocation::parse(s).ok()?),
             h::CtxClause::Positioned(es) => Clause::Positioned(self.checked_pos(es, holes)?),
             h::CtxClause::Facing(es) => Clause::Facing(self.checked_pos(es, holes)?),
@@ -882,6 +949,27 @@ impl<'a> Gen<'a> {
         }
     }
 
+    /// `execute [positioned x y z] summon <type> run function <ns>:_new_entity`: creates the entity
+    /// and has the helper give it an id and mark it as ours.
+    fn new_entity_command(&mut self, args: &[h::Expr], span: Span, holes: &mut Holes) -> Option<Command> {
+        let _ = span;
+        let id = match ResourceLocation::parse(&const_str(&args[0]).unwrap_or_default()) {
+            Ok(r) => r,
+            Err(e) => {
+                self.err(args[0].span, e.message().to_owned());
+                return None;
+            }
+        };
+        let mut exec = Command::execute();
+        if args.len() == 4 {
+            exec = exec.positioned(self.pos(&args[1..4], holes)?);
+        }
+        self.entities = true;
+        self.uses_summon = true;
+        let helper = ResourceLocation::new(&self.namespace, "_new_entity").ok()?;
+        Some(exec.clause(Clause::Summon(id)).run(Command::call(helper)))
+    }
+
     /// The command a world-acting builtin runs. Run-time values go into `holes`.
     fn builtin_command(&mut self, name: &str, args: &[h::Expr], span: Span, holes: &mut Holes) -> Option<Command> {
         let _ = span;
@@ -898,9 +986,9 @@ impl<'a> Gen<'a> {
             }
         };
         Some(match name {
-            "kill" => Command::Kill(Some(self.selector(&args[0])?)),
+            "kill" => Command::Kill(Some(self.target(&args[0], holes)?)),
             "tag.add" | "tag.remove" => {
-                let (sel, tag) = (self.selector(&args[0])?, Word::new(&s(1)).ok()?);
+                let (sel, tag) = (self.target(&args[0], holes)?, Word::new(&s(1)).ok()?);
                 if name == "tag.add" {
                     self.added_tags.insert(tag.as_str().to_owned());
                 }
@@ -908,7 +996,7 @@ impl<'a> Gen<'a> {
                 Command::Tag { targets: sel, action }
             }
             "effect.give" => {
-                let (sel, id) = (self.selector(&args[0])?, rl(self, 1)?);
+                let (sel, id) = (self.target(&args[0], holes)?, rl(self, 1)?);
                 // the duration argument is in ticks; the game takes whole seconds, rounded up
                 let seconds = match n(2) {
                     Some(t) => Num::Lit((t.max(1) as u32).div_ceil(20)),
@@ -924,9 +1012,9 @@ impl<'a> Gen<'a> {
                 });
                 Command::Effect(Effect::Give { targets: sel, effect: id, seconds: Some(seconds), amplifier, hide_particles: false })
             }
-            "effect.clear" => Command::Effect(Effect::Clear { targets: Some(self.selector(&args[0])?), effect: None }),
+            "effect.clear" => Command::Effect(Effect::Clear { targets: Some(self.target(&args[0], holes)?), effect: None }),
             "tp" => {
-                let sel = self.selector(&args[0])?;
+                let sel = self.target(&args[0], holes)?;
                 Command::Teleport { targets: sel, dest: self.pos(&args[1..4], holes)? }
             }
             "setblock" => {

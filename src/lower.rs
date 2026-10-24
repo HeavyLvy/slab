@@ -6,10 +6,10 @@ use std::fmt;
 
 use crate::datapack::{
     self, BuildError, Clause, Command, Condition, Data, DataPack, DataTarget, Execute, FunctionRef, HolderName, Hole,
-    IntRange, ModifyOp, ModifySource, Nbt, NbtPath, NumType, Objective, PathNode, ResourceLocation, ScoreHolder, ScoreOp,
+    IntRange, ModifyOp, ModifySource, Nbt, NbtPath, NumType, Objective, PathNode, ResourceLocation, ScoreHolder, ScoreOp, Word,
     ScoreTest, Scoreboard, Selector, StoreKind, StoreTarget, Text,
 };
-use crate::ir::{self, BinOp, Entry, Expr, Kind, PrintPart, Program, Stmt, UnOp, VarRef};
+use crate::ir::{self, BinOp, Entry, EntityConfig, Expr, Kind, PrintPart, Program, Stmt, UnOp, VarRef};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LowerError {
@@ -199,7 +199,7 @@ fn check_ident(what: &str, name: &str) -> R<()> {
 fn has_call(e: &Expr) -> bool {
     match e {
         Expr::Call(..) => true,
-        Expr::CommandSuccess { args, .. } => args.iter().any(|(_, e)| has_call(e)),
+        Expr::CommandSuccess { args, .. } | Expr::NewEntity { args, .. } | Expr::PlayerScore { args, .. } => args.iter().any(|(_, e)| has_call(e)),
         Expr::Unary(_, a) | Expr::ToInt(a) | Expr::ToData(a) => has_call(a),
         Expr::Binary(_, a, b) => has_call(a) || has_call(b),
         _ => false,
@@ -208,7 +208,7 @@ fn has_call(e: &Expr) -> bool {
 
 fn collect_calls_expr(e: &Expr, out: &mut Vec<String>) {
     match e {
-        Expr::CommandSuccess { args, .. } => args.iter().for_each(|(_, a)| collect_calls_expr(a, out)),
+        Expr::CommandSuccess { args, .. } | Expr::NewEntity { args, .. } | Expr::PlayerScore { args, .. } => args.iter().for_each(|(_, a)| collect_calls_expr(a, out)),
         Expr::Call(n, args) => {
             out.push(n.clone());
             args.iter().for_each(|a| collect_calls_expr(a, out));
@@ -248,7 +248,10 @@ fn collect_calls(stmts: &[Stmt], out: &mut Vec<String>) {
                     }
                 }
             }
-            Stmt::SetScore { value, .. } => collect_calls_expr(value, out),
+            Stmt::SetScore { value, args, .. } => {
+                collect_calls_expr(value, out);
+                args.iter().for_each(|(_, e)| collect_calls_expr(e, out));
+            }
             Stmt::Context { args, body, .. } => {
                 args.iter().for_each(|(_, e)| collect_calls_expr(e, out));
                 collect_calls(body, out);
@@ -620,7 +623,7 @@ impl<'a> Lower<'a> {
                 self.expect_data_ref(r)?;
                 Kind::Int
             }
-            Expr::PlayerScore { .. } => Kind::Int,
+            Expr::PlayerScore { .. } | Expr::EntityOf(_) | Expr::NewEntity { .. } => Kind::Int,
             Expr::EntityExists(_) | Expr::CommandSuccess { .. } => Kind::Bool,
         })
     }
@@ -735,12 +738,32 @@ impl<'a> Lower<'a> {
                 }
                 Ok(IntVal::Holder(d, true))
             }
-            Expr::PlayerScore { objective, holder } => {
+            Expr::PlayerScore { objective, holder, args } => {
                 let (d, temp) = self.dest(hint)?;
                 let cmd = Command::execute()
                     .store(StoreKind::Result, StoreTarget::Score { targets: fake(&d), objective: self.obj.clone() })
                     .run(Command::Scoreboard(Scoreboard::PlayersGet { target: holder.clone(), objective: Objective::new(objective)? }));
-                self.emit(cmd);
+                self.run_command(cmd, args)?;
+                Ok(IntVal::Holder(d, temp))
+            }
+            Expr::EntityOf(sel) => {
+                self.require_entities()?;
+                // `_ensure_id` leaves the id in #new_id; clear it so "no match" reads as 0
+                let new_id = self.entity_holder("#new_id")?;
+                self.set_const(&new_id, 0);
+                let id = self.fn_id("_ensure_id")?;
+                self.emit(Command::execute().clause(datapack::Clause::As(sel.clone())).run(Command::call(id)));
+                let (d, temp) = self.dest(hint)?;
+                self.copy_score(&d, &new_id);
+                Ok(IntVal::Holder(d, temp))
+            }
+            Expr::NewEntity { command, args } => {
+                self.require_entities()?;
+                let new_id = self.entity_holder("#new_id")?;
+                self.set_const(&new_id, 0);
+                self.run_command((**command).clone(), args)?;
+                let (d, temp) = self.dest(hint)?;
+                self.copy_score(&d, &new_id);
                 Ok(IntVal::Holder(d, temp))
             }
             Expr::Call(name, args) => {
@@ -1284,7 +1307,7 @@ impl<'a> Lower<'a> {
             }
             Stmt::Print(e) => self.lower_print(e)?,
             Stmt::PrintParts(parts) => self.lower_print_parts(parts)?,
-            Stmt::SetScore { objective, holder, op, value } => self.lower_set_score(objective, holder, *op, value)?,
+            Stmt::SetScore { objective, holder, op, value, args } => self.lower_set_score(objective, holder, *op, value, args)?,
             Stmt::Remove { target, path } => {
                 self.expect_data_ref(target)?;
                 let loc = self.ref_loc(target)?.extend(path)?;
@@ -1419,7 +1442,7 @@ impl<'a> Lower<'a> {
         Ok(())
     }
 
-    fn lower_set_score(&mut self, objective: &str, holder: &ScoreHolder, op: Option<BinOp>, value: &Expr) -> R<()> {
+    fn lower_set_score(&mut self, objective: &str, holder: &ScoreHolder, op: Option<BinOp>, value: &Expr, args: &[(Hole, Expr)]) -> R<()> {
         if !self.kind_of(value)?.is_score() {
             err!("a score can only be set to an Int/Bool value");
         }
@@ -1434,19 +1457,21 @@ impl<'a> Lower<'a> {
             BinOp::Mod => Ok(ScoreOp::Mod),
             other => Err(LowerError { message: format!("`{other:?}` is not a score assignment operator") }),
         };
-        match (op, &v) {
-            (None, IntVal::Const(c)) => self.emit(Command::Scoreboard(Scoreboard::PlayersSet { targets: holder.clone(), objective: obj, value: *c })),
-            (None, IntVal::Holder(h, _)) => self.emit(Command::score_op(holder.clone(), obj, ScoreOp::Set, fake(h), my_obj)),
-            (Some(BinOp::Add), IntVal::Const(c)) if *c != i32::MIN => self.emit(Command::score_add(holder.clone(), obj, *c)),
-            (Some(BinOp::Sub), IntVal::Const(c)) if *c != i32::MIN => self.emit(Command::score_add(holder.clone(), obj, -*c)),
+        let cmd = match (op, &v) {
+            (None, IntVal::Const(c)) => Command::Scoreboard(Scoreboard::PlayersSet { targets: holder.clone(), objective: obj, value: *c }),
+            (None, IntVal::Holder(h, _)) => Command::score_op(holder.clone(), obj, ScoreOp::Set, fake(h), my_obj),
+            (Some(BinOp::Add), IntVal::Const(c)) if *c != i32::MIN => Command::score_add(holder.clone(), obj, *c),
+            (Some(BinOp::Sub), IntVal::Const(c)) if *c != i32::MIN => Command::score_add(holder.clone(), obj, -*c),
             (Some(op), v) => {
                 let src = match v {
                     IntVal::Const(c) => self.const_holder(*c)?,
                     IntVal::Holder(h, _) => h.clone(),
                 };
-                self.emit(Command::score_op(holder.clone(), obj, sop(op)?, fake(&src), my_obj));
+                Command::score_op(holder.clone(), obj, sop(op)?, fake(&src), my_obj)
             }
-        }
+        };
+        // a holder chosen at run time (an entity handle) makes this a macro command
+        self.run_command(cmd, args)?;
         self.release_int(&v);
         Ok(())
     }
@@ -1723,6 +1748,18 @@ impl<'a> Lower<'a> {
             };
             self.emit(Command::Scoreboard(Scoreboard::ObjectivesAdd { name: Objective::new(&o.name)?, criteria, display_name: None }));
         }
+        if let Some(cfg) = prog.entities.as_ref() {
+            if cfg.objective == self.obj.as_str() || prog.objectives.iter().any(|o| o.name == cfg.objective) {
+                err!("the objective `{}` is reserved for entity ids; rename yours", cfg.objective);
+            }
+            self.emit(Command::Scoreboard(Scoreboard::ObjectivesAdd { name: Objective::new(&cfg.objective)?, criteria: datapack::Criteria::Dummy, display_name: None }));
+            // ids are never reused: the counter survives /reload like a global
+            let next = self.entity_holder("#next_id")?;
+            let unset = Condition::Score { target: fake(&next), objective: self.obj.clone(), test: ScoreTest::Matches(IntRange::between(i32::MIN, i32::MAX)) };
+            let init = Command::execute().unless(unset).run(Command::score_set(fake(&next), self.obj.clone(), 0));
+            self.emit(init);
+            self.emit_entity_support(cfg)?;
+        }
         let consts: Vec<i32> = self.consts.iter().copied().collect();
         for c in consts {
             let h = self.const_holder(c)?;
@@ -1745,6 +1782,48 @@ impl<'a> Lower<'a> {
         Ok(())
     }
 
+    fn require_entities(&self) -> R<&'a EntityConfig> {
+        match self.prog.entities.as_ref() {
+            Some(c) => Ok(c),
+            None => err!("internal error: the program uses entity handles but declares no entity configuration"),
+        }
+    }
+
+    fn entity_holder(&self, name: &str) -> R<HolderName> {
+        self.holder(name.to_owned())
+    }
+
+    /// The helper functions behind entity handles (see docs/lang/entities.md):
+    /// * `_alloc_id`: gives the executing entity the next id;
+    /// * `_new_entity`: for a freshly created entity: allocate, mark as ours, report the id in `#new_id`;
+    /// * `_ensure_id`: for an existing entity: allocate only if it has none, report the id in `#new_id`.
+    fn emit_entity_support(&mut self, cfg: &EntityConfig) -> R<()> {
+        let id_obj = Objective::new(&cfg.objective)?;
+        let next = fake(&self.entity_holder("#next_id")?);
+        let new = fake(&self.entity_holder("#new_id")?);
+        let me = || ScoreHolder::Selector(Selector::s());
+        let mut alloc = datapack::Function::new();
+        alloc.comment("generated by slab: give the executing entity the next entity id");
+        alloc.push(Command::score_add(next.clone(), self.obj.clone(), 1));
+        alloc.push(Command::score_op(me(), id_obj.clone(), ScoreOp::Set, next, self.obj.clone()));
+        self.pack.add_function(self.fn_id("_alloc_id")?, alloc)?;
+
+        let mut fresh = datapack::Function::new();
+        fresh.comment("generated by slab: a new entity gets an id and is marked as ours");
+        fresh.push(Command::call(self.fn_id("_alloc_id")?));
+        fresh.push(Command::Tag { targets: Selector::s(), action: datapack::TagAction::Add(Word::new(&cfg.owned_tag)?) });
+        fresh.push(Command::score_op(new.clone(), self.obj.clone(), ScoreOp::Set, me(), id_obj.clone()));
+        self.pack.add_function(self.fn_id("_new_entity")?, fresh)?;
+
+        let mut ensure = datapack::Function::new();
+        ensure.comment("generated by slab: the executing entity's id, allocated on first use");
+        let has_id = Condition::Score { target: me(), objective: id_obj.clone(), test: ScoreTest::Matches(IntRange::at_least(1)) };
+        ensure.push(Command::execute().unless(has_id).run(Command::call(self.fn_id("_alloc_id")?)));
+        ensure.push(Command::score_op(new, self.obj.clone(), ScoreOp::Set, me(), id_obj));
+        self.pack.add_function(self.fn_id("_ensure_id")?, ensure)?;
+        Ok(())
+    }
+
     /// `<ns>:_uninstall`: removes everything this pack ever created. Pack data cannot detect that
     /// the pack was removed, so cleaning up at the end means running this function (docs/lang/memory.md).
     fn emit_uninstall(&mut self) -> R<()> {
@@ -1754,6 +1833,9 @@ impl<'a> Lower<'a> {
         f.extend(prog.uninstall.iter().cloned());
         for o in &prog.objectives {
             f.push(Command::Scoreboard(Scoreboard::ObjectivesRemove(Objective::new(&o.name)?)));
+        }
+        if let Some(cfg) = prog.entities.as_ref() {
+            f.push(Command::Scoreboard(Scoreboard::ObjectivesRemove(Objective::new(&cfg.objective)?)));
         }
         f.push(Command::Scoreboard(Scoreboard::ObjectivesRemove(self.obj.clone())));
         let remove = |storage: ResourceLocation, key: &str| Command::Data(Data::Remove { target: DataTarget::Storage(storage), path: NbtPath::new().key(key) });

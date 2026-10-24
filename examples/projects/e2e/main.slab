@@ -38,6 +38,16 @@ global r_dyn_index: int = 0;
 global r_dyn_struct: int = 0;
 global r_dyn_loop: int = 0;
 global r_dyn_neg: int = 0;
+global r_ent_distinct: int = 0;
+global r_ent_alive: int = 0;
+global r_ent_after_kill: int = 0;
+global r_ent_stale_tp: int = 0;
+global r_ent_same: int = 0;
+global r_ent_ctx: int = 0;
+global r_ent_score: int = 0;
+global r_ent_list: int = 0;
+global r_ent_fn: int = 0;
+global r_ent_struct: int = 0;
 global r_results: int = 0;
 global r_gone: int = 0;
 global r_entities: int = 0;
@@ -260,6 +270,8 @@ fn world_test() {
         setblock(~, ~2, ~, "minecraft:diamond_block");
     }
 
+    entity_test();
+
     // one owned entity is left alive on purpose: `_uninstall` must remove it
     summon("minecraft:marker", bx, 64, bx);
     // ...and moved with variable coordinates
@@ -291,4 +303,62 @@ fn world_test() {
     // variable effect duration (ticks) and amplifier; nobody is online, but the command must parse
     let secs = 3;
     effect.give(@a, "minecraft:speed", secs * 20, level);
+}
+
+struct Duel {
+    left: entity,
+    right: entity,
+}
+
+fn raise(e: entity, y: int) -> bool {
+    return tp(e, 8, y, 8);
+}
+
+fn spawn_at(x: int) -> entity {
+    return summon("minecraft:marker", x, 64, 8);
+}
+
+// Entity values: a variable holds an entity and acts on it. Run by the harness after world_test.
+fn entity_test() {
+    let a = summon("minecraft:marker", 8, 64, 8);
+    let b = summon("minecraft:marker", 9, 64, 9);
+    if a != b && exists(a) && exists(b) { r_ent_distinct = 1; }
+
+    // act on exactly one of them: only `a` moves
+    raise(a, 90);
+    let mut up = 0;
+    as @e[type=minecraft:marker, x=8.5, y=90, z=8.5, distance=..0.5] { up += 1; }
+    r_ent_alive = up;
+
+    // a selector for one entity gives the same handle again (the id is stable)
+    let again = @e[type=minecraft:marker, x=8.5, y=90, z=8.5, distance=..0.5, limit=1];
+    if again == a { r_ent_same = 1; }
+
+    // handles through a function, a list and a struct
+    let c = spawn_at(12);
+    let hs = [a, b, c];
+    let mut n = 0;
+    for h in hs { if tag.add(h, "listed") { n += 1; } }
+    r_ent_list = n;
+    let duel = Duel { left: a, right: c };
+    r_ent_struct = 0;
+    if exists(duel.left) && exists(duel.right) && duel.left != duel.right { r_ent_struct = 1; }
+    if raise(c, 70) { r_ent_fn = 1; }
+
+    // a context block over a handle, and a score on an entity
+    let mut seen = 0;
+    as b { seen += 1; }
+    r_ent_ctx = seen;
+    pts["#e"] = 0;
+    pts[b] = 5;
+    pts[b] += 3;
+    r_ent_score = pts[b];
+
+    // kill one: its handle goes stale and every action on it fails (catchable)
+    kill(b);
+    if !exists(b) { r_ent_after_kill = 1; }
+    if !tp(b, 0, 70, 0) { r_ent_stale_tp = 1; }
+
+    kill(a);
+    kill(c);
 }

@@ -138,7 +138,7 @@ fn let_inference_and_annotations() {
     one_error(&in_fn("let a: bool = 1; print(a);"), "expected `bool`, found `int`");
     one_error(&in_fn("let x = []; print(x);"), "cannot infer the type of an empty list");
     ok(&in_fn("let x: list<int> = []; print(x);"));
-    one_error(&in_fn("let s = @a; print(1);"), "cannot be stored");
+    one_error(&in_fn("let s = @a; print(1);"), "can match several entities");
     one_error("fn g() {} fn f() { let x = g(); }", "no value to store");
 }
 
@@ -341,7 +341,7 @@ fn selectors_are_validated_and_typed() {
     assert_eq!(e.len(), 2, "{e:?}");
     assert!(e[0].contains("unknown selector argument `tpye`"));
     assert!(e[1].contains("positive integer"));
-    one_error(&in_fn("kill(1);"), "expected `selector`, found `int`");
+    one_error(&in_fn("kill(1);"), "expected a `selector` or an `entity`, found `int`");
     one_error(&in_fn("let n = @s + 1;"), "cannot apply `+`");
 }
 
@@ -366,7 +366,7 @@ fn builtin_const_arguments_accept_constants() {
 
 #[test]
 fn world_acting_builtins_return_whether_they_worked() {
-    ok(&in_fn("let a = tp(@s, 1, 2, 3); let b = kill(@e[tag=x]); let c = tag.add(@s, \"t\"); let d = effect.give(@s, \"speed\", 10s); let e = setblock(1, 2, 3, \"stone\"); let f = summon(\"pig\"); print(a && b && c && d && e && f);"));
+    ok(&in_fn("let a = tp(@s, 1, 2, 3); let b = kill(@e[tag=x]); let c = tag.add(@s, \"t\"); let d = effect.give(@s, \"speed\", 10s); let e = setblock(1, 2, 3, \"stone\"); print(a && b && c && d && e);"));
     ok(&in_fn("if !tp(@s, 0, 70, 0) { print(\"gone\"); } while kill(@e[tag=x]) { }"));
     // ignoring the result is fine and warns about nothing
     assert!(warnings(&in_fn("tp(@s, 1, 2, 3); kill(@s);")).is_empty());
@@ -406,7 +406,7 @@ fn objectives() {
 #[test]
 fn context_blocks() {
     ok(&in_fn("as @a[tag=ready] at @s positioned ~ ~1 ~ rotated 0 90 align xz anchored eyes { say(\"x\"); } in \"minecraft:the_nether\" { } facing 0 64 0 { }"));
-    one_error(&in_fn("as 1 { }"), "expected `selector`, found `int`");
+    one_error(&in_fn("as 1 { }"), "expected a `selector` or an `entity`, found `int`");
     one_error(&in_fn("positioned \"a\" 0 0 { }"), "expected a coordinate");
     one_error(&in_fn("align xx { }"), "invalid axes `xx`");
     one_error(&in_fn("align w { }"), "invalid axes");
@@ -466,7 +466,29 @@ fn bad_types() {
     one_error("fn f(a: list) {}", "`list` takes exactly one type argument");
     one_error("fn f(a: int<str>) {}", "does not take type arguments");
     one_error("struct S { a: list<Nope> }", "unknown type `Nope`");
-    one_error("global g: entity = 0;", "unknown type `entity`");
+    one_error("global g: entity = 0;", "expected `entity`, found `int`");
+}
+
+// ------------------------------------------------------------------ entities
+
+#[test]
+fn entity_values() {
+    // a single-entity selector becomes a handle; `summon` returns one
+    ok(&in_fn("let me = @p; let boss = summon(\"minecraft:zombie\", 1, 64, 2); let e: entity = @s; let n = @n[type=zombie]; let f = @a[limit=1]; print(me); print(boss == e && n != f);"));
+    // handles are values: storable, passable, returnable
+    ok("struct Fight { boss: entity, helpers: list<entity> } fn pick() -> entity { return @r; } fn hit(e: entity) -> bool { return kill(e); } fn f() { let fight = Fight { boss: @p, helpers: [@s, pick()] }; hit(fight.boss); for h in fight.helpers { tp(h, 0, 70, 0); } }");
+    // and usable as a target anywhere a selector is
+    ok(&in_fn("let b = summon(\"minecraft:pig\"); kill(b); tp(b, 1, 2, 3); effect.give(b, \"speed\", 10s); tag.add(b, \"x\"); as b at b { say(\"hi\"); } print(exists(b)); print(tag.has(b, \"x\"));"));
+    ok("objective pts = \"dummy\"; fn f(b: entity) { pts[b] += 1; print(pts[b]); }");
+    // it is its own type
+    one_error(&in_fn("let e: entity = 5; print(e);"), "expected `entity`, found `int`");
+    one_error(&in_fn("let e = @p; let n: int = e; print(n);"), "expected `int`, found `entity`");
+    one_error(&in_fn("let e = @p; let b = e + 1; print(b);"), "cannot apply `+` to `entity` and `int`");
+    // a selector that can match several entities is not one entity
+    one_error(&in_fn("let all: entity = @a; print(all);"), "can match several entities");
+    one_error("fn f(e: entity) {} fn g() { f(@e[type=pig]); }", "can match several entities");
+    // a plain selector value is still not storable
+    one_error(&in_fn("let a = @a[tag=x]; print(1);"), "can match several entities");
 }
 
 // ------------------------------------------------------------------ f-strings

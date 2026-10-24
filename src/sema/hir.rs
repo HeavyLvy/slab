@@ -160,6 +160,8 @@ pub enum ExprKind {
     Local(LocalId),
     Global(GlobalId),
     Selector(Selector),
+    /// The entity handle of a selector literal that matches (at most) one entity.
+    ToEntity(Box<Expr>),
     Rel { kind: RelKind, offset: Option<String> },
     Unary { op: UnOp, expr: Box<Expr> },
     Binary { op: BinOp, lhs: Box<Expr>, rhs: Box<Expr> },

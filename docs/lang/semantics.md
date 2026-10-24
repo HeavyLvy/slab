@@ -14,6 +14,7 @@ slab is statically typed with local inference: every expression has a type known
 | `list<T>` | list of any storable `T` | command storage |
 | `Name` | a `struct`, a compound of storable fields | command storage |
 | `()` | no value (statements, functions without `->`) | - |
+| entity | a reference to one entity (`docs/lang/entities.md`) | scoreboard (an int id) |
 | text | an f-string, `f"x = {x}"` | **not storable**: only `print` accepts it |
 | selector | `@a[...]` literal | **not storable** (expression only) |
 | coordinate | `~`, `~1`, `^2` | **not storable** (expression only) |

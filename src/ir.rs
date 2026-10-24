@@ -83,8 +83,14 @@ pub enum Expr {
     Exists(VarRef, NbtPath),
     /// Int: length of the list/string at `var.path`.
     Len(VarRef, NbtPath),
-    /// Int: a score on a user objective (`scoreboard players get`).
-    PlayerScore { objective: String, holder: ScoreHolder },
+    /// Int: a score on a user objective (`scoreboard players get`). `args` fill holes in `holder`.
+    PlayerScore { objective: String, holder: ScoreHolder, args: Vec<(Hole, Expr)> },
+    /// Int: a handle to the one entity matching the selector, giving it an id on first use; 0 if
+    /// nothing matches. Needs `Program::entities`.
+    EntityOf(Selector),
+    /// Int: runs `command`, which creates an entity and ends in `function <ns>:_new_entity`, and
+    /// gives the handle of the new entity (0 if the command failed). Needs `Program::entities`.
+    NewEntity { command: Box<Command>, args: Vec<(Hole, Expr)> },
     /// Bool: whether any entity matches the selector (`execute if entity`).
     EntityExists(Selector),
     /// Bool: whether the command succeeded (`execute store success`). With `args` the command
@@ -141,7 +147,7 @@ pub enum Stmt {
     PrintParts(Vec<PrintPart>),
     /// Writes a score on a user objective; `op` of `None` assigns, otherwise `score op= value`
     /// (only Add, Sub, Mul, Div and Mod).
-    SetScore { objective: String, holder: ScoreHolder, op: Option<BinOp>, value: Expr },
+    SetScore { objective: String, holder: ScoreHolder, op: Option<BinOp>, value: Expr, args: Vec<(Hole, Expr)> },
     /// Removes the element or field at `target.path` (`data remove`).
     Remove { target: VarRef, path: NbtPath },
     /// Runs `body` under `/execute` modifiers. The body is its own function, so it may run once
@@ -226,6 +232,15 @@ pub struct Global {
     pub init: Expr,
 }
 
+/// Entity handles (an int id stored as a score on the entity). Present when the program uses them.
+#[derive(Clone, Debug, PartialEq)]
+pub struct EntityConfig {
+    /// The objective that holds each entity's id.
+    pub objective: String,
+    /// The tag put on entities the program summons, so `_uninstall` can remove them.
+    pub owned_tag: String,
+}
+
 /// A scoreboard objective the program declares (created on load).
 #[derive(Clone, Debug, PartialEq)]
 pub struct ObjectiveDecl {
@@ -240,6 +255,7 @@ pub struct Program {
     pub namespace: String,
     pub description: String,
     pub objectives: Vec<ObjectiveDecl>,
+    pub entities: Option<EntityConfig>,
     /// Extra commands for the generated `_uninstall` function (kill entities the program
     /// summoned, remove tags it added, ...), run before the compiler removes its own state.
     pub uninstall: Vec<Command>,
@@ -249,7 +265,7 @@ pub struct Program {
 
 impl Program {
     pub fn new(namespace: &str) -> Self {
-        Program { namespace: namespace.to_owned(), description: format!("{namespace} (compiled by slab)"), objectives: Vec::new(), uninstall: Vec::new(), globals: Vec::new(), functions: Vec::new() }
+        Program { namespace: namespace.to_owned(), description: format!("{namespace} (compiled by slab)"), objectives: Vec::new(), entities: None, uninstall: Vec::new(), globals: Vec::new(), functions: Vec::new() }
     }
 
     pub fn global(mut self, name: &str, kind: Kind, init: Expr) -> Self {

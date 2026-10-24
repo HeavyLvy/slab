@@ -72,6 +72,12 @@ Results read back with `scoreboard players get` / `data get` (`--checks`), all 2
 * `execute store success score X run <command>` stores 1 if the command worked and 0 if it failed, for `teleport`, `tag`, `kill` and `setblock`: no matching entity -> 0; `tag add` of a tag the entity already has -> 0 (first time -> 1); `setblock` of the block that is already there -> 0 (a changed block -> 1).
 * A macro function whose only line is `$return run teleport @s $(h0) 64 2`, called as `execute store success score X run function <f> with storage <id>`, stores the teleport's success (1 with a target, 0 without), so `return run` forwards the inner command's success through a macro call.
 
+## Entity ids and single-target arguments (found by running slab output)
+
+* `scoreboard players get @e[scores={obj=7}] t` is a **parse error**: `Only one entity is allowed, but the provided selector allows more than one`. `score_holder{amount=single}` arguments (`get`, `if score`, ...) need a selector that is provably single, so the id selector carries `limit=1` (`@e[scores={obj=7},limit=1]` works). `set`/`add`/`operation` accept the multi-entity form.
+* A macro line that fails to parse at call time is **silent** inside a function: no `Failed to instantiate` in the log and no abort, the command just doesn't run. Only the result (here a score reading 0) reveals it, so selectors built into macro lines must be valid for the argument they are used in.
+* `execute summon <type> run function <f>` runs `<f>` as the new entity; `scoreboard players operation @s <obj> = #counter <main>` inside it gives that entity an id score. Scores on non-player entities are keyed by UUID and disappear with the entity.
+
 ## Harness behaviour worth knowing
 
 * Commands inside functions give **no feedback** to the console, so runtime failures aren't visible; the harness mainly proves *parsing/loading*. To assert runtime behaviour, write functions that `execute store ... score` a result and print it with `say`/`tellraw`, or read it with `scoreboard players get`.

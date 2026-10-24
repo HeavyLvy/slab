@@ -527,6 +527,7 @@ impl<'a> Checker<'a> {
             "int" => no_args(self, Ty::Int),
             "bool" => no_args(self, Ty::Bool),
             "str" => no_args(self, Ty::Str),
+            "entity" => no_args(self, Ty::Entity),
             "list" => {
                 if t.args.len() != 1 {
                     self.error(t.span, "`list` takes exactly one type argument, as in `list<int>`");
@@ -1022,7 +1023,11 @@ impl<'a> Checker<'a> {
         match &s.kind {
             K::Let { name, mutable, ty, init } => {
                 let declared = ty.as_ref().map(|t| self.resolve_ty(t));
-                let value = self.expr(init, declared.as_ref());
+                let mut value = self.expr(init, declared.as_ref());
+                if declared.is_none() && value.ty == Ty::Selector {
+                    // `let me = @p;` holds the entity, not the query
+                    value = self.coerce_to_entity(value);
+                }
                 let ty = match declared {
                     Some(t) => {
                         self.mismatch(value.span, &t, &value.ty);
@@ -1180,9 +1185,13 @@ impl<'a> Checker<'a> {
         Stmt::Context { clauses: out, body }
     }
 
+    /// A target: a selector, or an entity value.
     fn selector_operand(&mut self, e: &'a ast::Expr) -> Expr {
         let h = self.expr(e, None);
-        self.mismatch(h.span, &Ty::Selector, &h.ty);
+        if !matches!(h.ty, Ty::Selector | Ty::Entity | Ty::Error) {
+            let msg = format!("expected a `selector` or an `entity`, found `{}`", self.tn(&h.ty));
+            self.error(h.span, msg);
+        }
         h
     }
 
@@ -1257,7 +1266,32 @@ impl<'a> Checker<'a> {
 
     // ------------------------------------------------------------ expressions
 
+    /// Checks an expression. A selector that matches one entity becomes an entity value wherever an
+    /// `entity` is expected (annotation, argument, return, field, list element, assignment).
     fn expr(&mut self, e: &'a ast::Expr, expected: Option<&Ty>) -> Expr {
+        let h = self.expr_inner(e, expected);
+        if matches!(expected, Some(Ty::Entity)) && h.ty == Ty::Selector {
+            return self.coerce_to_entity(h);
+        }
+        h
+    }
+
+    fn coerce_to_entity(&mut self, h: Expr) -> Expr {
+        match &h.kind {
+            ExprKind::Selector(sel) if sel.is_single() => {
+                let span = h.span;
+                Expr { kind: ExprKind::ToEntity(Box::new(h)), ty: Ty::Entity, span }
+            }
+            ExprKind::Selector(sel) => {
+                let msg = format!("`{sel}` can match several entities, so it cannot be one entity value");
+                self.error_hint(h.span, msg, "use a selector for one entity (`@s`, `@p`, `@r`, `@n`, or `limit=1`), or act on all of them with `as`");
+                Expr::error(h.span)
+            }
+            _ => h,
+        }
+    }
+
+    fn expr_inner(&mut self, e: &'a ast::Expr, expected: Option<&Ty>) -> Expr {
         use ast::ExprKind as K;
         let span = e.span;
         let mk = |kind: ExprKind, ty: Ty| Expr { kind, ty, span };
@@ -1475,8 +1509,8 @@ impl<'a> Checker<'a> {
                 if !poisoned {
                     if l.ty != r.ty {
                         self.bin_error(op, &l.ty, &r.ty, span);
-                    } else if !matches!(l.ty, Ty::Int | Ty::Bool) {
-                        let msg = format!("`{}` on `{}` values is not supported yet (only `int` and `bool`)", op_str(op), self.tn(&l.ty));
+                    } else if !matches!(l.ty, Ty::Int | Ty::Bool | Ty::Entity) {
+                        let msg = format!("`{}` on `{}` values is not supported yet (only `int`, `bool` and `entity`)", op_str(op), self.tn(&l.ty));
                         self.error(span, msg);
                     }
                 }
@@ -1554,7 +1588,7 @@ impl<'a> Checker<'a> {
             if let Some(obj) = objective {
                 {
                     let holder = self.expr(index, None);
-                    if !matches!(holder.ty, Ty::Selector | Ty::Str | Ty::Error) {
+                    if !matches!(holder.ty, Ty::Selector | Ty::Entity | Ty::Str | Ty::Error) {
                         let msg = format!("a score holder is a selector or a name (`str`), found `{}`", self.tn(&holder.ty));
                         self.error(holder.span, msg);
                     }

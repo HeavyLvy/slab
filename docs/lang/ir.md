@@ -70,6 +70,10 @@ A function's Data locals are removed from storage whenever it exits, Data tempor
 
 `execute store success score F if A if B` writes `F` only if the chain reaches its last condition: when `A` fails nothing is stored and `F` keeps its old value (verified on 26.3). The lowering therefore clears `F` first whenever it stores more than one test (`Lower::store_success`); a single trailing test stores its own 0.
 
+## Entity handles
+
+`Expr::EntityOf(selector)` and `Expr::NewEntity { command, args }` give an `Int` handle; `Program::entities` (`EntityConfig { objective, owned_tag }`) makes the lowering create the id objective, the `#next_id` counter and the helpers `_alloc_id`, `_new_entity`, `_ensure_id` (`docs/lang/entities.md`). `PlayerScore` and `SetScore` carry `args` for a holder chosen at run time.
+
 ## Other constructs
 
 `MacroCommand { command, args }` runs a typed command that contains `Hole`s: the values of `args` are stored in `<ns>:macro` and the command, which is the only line of a generated helper function, is called with them (`docs/lang/codegen.md`). `ReadAt` / `WriteAt` do the same for an NBT path with an index hole (`xs[$(h0)]`); `Context` carries `args` for holes in its `execute` clauses; `PrintParts` is a `tellraw` of literal text, `score` and `nbt` components.

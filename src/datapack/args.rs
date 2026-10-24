@@ -584,8 +584,12 @@ impl Selector {
     }
 
     /// The entity whose `objective` score equals the run-time value of `hole`.
+    ///
+    /// `limit=1` is part of it: the id is unique so it changes nothing, it lets the game stop
+    /// searching at the first hit, and Minecraft refuses a selector that "allows more than one"
+    /// entity in single-target arguments such as `scoreboard players get`.
     pub fn entity_id(objective: Objective, hole: Hole) -> Self {
-        Selector::e().arg(SelectorArg::EntityId { objective, hole })
+        Selector::e().arg(SelectorArg::EntityId { objective, hole }).limit(1)
     }
 
     pub fn score(self, objective: Objective, range: IntRange) -> Self {
@@ -804,7 +808,7 @@ mod tests {
     #[test]
     fn entity_id_selectors() {
         let s = Selector::entity_id(word("ns_id"), Hole(0)).tag(word("mine"));
-        assert_eq!(s.to_string(), "@e[scores={ns_id=$(h0)},tag=mine]");
+        assert_eq!(s.to_string(), "@e[scores={ns_id=$(h0)},limit=1,tag=mine]");
         assert!(s.is_single(), "an id matches at most one entity");
         assert!(s.check().is_ok());
         // it uses the `scores` option, which may appear only once

@@ -25,6 +25,8 @@ pub enum BParam {
 pub enum BRet {
     Unit,
     Bool,
+    /// A handle to the entity the builtin created (`summon`).
+    Entity,
 }
 
 impl BRet {
@@ -32,6 +34,7 @@ impl BRet {
         match self {
             BRet::Unit => Ty::Unit,
             BRet::Bool => Ty::Bool,
+            BRet::Entity => Ty::Entity,
         }
     }
 }
@@ -58,7 +61,7 @@ pub const BUILTINS: &[Builtin] = &[
     Builtin { name: "effect.clear", params: &[Selector], min_args: 1, ret: BRet::Bool },
     Builtin { name: "tp", params: &[Selector, Coord, Coord, Coord], min_args: 4, ret: BRet::Bool },
     Builtin { name: "setblock", params: &[Coord, Coord, Coord, ConstStr], min_args: 4, ret: BRet::Bool },
-    Builtin { name: "summon", params: &[ConstStr, Coord, Coord, Coord], min_args: 1, ret: BRet::Bool },
+    Builtin { name: "summon", params: &[ConstStr, Coord, Coord, Coord], min_args: 1, ret: BRet::Entity },
 ];
 
 /// Names that act as a namespace for builtins (`effect.give`, `tag.add`).
