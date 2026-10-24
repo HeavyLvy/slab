@@ -56,9 +56,12 @@ Limits worth knowing: no floats, no string concatenation (f-strings can only be 
 ## Editor support
 
 ```
-cargo build --release           # builds slab (compiler) and slab-lsp (language server)
+cargo install --path crates/slab-lsp   # the language server, globally (also `--path .` for the compiler)
 code --install-extension editors/vscode/slab-vscode-0.1.0.vsix   # after `npm run vsix` once (editors/vscode)
 ```
+
+Alternatively build locally with `cargo build --release`; the extension looks for the server
+at `slab.server.path`, then `<workspace>/target/release/slab-lsp`, then PATH.
 
 The VS Code extension highlights `.slab` files immediately (TextMate grammar) and, with
 `slab-lsp` on hand, adds live errors and warnings from the real compiler, hover with types
