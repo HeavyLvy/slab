@@ -5,6 +5,14 @@ use crate::diag::{Diagnostic, Span};
 
 type R<T> = Result<T, Diagnostic>;
 
+/// The selector variables that may follow `@` (`Tok::Selector { var }`), in the order the
+/// language documents them.
+pub const SELECTOR_VARS: &[char] = &['a', 'e', 'p', 'r', 's', 'n'];
+/// Suffixes on integer literals that make them time literals: ticks, seconds, days.
+pub const TIME_SUFFIXES: &[char] = &['t', 's', 'd'];
+/// How many ticks each time suffix stands for, in the order of [`TIME_SUFFIXES`].
+pub const TIME_MULTIPLIERS: &[i64] = &[1, 20, 24000];
+
 struct Lexer<'a> {
     src: &'a str,
     pos: usize,
@@ -220,11 +228,7 @@ impl Lexer<'_> {
         if let Some(unit @ ('t' | 's' | 'd')) = self.peek()
             && !self.peek_n(1).is_some_and(is_ident_char) {
                 self.bump();
-                let mult = match unit {
-                    't' => 1,
-                    's' => 20,
-                    _ => 24000,
-                };
+                let mult = TIME_SUFFIXES.iter().position(|&s| s == unit).map_or(1, |i| TIME_MULTIPLIERS[i]);
                 value = match value.checked_mul(mult) {
                     Some(v) => v,
                     None => return self.err("time literal is too large", start),
@@ -336,8 +340,11 @@ impl Lexer<'_> {
 
     fn selector(&mut self, start: usize) -> R<Tok> {
         let var = match self.peek() {
-            Some(c @ ('p' | 'r' | 'a' | 'e' | 's' | 'n')) => c,
-            _ => return self.err("expected a selector variable after `@` (one of p, r, a, e, s, n)", start),
+            Some(c) if SELECTOR_VARS.contains(&c) => c,
+            _ => {
+                let list = SELECTOR_VARS.iter().map(|c| c.to_string()).collect::<Vec<_>>().join(", ");
+                return self.err(format!("expected a selector variable after `@` (one of {list})"), start);
+            }
         };
         self.bump();
         if self.peek().is_some_and(is_ident_char) {

@@ -47,23 +47,41 @@ pub struct Builtin {
     /// Trailing parameters beyond this count are optional.
     pub min_args: usize,
     pub ret: BRet,
+    /// One-line human description, shown on hover by the language server.
+    pub docs: &'static str,
+}
+
+impl BParam {
+    /// The generic parameter name used when displaying a signature
+    /// (`tp(selector, coord, coord, coord)`).
+    pub fn label(self) -> &'static str {
+        match self {
+            Printable => "value",
+            ConstStr => "const str",
+            Str => "str",
+            ConstInt => "const int",
+            Int => "int",
+            Selector => "selector",
+            Coord => "coord",
+        }
+    }
 }
 
 use BParam::*;
 
 pub const BUILTINS: &[Builtin] = &[
-    Builtin { name: "print", params: &[Printable], min_args: 1, ret: BRet::Unit },
-    Builtin { name: "say", params: &[Str], min_args: 1, ret: BRet::Unit },
-    Builtin { name: "kill", params: &[Selector], min_args: 1, ret: BRet::Bool },
-    Builtin { name: "exists", params: &[Selector], min_args: 1, ret: BRet::Bool },
-    Builtin { name: "tag.add", params: &[Selector, Str], min_args: 2, ret: BRet::Bool },
-    Builtin { name: "tag.remove", params: &[Selector, Str], min_args: 2, ret: BRet::Bool },
-    Builtin { name: "tag.has", params: &[Selector, ConstStr], min_args: 2, ret: BRet::Bool },
-    Builtin { name: "effect.give", params: &[Selector, Str, Int, Int], min_args: 2, ret: BRet::Bool },
-    Builtin { name: "effect.clear", params: &[Selector], min_args: 1, ret: BRet::Bool },
-    Builtin { name: "tp", params: &[Selector, Coord, Coord, Coord], min_args: 4, ret: BRet::Bool },
-    Builtin { name: "setblock", params: &[Coord, Coord, Coord, Str], min_args: 4, ret: BRet::Bool },
-    Builtin { name: "summon", params: &[Str, Coord, Coord, Coord], min_args: 1, ret: BRet::Entity },
+    Builtin { name: "print", params: &[Printable], min_args: 1, ret: BRet::Unit, docs: "Show a message to every player via `tellraw` with text components; accepts any number of values." },
+    Builtin { name: "say", params: &[Str], min_args: 1, ret: BRet::Unit, docs: "Show a raw chat message as if typed by the server." },
+    Builtin { name: "kill", params: &[Selector], min_args: 1, ret: BRet::Bool, docs: "Kill the entities matching the selector; true when anything was killed." },
+    Builtin { name: "exists", params: &[Selector], min_args: 1, ret: BRet::Bool, docs: "Whether the selector matches at least one entity right now." },
+    Builtin { name: "tag.add", params: &[Selector, Str], min_args: 2, ret: BRet::Bool, docs: "Add a tag to the matching entities; true when anything was tagged." },
+    Builtin { name: "tag.remove", params: &[Selector, Str], min_args: 2, ret: BRet::Bool, docs: "Remove a tag from the matching entities; true when anything was untagged." },
+    Builtin { name: "tag.has", params: &[Selector, ConstStr], min_args: 2, ret: BRet::Bool, docs: "Whether every matching entity carries the tag." },
+    Builtin { name: "effect.give", params: &[Selector, Str, Int, Int], min_args: 2, ret: BRet::Bool, docs: "Give an effect to the matching entities: duration and amplifier, both in ticks." },
+    Builtin { name: "effect.clear", params: &[Selector], min_args: 1, ret: BRet::Bool, docs: "Clear (all or the named, if given) effects from the matching entities." },
+    Builtin { name: "tp", params: &[Selector, Coord, Coord, Coord], min_args: 4, ret: BRet::Bool, docs: "Teleport the matching entities to the coordinates; true when it happened." },
+    Builtin { name: "setblock", params: &[Coord, Coord, Coord, Str], min_args: 4, ret: BRet::Bool, docs: "Place a block at the coordinates; true when the block was set." },
+    Builtin { name: "summon", params: &[Str, Coord, Coord, Coord], min_args: 1, ret: BRet::Entity, docs: "Summon an entity at the coordinates and yield a handle to it." },
 ];
 
 /// Names that act as a namespace for builtins (`effect.give`, `tag.add`).

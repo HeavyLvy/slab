@@ -6,7 +6,7 @@ pub mod hir;
 mod selector;
 pub mod ty;
 
-pub use check::{Checked, ModuleInput, Report, check, check_modules};
+pub use check::{Checked, ModuleInput, Report, Tolerant, check, check_modules, check_modules_tolerant};
 
 #[cfg(test)]
 mod tests;

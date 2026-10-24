@@ -96,6 +96,64 @@ impl Kw {
             Kw::Import => "import",
         }
     }
+
+    /// Every keyword, in declaration order. Tools that spell out the language's words
+    /// (highlighting, completion) take it from here so they cannot go stale.
+    pub const ALL: &'static [Kw] = &[
+        Kw::Fn,
+        Kw::Let,
+        Kw::Mut,
+        Kw::If,
+        Kw::Else,
+        Kw::While,
+        Kw::Loop,
+        Kw::For,
+        Kw::In,
+        Kw::Return,
+        Kw::Break,
+        Kw::Continue,
+        Kw::Struct,
+        Kw::Global,
+        Kw::Const,
+        Kw::Objective,
+        Kw::True,
+        Kw::False,
+        Kw::As,
+        Kw::At,
+        Kw::Positioned,
+        Kw::Rotated,
+        Kw::Facing,
+        Kw::Align,
+        Kw::Anchored,
+        Kw::Pub,
+        Kw::Import,
+    ];
+
+    /// The broad role of a keyword: how highlighting scopes and completion group it.
+    pub fn class(self) -> KwClass {
+        match self {
+            Kw::Fn | Kw::Let | Kw::Struct | Kw::Global | Kw::Const | Kw::Objective | Kw::Import | Kw::Pub => KwClass::Declaration,
+            Kw::If | Kw::Else | Kw::While | Kw::Loop | Kw::For | Kw::In | Kw::Return | Kw::Break | Kw::Continue => KwClass::Control,
+            Kw::Mut => KwClass::Modifier,
+            Kw::As | Kw::At | Kw::Positioned | Kw::Rotated | Kw::Facing | Kw::Align | Kw::Anchored => KwClass::Context,
+            Kw::True | Kw::False => KwClass::Literal,
+        }
+    }
+}
+
+/// The role of a keyword; see [`Kw::class`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum KwClass {
+    /// Starts an item: `fn let struct global const objective import pub`.
+    Declaration,
+    /// Control flow: `if else while loop for in return break continue`.
+    Control,
+    /// Changes how a declaration works: `mut`.
+    Modifier,
+    /// Execute-style context: `as at positioned rotated facing align anchored`.
+    Context,
+    /// Values of type `bool`: `true false`.
+    Literal,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -231,4 +289,16 @@ impl Tok {
 pub struct Token {
     pub tok: Tok,
     pub span: Span,
+}
+
+/// Every operator spelling, longest first: editors' grammar generators iterate these.
+pub fn operator_texts() -> Vec<&'static str> {
+    use Tok::*;
+    let toks = [
+        Eq, EqEq, NotEq, Lt, Le, Gt, Ge, Plus, Minus, Star, Slash, Percent, PlusEq, MinusEq, StarEq, SlashEq,
+        PercentEq, AndAnd, OrOr, Arrow, DotDot, DotDotEq, Bang,
+    ];
+    let mut texts: Vec<&'static str> = toks.iter().map(|t| t.punct()).collect();
+    texts.sort_by_key(|t| std::cmp::Reverse(t.len()));
+    texts
 }

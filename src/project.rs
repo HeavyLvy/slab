@@ -62,7 +62,30 @@ pub fn module_file(root: &Path, path: &[&str]) -> PathBuf {
     p
 }
 
+/// In-memory replacements for files on disk: the language server puts buffers that are still
+/// being edited here so checks see unsaved text. Keys are the exact paths `load_with`/`load_tolerant`
+/// visit (absolute, as built from the project root).
+pub type Overlay = HashMap<PathBuf, String>;
+
 pub fn load(root_file: &Path) -> Result<Project, LoadError> {
+    load_inner(root_file, &Overlay::default(), false).map(|(p, _)| p)
+}
+
+pub fn load_with(root_file: &Path, overlay: &Overlay) -> Result<Project, LoadError> {
+    load_inner(root_file, overlay, false).map(|(p, _)| p)
+}
+
+/// Like [`load_with`] but never bails entirely: what could be loaded, plus every diagnostic
+/// from broken files and imports. The language server drives this; the strict [`load`] stays
+/// the compiler's own path.
+pub fn load_tolerant(root_file: &Path, overlay: &Overlay) -> Result<(Project, Vec<Diagnostic>), String> {
+    load_inner(root_file, overlay, true).map_err(|e| match e {
+        LoadError::Io(m) => m,
+        LoadError::Invalid { .. } => "unreachable".to_owned(),
+    })
+}
+
+fn load_inner(root_file: &Path, overlay: &Overlay, tolerant: bool) -> Result<(Project, Vec<Diagnostic>), LoadError> {
     let root = root_file.parent().map(Path::to_path_buf).unwrap_or_default();
     let mut sources = SourceMap::default();
     let mut diagnostics: Vec<Diagnostic> = Vec::new();
@@ -74,7 +97,16 @@ pub fn load(root_file: &Path) -> Result<Project, LoadError> {
     loaded.insert("main".to_owned(), 0);
 
     while let Some((name, path)) = queue.pop_front() {
-        let text = std::fs::read_to_string(&path).map_err(|e| LoadError::Io(format!("cannot read {}: {e}", path.display())))?;
+        let text = match overlay.get(&path) {
+            Some(t) => t.clone(),
+            None => std::fs::read_to_string(&path).map_err(|e| {
+                if path == root_file {
+                    LoadError::Io(format!("cannot read {ROOT_FILE}: {e}"))
+                } else {
+                    LoadError::Io(format!("cannot read {}: {e}", path.display()))
+                }
+            })?,
+        };
         let file = sources.add(SourceFile::new(path.display().to_string(), text));
         let program = match parse(&sources.files[file].text) {
             Ok(p) => p,
@@ -110,8 +142,8 @@ pub fn load(root_file: &Path) -> Result<Project, LoadError> {
         modules.push(Module { name, file, program });
     }
 
-    if diagnostics.is_empty() {
-        Ok(Project { root, sources, modules })
+    if tolerant || diagnostics.is_empty() {
+        Ok((Project { root, sources, modules }, diagnostics))
     } else {
         Err(LoadError::Invalid { sources, diagnostics })
     }
@@ -162,6 +194,18 @@ mod tests {
         assert_eq!(names(&p), ["main", "util", "game::arena"]);
         assert_eq!(p.sources.files.len(), 3);
         assert!(p.sources.files[2].name.ends_with("arena.slab"));
+    }
+
+    #[test]
+    fn overlay_replaces_the_file_on_disk() {
+        let d = Dir::new("overlay", &[("main.slab", "import util; fn main() {}"), ("util.slab", "pub fn f() {}")]);
+        let mut overlay = Overlay::default();
+        overlay.insert(d.0.join("util.slab"), "pub fn g() {}".to_owned());
+        let p = load_with(&d.0.join("main.slab"), &overlay).ok().expect("loads");
+        // the overlay has the new function and no longer `f`
+        assert!(p.sources.files[1].text.contains("fn g"), "{}", p.sources.files[1].text);
+        assert!(!p.modules[1].program.items.iter().any(|i| matches!(i.kind, ItemKind::Fn(ref f) if f.name.name == "f")));
+        assert_eq!(p.modules[1].program.items.len(), 1);
     }
 
     #[test]

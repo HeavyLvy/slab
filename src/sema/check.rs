@@ -43,6 +43,27 @@ pub fn check_modules(modules: &[ModuleInput]) -> Result<Checked, Report> {
     c.finish()
 }
 
+/// The result of [`check_modules_tolerant`]: everything the checker found, including whatever
+/// HIR could be built even though the program has errors. The language server drives this: an
+/// editor is often *between* states, and hover and completion should still work. Ids may be
+/// missing from the HIR (`.get(id.0)`), and expressions can be `ExprKind::Error`; the regular
+/// pipeline is unaffected.
+pub struct Tolerant {
+    pub hir: Option<Hir>,
+    pub errors: Vec<Diagnostic>,
+    pub warnings: Vec<Diagnostic>,
+}
+
+/// [`check_modules`] without the all-or-nothing contract.
+pub fn check_modules_tolerant(modules: &[ModuleInput]) -> Tolerant {
+    let mut c = Checker::new(modules);
+    c.run();
+    let key = |d: &Diagnostic| (d.file, d.span.start);
+    c.errors.sort_by_key(key);
+    c.warnings.sort_by_key(key);
+    Tolerant { hir: Some(c.build_hir()), errors: c.errors, warnings: c.warnings }
+}
+
 // ------------------------------------------------------------------- symbols
 
 #[derive(Clone, Copy)]
@@ -213,15 +234,18 @@ impl<'a> Checker<'a> {
         if !self.errors.is_empty() {
             return Err(Report { errors: self.errors, warnings: self.warnings });
         }
-        let hir = Hir {
+        Ok(Checked { hir: self.build_hir(), warnings: self.warnings })
+    }
+
+    fn build_hir(&mut self) -> Hir {
+        Hir {
             modules: self.mods.iter().map(|m| m.name.clone()).collect(),
             files: self.mods.iter().map(|m| m.file).collect(),
             structs: self.structs.iter().map(|s| StructDef { name: s.name.clone(), module: s.module, fields: s.fields.clone() }).collect(),
-            globals: self.globals,
-            objectives: self.objectives,
-            fns: self.hir_fns,
-        };
-        Ok(Checked { hir, warnings: self.warnings })
+            globals: self.globals.clone(),
+            objectives: self.objectives.clone(),
+            fns: self.hir_fns.clone(),
+        }
     }
 
     // ------------------------------------------------------------ name lookup
@@ -1559,7 +1583,9 @@ impl<'a> Checker<'a> {
                 None => {
                     let msg = format!("struct `{}` has no field `{}`", self.structs[id.0].name, name.name);
                     self.error(name.span, msg);
-                    Expr::error(span)
+                    // The base keeps its type, so a language server can offer field
+                    // completions for it; lowering never runs while an error exists.
+                    Expr { kind: ExprKind::Field { base: Box::new(b), index: usize::MAX, name: name.name.clone() }, ty: Ty::Error, span }
                 }
             },
             Ty::Error => Expr::error(span),
