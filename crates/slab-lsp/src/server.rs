@@ -30,8 +30,11 @@ pub fn run() -> ExitCode {
 }
 
 fn serve(connection: &Connection) -> Result<(), String> {
+    // Negotiate the position encoding the client offered (LSP default: UTF-16).
+    let (id, client_params) = connection.initialize_start().map_err(|e| e.to_string())?;
+    let enc = position_encoding(&client_params);
     let capabilities = json!({
-        "positionEncoding": "utf-8",
+        "positionEncoding": match enc { crate::lines::Enc::Utf8 => "utf-8", crate::lines::Enc::Utf16 => "utf-16" },
         "textDocumentSync": { "openClose": true, "change": 1 },
         "hoverProvider": true,
         "definitionProvider": true,
@@ -45,9 +48,12 @@ fn serve(connection: &Connection) -> Result<(), String> {
             "full": true,
         },
     });
-    connection.initialize(capabilities).map_err(|e| e.to_string())?;
+    connection
+        .initialize_finish(id, json!({ "capabilities": capabilities, "serverInfo": { "name": "slab-lsp", "version": env!("CARGO_PKG_VERSION") } }))
+        .map_err(|e| e.to_string())?;
 
     let mut ws = Workspace::default();
+    ws.enc = enc;
     for msg in &connection.receiver {
         match msg {
             Message::Request(ref request) => {
@@ -93,6 +99,15 @@ fn serve(connection: &Connection) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+/// The encoding to use: UTF-8 when the client offered it, otherwise the protocol's default.
+fn position_encoding(client_params: &Value) -> crate::lines::Enc {
+    let offered = client_params.pointer("/general/positionEncodings").and_then(Value::as_array);
+    match offered {
+        Some(list) if list.iter().any(|v| v.as_str() == Some("utf-8")) => crate::lines::Enc::Utf8,
+        _ => crate::lines::Enc::Utf16,
+    }
 }
 
 // ------------------------------------------------------------------ notifications
@@ -146,7 +161,7 @@ fn publish(connection: &Connection, publishes: Vec<crate::state::Publish>) {
 // ------------------------------------------------------------------ requests
 
 /// The (project, document, module) a request points at, when the project and module resolve.
-fn ctx<'a, 'b>(ws: &'a Workspace, params: &'b Value) -> Option<(&'a crate::state::ProjectState, &'a crate::state::Doc, usize)> {
+fn ctx<'a>(ws: &'a Workspace, params: &Value) -> Option<(&'a crate::state::ProjectState, &'a crate::state::Doc, usize)> {
     let uri = param_uri(params)?;
     let (state, doc, module) = ws.locate(uri)?;
     Some((state, doc, module?))
@@ -154,17 +169,19 @@ fn ctx<'a, 'b>(ws: &'a Workspace, params: &'b Value) -> Option<(&'a crate::state
 
 fn hover(ws: &Workspace, params: &Value) -> Value {
     let Some((state, doc, module)) = ctx(ws, params) else { return Value::Null };
-    let Some(offset) = param_position(params).and_then(|p| doc.lines.offset(&doc.text, p)) else { return Value::Null };
+    let Some(offset) =
+        param_position(params).and_then(|p| doc.lines.offset(&doc.text, p, ws.enc))
+    else { return Value::Null };
     let Some(md) = state.hover(module, offset) else { return Value::Null };
     json!({ "contents": { "kind": "markdown", "value": md } })
 }
 
 fn definition(ws: &Workspace, params: &Value) -> Value {
     let Some((state, doc, module)) = ctx(ws, params) else { return Value::Null };
-    let Some(offset) = param_position(params).and_then(|p| doc.lines.offset(&doc.text, p)) else { return Value::Null };
+    let Some(offset) = param_position(params).and_then(|p| doc.lines.offset(&doc.text, p, ws.enc)) else { return Value::Null };
     let Some(def) = state.goto_definition(module, offset) else { return Value::Null };
     let text = &state.sources.files[def.file_idx].text;
-    let range = state.lines[def.file_idx].range(text, def.span);
+    let range = state.lines[def.file_idx].range(text, def.span, ws.enc);
     let uri = path_to_uri(std::path::Path::new(state.sources.files[def.file_idx].name.as_str()));
     json!([{ "uri": uri, "range": range_value(range) }])
 }
@@ -174,7 +191,7 @@ fn completion_response(ws: &Workspace, params: &Value) -> Value {
     let Some(pos) = param_position(params) else { return Value::Null };
     // The offset is built from the document the client has (== our overlay).
     let Some((_state, doc, _module)) = ws.locate(uri) else { return Value::Null };
-    let Some(offset) = doc.lines.offset(&doc.text, pos) else { return Value::Null };
+    let Some(offset) = doc.lines.offset(&doc.text, pos, ws.enc) else { return Value::Null };
     let Some(items) = completion::completions(ws, uri, offset) else { return Value::Null };
     let json_items: Vec<Value> = items
         .into_iter()
@@ -213,7 +230,7 @@ fn document_symbols(ws: &Workspace, params: &Value) -> Value {
         }
         o
     }
-    json!(symbols::document_symbols(state, module).iter().map(build).collect::<Vec<_>>())
+    json!(symbols::document_symbols(state, module, ws.enc).iter().map(build).collect::<Vec<_>>())
 }
 
 fn semantic_tokens(ws: &Workspace, params: &Value) -> Value {
@@ -223,12 +240,16 @@ fn semantic_tokens(ws: &Workspace, params: &Value) -> Value {
     let mut data: Vec<u64> = Vec::with_capacity(found.len() * 5);
     let mut prev = Position { line: 0, character: 0 };
     for t in found {
-        let start = doc.lines.position(&doc.text, t.start);
+        let start = doc.lines.position(&doc.text, t.start, ws.enc);
         let delta_line = start.line - prev.line;
         let delta_char = if delta_line == 0 { start.character - prev.character } else { start.character };
-        // Token length in characters (the negotiated encoding).
+        // Token length in the negotiated encoding.
         let text = &doc.text[t.start..(t.start + t.len).min(doc.text.len())];
-        data.extend([delta_line as u64, delta_char as u64, text.chars().count() as u64, t.ty.index() as u64, t.mods as u64]);
+        let len = match ws.enc {
+            crate::lines::Enc::Utf8 => text.chars().count(),
+            crate::lines::Enc::Utf16 => text.encode_utf16().count(),
+        };
+        data.extend([delta_line as u64, delta_char as u64, len as u64, t.ty.index() as u64, t.mods as u64]);
         prev = start;
     }
     json!({ "data": data })

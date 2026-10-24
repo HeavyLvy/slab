@@ -36,11 +36,11 @@ fn grammar(target: Option<&str>) -> ExitCode {
     } else {
         target.join("slab.tmLanguage.json")
     };
-    if let Some(parent) = file.parent() {
-        if let Err(e) = std::fs::create_dir_all(parent) {
-            eprintln!("error: cannot create {}: {e}", parent.display());
-            return ExitCode::from(1);
-        }
+    if let Some(parent) = file.parent()
+        && let Err(e) = std::fs::create_dir_all(parent)
+    {
+        eprintln!("error: cannot create {}: {e}", parent.display());
+        return ExitCode::from(1);
     }
     let text = format!("{}\n", crate::grammar::tm_language_text());
     if let Err(e) = std::fs::write(&file, &text) {

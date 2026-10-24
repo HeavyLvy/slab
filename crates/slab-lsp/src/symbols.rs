@@ -5,7 +5,7 @@
 use slab::syntax::ast::ItemKind;
 
 use crate::defs::DefKind;
-use crate::lines::Range;
+use crate::lines::{Enc, Range};
 use crate::state::ProjectState;
 
 /// An outline entry (LSP `DocumentSymbol`).
@@ -20,10 +20,11 @@ pub struct Symbol {
     pub children: Vec<Symbol>,
 }
 
-pub fn document_symbols(state: &ProjectState, module: usize) -> Vec<Symbol> {
+pub fn document_symbols(state: &ProjectState, module: usize, enc: Enc) -> Vec<Symbol> {
     let Some(m) = state.modules.get(module) else { return Vec::new() };
     let text = &state.sources.files[m.file_idx].text;
     let lines = &state.lines[m.file_idx];
+    let span_range = |span: slab::diag::Span| lines.range(text, span, enc);
     let mut out = Vec::new();
     for (item, def) in m.program.items.iter().zip(m.defs.defs()) {
         let kind = match def.kind {
@@ -38,8 +39,8 @@ pub fn document_symbols(state: &ProjectState, module: usize) -> Vec<Symbol> {
             name: def.name.clone(),
             kind,
             detail: (!def.detail.is_empty()).then(|| def.detail.clone()),
-            range: lines.range(text, item.span),
-            selection: lines.range(text, def.name_span),
+            range: span_range(item.span),
+            selection: span_range(def.name_span),
             children: Vec::new(),
         };
         if let ItemKind::Struct(s) = &item.kind {
@@ -48,7 +49,7 @@ pub fn document_symbols(state: &ProjectState, module: usize) -> Vec<Symbol> {
                 .iter()
                 .zip(&def.fields)
                 .map(|(p, (_n, t))| {
-                    let r = lines.range(text, p.name.span);
+                    let r = span_range(p.name.span);
                     Symbol { name: p.name.name.clone(), kind: 7, detail: Some(t.clone()), range: r, selection: r, children: Vec::new() }
                 })
                 .collect();

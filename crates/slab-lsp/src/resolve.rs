@@ -145,7 +145,7 @@ impl ProjectState {
         let own_file = self.modules[module].file_idx;
 
         // Locals/parameters declared in the function containing the cursor, before it.
-        for span in local_decls(program, &hit.name, offset) {
+        if let Some(span) = local_decls(program, &hit.name, offset).into_iter().next() {
             return Some(Definition { file_idx: own_file, span });
         }
         // Own module items.
@@ -363,7 +363,7 @@ impl ProjectState {
                 Some(format!("```slab\n{raw}\n```\n{} — usable where a selector is expected", ty(&ctx.expr.ty)))
             }
             HirKind::Field { index, .. } => {
-                let (mi, def, i) = self.field_decl(hir, &ctx, *index)?;
+                let (mi, def, i) = self.field_decl(hir, ctx, *index)?;
                 let (n, t) = &def.fields[i];
                 let _ = mi;
                 Some(format!("```slab\n{n}: {t}\n```\nfield of `struct {}`", def.name))
@@ -497,7 +497,7 @@ fn local_decls(program: &ast::Program, name: &str, offset: usize) -> Vec<Span> {
         }
     }
     out.sort_by_key(|s| s.start);
-    out.iter().rev().filter(|s| (s.start as usize) < offset).map(|s| *s).collect()
+    out.iter().rev().filter(|s| (s.start as usize) < offset).copied().collect()
 }
 
 /// `#[load]` / `#[tick]` / `#[every(N)]` labels.
@@ -539,12 +539,11 @@ impl LocalWalker<'_> {
             ast::StmtKind::If { cond, then, els } => {
                 self.expr(cond);
                 self.block(then);
-                match els {
-                    Some(boxed) => match &**boxed {
+                if let Some(boxed) = els {
+                    match &**boxed {
                         ast::Else::Block(b) => self.block(b),
                         ast::Else::If(inner) => self.stmt(inner),
-                    },
-                    None => {}
+                    }
                 }
             }
             ast::StmtKind::While { cond, body } => {

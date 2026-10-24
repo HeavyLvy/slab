@@ -3,7 +3,7 @@
 
 use std::path::PathBuf;
 
-use slab_lsp::lines::LineIndex;
+use slab_lsp::lines::{Enc, LineIndex};
 use slab_lsp::state::Workspace;
 use slab_lsp::{analysis, completion, state, symbols, tokens};
 
@@ -55,7 +55,7 @@ fn project_diagnostics_and_symbols() {
 
     let (state, _doc, module) = ws.locate(&uri).expect("located");
     assert_eq!(module, Some(0));
-    let symbols = symbols::document_symbols(state, module.unwrap());
+    let symbols = symbols::document_symbols(state, module.unwrap(), Enc::Utf16);
     let names: Vec<&str> = symbols.iter().map(|s| s.name.as_str()).collect();
     assert_eq!(names, ["util", "Point", "ticks", "boot"]);
     let boot = symbols.iter().find(|s| s.name == "boot").unwrap();
@@ -99,14 +99,14 @@ fn goto_definition_across_modules() {
     let target_name = state.sources.files[target_file].name.clone();
     let target_text = state.sources.files[target_file].text.clone();
     assert!(target_name.ends_with("util.slab"));
-    let range = LineIndex::new(&target_text).position(&target_text, def.span.start as usize);
+    let range = LineIndex::new(&target_text).position(&target_text, def.span.start as usize, Enc::Utf8);
     assert_eq!((range.line, range.character), (0, 7), "the `clamp` declaration in util.slab (after `pub fn `)");
 
     // a local: `p` in `let p = Point { .. }`
     let at = text.find("p.x").unwrap();
     let def = state.goto_definition(module, at).expect("resolves");
     assert_eq!(def.file_idx, state.modules[module].file_idx);
-    let line = LineIndex::new(text).position(text, def.span.start as usize);
+    let line = LineIndex::new(text).position(text, def.span.start as usize, Enc::Utf8);
     assert_eq!(line.line, 8, "the `let p` line");
 
     // a type name: `Point` in the literal
@@ -244,8 +244,8 @@ fn line_positions_round_trip_on_the_examples() {
     for file in [examples().join("projects/e2e/main.slab"), examples().join("projects/e2e/mathx.slab")] {
         let text = std::fs::read_to_string(&file).unwrap();
         let idx = LineIndex::new(&text);
-        let p = idx.position(&text, text.len() / 2);
-        let back = idx.offset(&text, p).unwrap();
+        let p = idx.position(&text, text.len() / 2, Enc::Utf8);
+        let back = idx.offset(&text, p, Enc::Utf8).unwrap();
         assert!(back >= text.len() / 2 - 4 && back <= text.len() / 2 + 4);
     }
 }
@@ -260,7 +260,7 @@ fn the_examples_parse_and_the_e2e_project_checks() {
     let messages: Vec<String> = publishes.iter().flat_map(|p| p.diagnostics.iter().map(|d| d.message.clone())).collect();
     assert!(messages.is_empty(), "{messages:?}");
     let (state, _doc, module) = ws.locate(&uri).unwrap();
-    let symbols = symbols::document_symbols(state, module.unwrap());
+    let symbols = symbols::document_symbols(state, module.unwrap(), Enc::Utf16);
     assert!(!symbols.is_empty());
     // and analysis at every identifier position never panics
     let (state, doc, module) = ws.locate(&uri).unwrap();

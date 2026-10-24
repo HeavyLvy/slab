@@ -11,7 +11,7 @@ use slab::sema::{self, ModuleInput};
 use slab::syntax::ast;
 
 use crate::defs::DefIndex;
-use crate::lines::LineIndex;
+use crate::lines::{Enc, LineIndex};
 
 pub struct Doc {
     pub uri: String,
@@ -88,10 +88,13 @@ pub fn lsp_severity(d: &Diagnostic) -> u8 {
     }
 }
 
+/// The workspace: open documents with their overlay texts, and one analysis per project.
 #[derive(Default)]
 pub struct Workspace {
     docs: HashMap<String, Doc>,
     projects: HashMap<PathBuf, ProjectState>,
+    /// The negotiated position encoding; set once after `initialize`.
+    pub enc: Enc,
 }
 
 impl Workspace {
@@ -150,7 +153,7 @@ impl Workspace {
                 let lines = LineIndex::new(&text);
                 self.docs.insert(uri.to_owned(), Doc { uri: uri.to_owned(), path, text, version, lines });
                 let built = build_project(key.clone(), &root_file, standalone, &self.docs);
-                let publishes = publishes_for(&built, &self.docs);
+                let publishes = publishes_for(&built, &self.docs, self.enc);
                 self.projects.insert(key, built);
                 publishes
             }
@@ -162,7 +165,7 @@ impl Workspace {
                 } else {
                     // The file is back to its on-disk text; rebuild so the others stay fresh.
                     let built = build_project(key.clone(), &root_file, standalone, &self.docs);
-                    let publishes = publishes_for(&built, &self.docs);
+                    let publishes = publishes_for(&built, &self.docs, self.enc);
                     self.projects.insert(key.clone(), built);
                     return publishes;
                 }
@@ -244,7 +247,7 @@ fn build_project(key: PathBuf, root_file: &Path, standalone: bool, docs: &HashMa
 
 /// Diagnostics of a project grouped into one publish per open document, already converted
 /// to LSP-shaped values here where the line indexes are at hand.
-fn publishes_for(state: &ProjectState, docs: &HashMap<String, Doc>) -> Vec<Publish> {
+fn publishes_for(state: &ProjectState, docs: &HashMap<String, Doc>, enc: Enc) -> Vec<Publish> {
     let mut out = Vec::new();
     for doc in docs.values() {
         let diagnostics = match state.file_of(&doc.path) {
@@ -255,11 +258,11 @@ fn publishes_for(state: &ProjectState, docs: &HashMap<String, Doc>) -> Vec<Publi
                     .iter()
                     .chain(state.warnings.iter())
                     .filter(|d| d.file == file_idx)
-                    .map(|d| to_diag(d, index, text))
+                    .map(|d| to_diag(d, index, text, enc))
                     .collect()
             }
             // An unreadable project: report the reason on its root document (no line index).
-            None if &doc.path == &state.root_file => {
+            None if doc.path == state.root_file => {
                 vec![Diag { range: zero_range(), severity: 1, message: state.io_error.clone().unwrap_or_default() }]
             }
             None => continue,
@@ -270,14 +273,14 @@ fn publishes_for(state: &ProjectState, docs: &HashMap<String, Doc>) -> Vec<Publi
 }
 
 /// A compiler diagnostic as the LSP shape, with any hint appended.
-pub fn to_diag(d: &Diagnostic, index: Option<&LineIndex>, text: &str) -> Diag {
+pub fn to_diag(d: &Diagnostic, index: Option<&LineIndex>, text: &str, enc: Enc) -> Diag {
     let mut message = d.message.clone();
     if let Some(hint) = &d.hint {
         message.push_str("\nhint: ");
         message.push_str(hint);
     }
     Diag {
-        range: index.map_or_else(zero_range, |l| l.range(text, d.span)),
+        range: index.map_or_else(zero_range, |l| l.range(text, d.span, enc)),
         severity: lsp_severity(d),
         message,
     }

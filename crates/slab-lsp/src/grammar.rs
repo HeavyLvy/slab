@@ -84,7 +84,7 @@ fn repository() -> Map<String, Value> {
         ("objective", "entity.name.objective.slab"),
     ] {
         r.insert(
-            format!("decl-{keyword}").into(),
+            format!("decl-{keyword}"),
             json!({
                 "match": format!(r"\b({keyword})\s+[A-Za-z_]\w*"),
                 "captures": {
