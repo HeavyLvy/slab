@@ -1,0 +1,77 @@
+# slab
+
+A statically typed programming language (written in Rust) that compiles a project of `.slab` files to a Minecraft Java Edition **data pack**. `slab build my_project` -> a pack folder (and optionally a zip).
+
+- **Target version: Minecraft Java 26.3** ("Wilderness Bound", released 2026-09-15). Data pack format **121.0**, resource pack format 97.1.
+- Minecraft now uses year-based versions (26.1, 26.2, 26.3). Training-data knowledge of commands and data pack JSON is **outdated** (it mostly stops around 1.21.x), so do not write commands or data pack JSON from memory.
+
+## Check the docs often
+
+**Before writing or changing anything that emits Minecraft commands, JSON, NBT/SNBT, `pack.mcmeta`, or file layout, read the relevant file in [docs/mc/](docs/mc/README.md).** Re-check them while developing, not only at the start: syntax changed a lot between 1.21.4 and 26.3.
+
+| Need | File |
+|---|---|
+| What changed since 1.21.4, cheat sheet of gotchas | `docs/mc/00-version-deltas-1.21.4-to-26.3.md` |
+| pack.mcmeta, directory layout, functions, macros, load/tick tags | `docs/mc/01-datapack-structure.md` |
+| execute, scoreboard, data, function, return, schedule, gamerule, selectors, arg types | `docs/mc/02-commands-core.md` |
+| give, summon, setblock, fill, item, loot, tp, effect, attribute, etc. | `docs/mc/03-commands-world-entity.md` |
+| SNBT, text components, predicates, components, advancements, loot, recipes, dialogs, entity NBT | `docs/mc/04-data-formats.md` |
+| What the real 26.3 server accepted/rejected from slab's output (highest authority) | `docs/mc/05-verified-by-slab.md` |
+
+Rules for the docs:
+- If a doc says `**UNVERIFIED**` or doesn't cover something, verify against minecraft.wiki / misode.github.io/changelog (or ideally by running a real 26.3 server) before relying on it, then **update the doc** with the verified answer and source.
+- When you learn something new about 26.3 behaviour (from a test run, error message, or source), add it to the docs in the same change (`docs/mc/05-verified-by-slab.md` for things found by running slab output).
+- `docs/mc/` is reference material about Minecraft; the language's own design is in `docs/lang/` (below). Keep the doc, the code and the tests of a feature in sync.
+
+## The pipeline
+
+```text
+main.slab + modules --project.rs--> parsed modules --syntax--> --sema--> HIR --codegen--> IR --lower--> datapack --> pack folder/zip
+                      (load)         (lexer, parser)        (types)      (typed)  (HIR->IR)  (IR->commands)  (typed commands)
+```
+
+| Phase | Code | Design doc |
+|---|---|---|
+| load files, follow `import` | `src/project.rs` | `docs/lang/modules.md` |
+| lex + parse (first error only) | `src/syntax/`, `src/diag.rs` | `docs/lang/syntax.md` |
+| name resolution, types, flow checks -> HIR | `src/sema/` | `docs/lang/semantics.md`, `modules.md` |
+| HIR -> IR (break/continue, loops, structs, builtins, modules -> flat names) | `src/codegen.rs` | `docs/lang/codegen.md` |
+| IR -> typed commands (scoreboard/storage runtime model, recursion stack, scope cleanup, `_uninstall`) | `src/ir.rs`, `src/lower.rs` | `docs/lang/ir.md`, `docs/lang/memory.md` |
+| typed Minecraft commands/JSON, validation, output | `src/datapack/` | `docs/mc/` |
+| orchestration + CLI | `src/compile.rs`, `src/main.rs` | |
+
+Language decisions: Rust-like syntax; static types with local inference; Minecraft access through context blocks (`as @a at @s { }` = `/execute`) plus builtin functions; entry points are attributes (`#[load]`, `#[tick]`, `#[every(1s)]`); `main.slab` is the root, other files are modules (`import a::b;` = `a/b.slab`, `pub` exports). Runtime model: `int`/`bool` on the scoreboard, `str`/`list`/structs in command storage. Variables in commands: numbers become macro **holes** (`$(h0)`) filled through `<ns>:macro` and a generated helper function; text uses f-strings (`tellraw` components) - see `docs/lang/codegen.md`. Memory: values are copied (no references, so no lifetimes/borrow checker); Data locals are dropped at function exit and `<ns>:_uninstall` removes everything the pack created (`docs/lang/memory.md`).
+
+## Architecture rule: only `src/datapack` produces Minecraft syntax
+
+The frontend, `codegen` and `lower` must never `format!` a command, SNBT, JSON or resource path. They build the typed values in `src/datapack` (`Command`, `Execute`, `Compound`, `Text`, `Function`, `DataPack`, ...), which render and validate themselves. If a command isn't modelled, add a typed variant (with `Display` + `Check` + a unit test, and an entry in `examples/zoo.rs`) rather than using `Command::Raw` (escape hatch only).
+
+- `names.rs` validated newtypes (`ResourceLocation`, `Word` for objective/tag/team names, `HolderName`); `args.rs` coordinates, ranges, selectors, score holders; `nbt.rs` SNBT + paths; `text.rs` text components; `command.rs` the command AST, `Execute` builder, `MacroCommand`; `function.rs`; `pack.rs` `DataPack` (functions, tags, JSON resources, `validate()`, `write_dir`, `write_zip`); `zip.rs` a stored-method zip writer.
+- `Check::check()` catches what types can't (mixed `~`/`^`, a negative `players add`, an `execute` chain not ending in `run`). `DataPack::validate()` checks cross-references.
+- Not modelled yet: `give`, `fill`, `clone`, `title`, `bossbar`, `team`, `attribute`, `item`, `loot`, `random`, `tick`, `/compute`, `execute if items|slots|stopwatch`, selector `advancements=`/`nbt=`, typed macro arguments (macros are assembled from text pieces).
+
+## Working on the compiler
+
+- `cargo test` (unit + integration), `cargo clippy --all-targets` (kept at zero warnings).
+- `slab build [PATH] [-o DIR] [--zip] [--namespace NS]`, `slab check [PATH]`, `slab parse FILE`. Examples: `examples/slab/*.slab` (single files, must parse + check), `examples/projects/hello` (small multi-file project), `examples/projects/e2e` (the end-to-end test project).
+- A language feature touches several places: grammar doc -> parser (+ tests) -> checker rules (+ `docs/lang/semantics.md`, + tests in `src/sema/tests.rs`) -> `codegen` (+ `docs/lang/codegen.md`, + tests in `src/compile.rs`) -> IR/lowering if it needs a runtime construct -> **a case in `examples/projects/e2e` with an expected value in `checks.json`**.
+
+## Verifying output against the real game
+
+Unit tests only prove the output matches *our reading of the docs*. Everything is also checked on a real 26.3 dedicated server:
+
+```text
+tools/verify_all.sh          # builds and checks all three packs below; prints zoo/programs/e2e: OK|FAILED
+```
+
+- `examples/zoo.rs` -> `target/zoo`: every supported command variant; passes if the server loads it without parse errors.
+- `examples/programs.rs` -> IR programs whose *results* are read back (`checks.json`-style: `[{cmd, expect | matches, wait}]`).
+- `examples/projects/e2e` + `checks.json` -> compiled from `.slab` source; 64 checks (recursion, loops, `break`/`continue`, structs, lists, strings, objectives, entities, `#[tick]`, `#[every]`, no leftover locals, `_uninstall`, variable indices/coordinates/effect values, f-strings). Checks may use `expect`, `matches`, `absent` or `wait`. Run with `--setup "forceload add 0 0"` so entity tests have a loaded chunk.
+
+`tools/verify_pack.py` downloads the official server jar into `target/mc/` (Java 25+ needed; `--jar`/`--java` override). **Run `tools/verify_all.sh` after changing `lower.rs`, `codegen.rs` or anything in `src/datapack/`**, and record surprises in `docs/mc/05-verified-by-slab.md`. Two traps already found that way: `execute store success ... if A if B` doesn't write when `A` fails, and a console-run function executes at the (per-world) spawn point.
+
+## Project layout
+
+- `src/lib.rs` + modules above; `src/main.rs` the CLI.
+- `docs/mc/` Minecraft 26.3 reference. `docs/lang/` language design (`syntax`, `semantics`, `modules`, `codegen`, `ir`, `memory`).
+- `examples/` and `tools/` (`verify_pack.py`, `verify_all.sh`); `tests/` integration tests (`projects.rs` drives the `slab` binary).
