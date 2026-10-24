@@ -36,6 +36,7 @@ pub fn tm_language() -> Value {
             { "include": "#decl-const" },
             { "include": "#decl-objective" },
             { "include": "#modifier-keyword" },
+            { "include": "#call" },
             { "include": "#attribute" },
             { "include": "#fstring" },
             { "include": "#string" },

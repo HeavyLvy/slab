@@ -108,7 +108,18 @@ pub fn document_tokens(text: &str, program: &slab::syntax::ast::Program) -> Vec<
     let whole = Span::new(0, text.len());
     collect_region(text, whole, &holes, &idents, &mut out, &mut seen);
     out.sort_by_key(|t| (t.start, t.len));
-    out
+    // Never hand VS Code an overlapping token: one bad token makes a client discard the
+    // whole array, so the later of two overlapping tokens is dropped instead.
+    let mut compacted: Vec<SemTok> = Vec::with_capacity(out.len());
+    let mut end = 0usize;
+    for t in out {
+        if t.start < end {
+            continue;
+        }
+        end = t.start + t.len;
+        compacted.push(t);
+    }
+    compacted
 }
 
 // ------------------------------------------------------------------ f-string holes
@@ -279,4 +290,50 @@ pub fn lex_lenient(src: &str) -> Vec<slab::syntax::token::Token> {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use slab::syntax::parse;
+
+    fn valid(text: &str) {
+        let file = slab::diag::SourceFile::new("t.slab", text);
+        let program = parse(&file.text).unwrap();
+        let toks = document_tokens(text, &program);
+        let mut prev_end = 0usize;
+        for t in &toks {
+            assert!(t.start >= prev_end, "overlap at {}: {:?}", t.start, &text[t.start..t.start + t.len]);
+            assert!(t.len > 0);
+            assert!(t.ty.index() < (TOKEN_TYPES.len() as u32), "type index out of legend: {:?}", t.ty);
+            // any used modifier bit must exist in the legend
+            for bit in [M_DECLARATION, M_DEFINITION, M_STATIC, M_READONLY, M_DEFAULT_LIBRARY] {
+                if t.mods & bit != 0 {
+                    assert!(TOKEN_MODIFIERS.contains(&["declaration", "definition", "static", "readonly", "defaultLibrary"][bit.trailing_zeros() as usize]));
+                }
+            }
+            prev_end = t.start + t.len;
+        }
+    }
+
+    #[test]
+    fn tokens_never_overlap() {
+        valid("import util;\n\n#[load]\nfn boot() {\n    let s = \"a\\\"b\";\n    print(f\"x {s} y\");\n    as @a at @s {\n        effect.give(@s, \"minecraft:speed\", 10s);\n    }\n}");
+        // the e2e project for good measure
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/projects/e2e/main.slab");
+        let text = std::fs::read_to_string(path).unwrap();
+        valid(&text);
+    }
+
+    #[test]
+    fn calls_are_function_tokens_even_without_a_server() {
+        let src = "fn f() {}\nfn g() {\n    f();\n}\n";
+        let program = parse(src).unwrap();
+        let toks = document_tokens(src, &program);
+        let call = toks.iter().find(|t| t.start == src.find("f();").unwrap()).unwrap();
+        assert_eq!(call.ty, ST::Function);
+        // a keyword token is what the theme's default rules expect too
+        let kw = toks.iter().find(|t| t.start == src.find("fn g").unwrap()).unwrap();
+        assert_eq!(kw.ty, ST::Keyword);
+    }
 }

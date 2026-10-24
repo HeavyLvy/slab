@@ -33,6 +33,9 @@
       "include": "#modifier-keyword"
     },
     {
+      "include": "#call"
+    },
+    {
       "include": "#attribute"
     },
     {
