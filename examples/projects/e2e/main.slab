@@ -38,6 +38,8 @@ global r_dyn_index: int = 0;
 global r_dyn_struct: int = 0;
 global r_dyn_loop: int = 0;
 global r_dyn_neg: int = 0;
+global r_results: int = 0;
+global r_gone: int = 0;
 global r_entities: int = 0;
 global r_exists: int = 0;
 global r_tagged: int = 0;
@@ -263,6 +265,28 @@ fn world_test() {
     // ...and moved with variable coordinates
     let ty = 70;
     tp(@e[tag=e2e.owned, limit=1], bx, ty, bx);
+
+    // command results: did the command work? (the value is only computed because it is used)
+    let ok1 = tp(@e[tag=e2e.owned, limit=1], bx, ty, bx);        // a marker exists (macro helper)
+    let ok2 = tp(@e[tag=nobody, limit=1], 1, 2, 3);              // nothing matches
+    let ok3 = tp(@e[tag=nobody, limit=1], bx, ty, bx);           // nothing matches (macro helper)
+    let ok4 = tag.add(@e[tag=e2e.owned, limit=1], "mark");       // first time
+    let ok5 = tag.add(@e[tag=e2e.owned, limit=1], "mark");       // already has it
+    let ok6 = kill(@e[tag=nobody]);                              // nothing to kill
+    let ok7 = setblock(bx, 80, bx, "minecraft:stone");           // changes the block
+    let ok8 = setblock(bx, 80, bx, "minecraft:stone");           // already stone
+    let mut res = 0;
+    if ok1 { res += 1; }
+    if ok2 { res += 2; }
+    if ok3 { res += 4; }
+    if ok4 { res += 8; }
+    if ok5 { res += 16; }
+    if ok6 { res += 32; }
+    if ok7 { res += 64; }
+    if ok8 { res += 128; }
+    r_results = res;
+    // a failure can be caught: a missing target takes the other branch
+    if !tp(@e[tag=nobody, limit=1], 0, 0, 0) { r_gone = 1; }
 
     // variable effect duration (ticks) and amplifier; nobody is online, but the command must parse
     let secs = 3;

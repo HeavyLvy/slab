@@ -610,9 +610,22 @@ impl<'a> Gen<'a> {
                     (Some(sel), Some(tag)) => ir::Expr::EntityExists(sel.tag(tag)),
                     _ => ir::Expr::Bool(false),
                 },
-                other => {
-                    self.err(e.span, format!("`{other}` does not produce a value"));
+                "print" | "say" => {
+                    self.err(e.span, format!("`{}` does not produce a value", name));
                     ir::Expr::Int(0)
+                }
+                // a world-acting builtin used as a value: did the command succeed?
+                other => {
+                    let mut holes = Holes::default();
+                    match self.builtin_command(other, args, e.span, &mut holes) {
+                        Some(command) if datapack::Check::check(&command).is_ok() => ir::Expr::CommandSuccess { command, args: holes.args },
+                        Some(command) => {
+                            let msg = datapack::Check::check(&command).unwrap_err().message().to_owned();
+                            self.err(e.span, msg);
+                            ir::Expr::Bool(false)
+                        }
+                        None => ir::Expr::Bool(false),
+                    }
                 }
             },
             h::ExprKind::Method { kind, recv, .. } => match kind {
@@ -830,19 +843,9 @@ impl<'a> Gen<'a> {
         }
     }
 
+    /// Statement form of a builtin. World-acting builtins are emitted as plain commands, so their
+    /// success result costs nothing unless the program uses it (see [`Self::expr`]).
     fn builtin_stmt(&mut self, name: &str, args: &[h::Expr], span: Span, out: &mut Vec<ir::Stmt>) {
-        let s = |i: usize| const_str(&args[i]).unwrap_or_default();
-        let n = |i: usize| match args.get(i).map(|a| &a.kind) {
-            Some(h::ExprKind::Int(n)) => Some(*n),
-            _ => None,
-        };
-        let rl = |this: &mut Self, i: usize| match ResourceLocation::parse(&s(i)) {
-            Ok(r) => Some(r),
-            Err(e) => {
-                this.err(args[i].span, e.message().to_owned());
-                None
-            }
-        };
         match name {
             "print" => {
                 if let h::ExprKind::Format(parts) = &args[0].kind {
@@ -861,74 +864,86 @@ impl<'a> Gen<'a> {
                 self.flush(out);
                 out.push(ir::Stmt::Print(v));
             }
-            "say" => self.push_cmd(Command::Say(s(0)), Holes::default(), span, out),
-            "kill" => {
-                if let Some(sel) = self.selector(&args[0]) {
-                    self.push_cmd(Command::Kill(Some(sel)), Holes::default(), span, out);
+            "say" => self.push_cmd(Command::Say(const_str(&args[0]).unwrap_or_default()), Holes::default(), span, out),
+            // value-producing builtins used as statements have no effect
+            "exists" | "tag.has" => {}
+            other => {
+                let mut holes = Holes::default();
+                match self.builtin_command(other, args, span, &mut holes) {
+                    Some(cmd) => self.push_cmd(cmd, holes, span, out),
+                    None => {
+                        if !self.errors.is_empty() {
+                            return;
+                        }
+                        self.err(span, format!("the builtin `{other}` is not supported by the backend yet"));
+                    }
                 }
             }
+        }
+    }
+
+    /// The command a world-acting builtin runs. Run-time values go into `holes`.
+    fn builtin_command(&mut self, name: &str, args: &[h::Expr], span: Span, holes: &mut Holes) -> Option<Command> {
+        let _ = span;
+        let s = |i: usize| const_str(&args[i]).unwrap_or_default();
+        let n = |i: usize| match args.get(i).map(|a| &a.kind) {
+            Some(h::ExprKind::Int(n)) => Some(*n),
+            _ => None,
+        };
+        let rl = |this: &mut Self, i: usize| match ResourceLocation::parse(&s(i)) {
+            Ok(r) => Some(r),
+            Err(e) => {
+                this.err(args[i].span, e.message().to_owned());
+                None
+            }
+        };
+        Some(match name {
+            "kill" => Command::Kill(Some(self.selector(&args[0])?)),
             "tag.add" | "tag.remove" => {
-                if let (Some(sel), Ok(tag)) = (self.selector(&args[0]), Word::new(&s(1))) {
-                    if name == "tag.add" {
-                        self.added_tags.insert(tag.as_str().to_owned());
-                    }
-                    let action = if name == "tag.add" { TagAction::Add(tag) } else { TagAction::Remove(tag) };
-                    self.push_cmd(Command::Tag { targets: sel, action }, Holes::default(), span, out);
+                let (sel, tag) = (self.selector(&args[0])?, Word::new(&s(1)).ok()?);
+                if name == "tag.add" {
+                    self.added_tags.insert(tag.as_str().to_owned());
                 }
+                let action = if name == "tag.add" { TagAction::Add(tag) } else { TagAction::Remove(tag) };
+                Command::Tag { targets: sel, action }
             }
             "effect.give" => {
-                let (Some(sel), Some(id)) = (self.selector(&args[0]), rl(self, 1)) else { return };
-                let mut holes = Holes::default();
+                let (sel, id) = (self.selector(&args[0])?, rl(self, 1)?);
                 // the duration argument is in ticks; the game takes whole seconds, rounded up
                 let seconds = match n(2) {
                     Some(t) => Num::Lit((t.max(1) as u32).div_ceil(20)),
                     None => {
                         let ticks = self.expr(&args[2]);
                         let secs = ir::Expr::bin(ir::BinOp::Div, ir::Expr::bin(ir::BinOp::Add, ticks, ir::Expr::Int(19)), ir::Expr::Int(20));
-                        Num::Hole(self.hole_ir(&mut holes, secs))
+                        Num::Hole(self.hole_ir(holes, secs))
                     }
                 };
                 let amplifier = args.get(3).map(|a| match n(3) {
-                        Some(v) => Num::Lit(v.max(0) as u32),
-                        None => Num::Hole(self.hole(&mut holes, a)),
-                    });
-                let cmd = Command::Effect(Effect::Give { targets: sel, effect: id, seconds: Some(seconds), amplifier, hide_particles: false });
-                self.push_cmd(cmd, holes, span, out);
+                    Some(v) => Num::Lit(v.max(0) as u32),
+                    None => Num::Hole(self.hole(holes, a)),
+                });
+                Command::Effect(Effect::Give { targets: sel, effect: id, seconds: Some(seconds), amplifier, hide_particles: false })
             }
-            "effect.clear" => {
-                if let Some(sel) = self.selector(&args[0]) {
-                    self.push_cmd(Command::Effect(Effect::Clear { targets: Some(sel), effect: None }), Holes::default(), span, out);
-                }
-            }
+            "effect.clear" => Command::Effect(Effect::Clear { targets: Some(self.selector(&args[0])?), effect: None }),
             "tp" => {
-                let mut holes = Holes::default();
-                if let (Some(sel), Some(dest)) = (self.selector(&args[0]), self.pos(&args[1..4], &mut holes)) {
-                    self.push_cmd(Command::Teleport { targets: sel, dest }, holes, span, out);
-                }
+                let sel = self.selector(&args[0])?;
+                Command::Teleport { targets: sel, dest: self.pos(&args[1..4], holes)? }
             }
             "setblock" => {
-                let mut holes = Holes::default();
-                if let (Some(pos), Some(id)) = (self.pos(&args[0..3], &mut holes), rl(self, 3)) {
-                    self.push_cmd(Command::Setblock { pos, block: datapack::BlockState::new(id), mode: None }, holes, span, out);
-                }
+                let pos = self.pos(&args[0..3], holes)?;
+                Command::Setblock { pos, block: datapack::BlockState::new(rl(self, 3)?), mode: None }
             }
             "summon" => {
-                let Some(id) = rl(self, 0) else { return };
-                let mut holes = Holes::default();
-                let pos = if args.len() == 4 { self.pos(&args[1..4], &mut holes) } else { None };
-                if args.len() == 4 && pos.is_none() {
-                    return;
-                }
+                let id = rl(self, 0)?;
+                let pos = if args.len() == 4 { Some(self.pos(&args[1..4], holes)?) } else { None };
                 // every summoned entity is tagged as ours so `_uninstall` can remove it; an NBT
                 // argument needs an explicit position, and `~ ~ ~` is "here"
                 self.uses_summon = true;
                 let nbt = Compound::new().with("Tags", vec![Nbt::str(self.owned_tag())]);
-                self.push_cmd(Command::Summon { entity: id, pos: Some(pos.unwrap_or_else(Pos::here)), nbt: Some(nbt) }, holes, span, out);
+                Command::Summon { entity: id, pos: Some(pos.unwrap_or_else(Pos::here)), nbt: Some(nbt) }
             }
-            // value-producing builtins used as statements have no effect
-            "exists" | "tag.has" => {}
-            other => self.err(span, format!("the builtin `{other}` is not supported by the backend yet")),
-        }
+            _ => return None,
+        })
     }
 }
 

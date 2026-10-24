@@ -49,6 +49,10 @@ Constant arguments never use this: `tp(@s, 1, 64, 2)` is the plain command `tele
 
 String values are *not* substituted into commands (a `"` or `\` in a string would break the line); only numbers are. Text with variables goes through **f-strings** instead.
 
+## Command results
+
+A world-acting builtin used as a value becomes `ir::Expr::CommandSuccess`: `set tmp 0; execute store success score tmp run <command>` (cleared first because `store` writes nothing if the chain ends early). With run-time values the macro helper is `$return run <command>` so the command's own success flows out of the function call, and the call is wrapped in the same `execute store success`. As a statement the result is not computed: the command is emitted unchanged.
+
 ## F-strings
 
 `print(f"{name} has {n} points")` is one `tellraw @a {text:"",extra:[...]}`: literal text, a `{score:{name,objective}}` component for each number and an `{nbt,storage}` component for each string, list or struct. Components are read when the message is sent, so there is no escaping problem and no macro. Booleans print as 0/1. All temporaries stay alive until the `tellraw` is emitted.

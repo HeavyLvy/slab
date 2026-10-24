@@ -67,6 +67,11 @@ Results read back with `scoreboard players get` / `data get` (`--checks`), all 2
 * Whole-number coordinates are block-centered for entities: `teleport @s 8 70 8` puts the entity at `8.5 70.0 8.5`.
 * `data modify ... set value 5` and `set from storage ...` both work with a hole index on the left side.
 
+## Command success as a value (checked on the real server)
+
+* `execute store success score X run <command>` stores 1 if the command worked and 0 if it failed, for `teleport`, `tag`, `kill` and `setblock`: no matching entity -> 0; `tag add` of a tag the entity already has -> 0 (first time -> 1); `setblock` of the block that is already there -> 0 (a changed block -> 1).
+* A macro function whose only line is `$return run teleport @s $(h0) 64 2`, called as `execute store success score X run function <f> with storage <id>`, stores the teleport's success (1 with a target, 0 without), so `return run` forwards the inner command's success through a macro call.
+
 ## Harness behaviour worth knowing
 
 * Commands inside functions give **no feedback** to the console, so runtime failures aren't visible; the harness mainly proves *parsing/loading*. To assert runtime behaviour, write functions that `execute store ... score` a result and print it with `say`/`tellraw`, or read it with `scoreboard players get`.

@@ -173,6 +173,14 @@
   "absent": "h0"
  },
  {
+  "cmd": "scoreboard players get #g.r_results e2e",
+  "expect": "has 73 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_gone e2e",
+  "expect": "has 1 [e2e]"
+ },
+ {
   "cmd": "data get storage e2e:vars run_all.v_xs",
   "expect": "Found no elements"
  },

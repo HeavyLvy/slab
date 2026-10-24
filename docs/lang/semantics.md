@@ -49,18 +49,20 @@ Semantic analysis runs over the whole project at once: it first registers every 
 
 ## Builtins (`sema/builtins.rs`)
 
+Builtins that act on the world return `bool`: **did the command work?** `if !tp(boss, 0, 70, 0) { ... }` catches a missing target. Ignoring the result is free (the plain command is emitted); using it costs one `execute store success`. "Worked" is Minecraft's own notion: it targeted something and changed something, so `tag.add` fails if the tag is already there, `setblock` fails if the block is unchanged, `kill`/`tp`/`effect.give` fail when nothing matches, and a run-time value out of range fails that one command.
+
 | Call | Returns | Notes |
 |---|---|---|
 | `print(v)` | `()` | any storable value, or an f-string |
 | `say("text")` | `()` | text known at compile time |
-| `kill(sel)` | `()` | |
+| `kill(sel)` | `bool` | |
 | `exists(sel)` | `bool` | any entity matches |
-| `tag.add(sel, "t")` `tag.remove` `tag.has` | `()` / `()` / `bool` | tag name is `[A-Za-z0-9_.+-]+` |
-| `effect.give(sel, "id", ticks [, amplifier])` | `()` | duration in **ticks** (`10s` = ten seconds), amplifier 0..=255; both may be variables |
-| `effect.clear(sel)` | `()` | |
-| `tp(sel, x, y, z)` | `()` | each coordinate is any `int` expression or `~`/`^` |
-| `setblock(x, y, z, "id")` | `()` | |
-| `summon("id" [, x, y, z])` | `()` | |
+| `tag.add(sel, "t")` `tag.remove` `tag.has` | `bool` | tag name is `[A-Za-z0-9_.+-]+` |
+| `effect.give(sel, "id", ticks [, amplifier])` | `bool` | duration in **ticks** (`10s` = ten seconds), amplifier 0..=255; both may be variables |
+| `effect.clear(sel)` | `bool` | |
+| `tp(sel, x, y, z)` | `bool` | each coordinate is any `int` expression or `~`/`^` |
+| `setblock(x, y, z, "id")` | `bool` | |
+| `summon("id" [, x, y, z])` | `bool` | |
 
 Methods: `list.push(x)` (needs a mutable place), `list.len()`, `str.len()`. Whether the *backend* can lower each builtin yet is separate from this table; a builtin the backend lacks is reported by the lowering, not here.
 

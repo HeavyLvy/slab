@@ -407,6 +407,34 @@ mod tests {
     }
 
     #[test]
+    fn an_ignored_result_costs_nothing_and_a_used_one_stores_success() {
+        // ignored: exactly the plain command
+        let c = build_main("fn f() { tp(@s, 1, 64, 2); }");
+        assert_eq!(fn_text(&c, "t:f"), "teleport @s 1 64 2\n");
+        // used: cleared, then `execute store success` around the same command
+        let c = build_main("fn f() -> bool { return tp(@s, 1, 64, 2); }");
+        let f = fn_text(&c, "t:f");
+        assert!(f.contains("scoreboard players set #f.t_0 t 0\nexecute store success score #f.t_0 t run teleport @s 1 64 2\n"), "{f}");
+        assert!(f.contains("scoreboard players operation #ret t = #f.t_0 t"), "{f}");
+    }
+
+    #[test]
+    fn a_used_result_with_variables_goes_through_a_return_run_helper() {
+        let c = build_main("fn f(x: int) -> bool { let ok = tp(@s, x, 64, 2); return ok; }");
+        let f = fn_text(&c, "t:f");
+        // the helper forwards the command's own success, and the call stores it
+        assert_eq!(fn_text(&c, "t:f/m0"), "$return run teleport @s $(h0) 64 2\n");
+        assert!(f.contains("execute store success score #f.t_0 t run function t:f/m0 with storage t:macro"), "{f}");
+    }
+
+    #[test]
+    fn exists_and_tag_has_still_test_directly() {
+        let c = build_main("fn f() -> bool { return exists(@e[tag=a]) && tag.has(@s, \"b\"); }");
+        let f = fn_text(&c, "t:f");
+        assert!(f.contains("execute store success score") && f.contains("if entity @e[tag=a] if entity @s[tag=b]"), "{f}");
+    }
+
+    #[test]
     fn namespaces() {
         assert_eq!(default_namespace(Path::new("/tmp/My-Cool Game")), "my_cool_game");
         assert!(validate_namespace("ok_name").is_ok());

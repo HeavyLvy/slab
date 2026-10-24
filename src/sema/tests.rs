@@ -365,6 +365,18 @@ fn builtin_const_arguments_accept_constants() {
 }
 
 #[test]
+fn world_acting_builtins_return_whether_they_worked() {
+    ok(&in_fn("let a = tp(@s, 1, 2, 3); let b = kill(@e[tag=x]); let c = tag.add(@s, \"t\"); let d = effect.give(@s, \"speed\", 10s); let e = setblock(1, 2, 3, \"stone\"); let f = summon(\"pig\"); print(a && b && c && d && e && f);"));
+    ok(&in_fn("if !tp(@s, 0, 70, 0) { print(\"gone\"); } while kill(@e[tag=x]) { }"));
+    // ignoring the result is fine and warns about nothing
+    assert!(warnings(&in_fn("tp(@s, 1, 2, 3); kill(@s);")).is_empty());
+    // print and say have no value
+    one_error(&in_fn("let x = print(1);"), "no value to store");
+    one_error(&in_fn("let x = say(\"a\");"), "no value to store");
+    one_error(&in_fn("let n: int = tp(@s, 1, 2, 3);"), "expected `int`, found `bool`");
+}
+
+#[test]
 fn builtins_cannot_be_redefined_or_shadow_modules() {
     one_error("fn print() {}", "builtin");
     one_error("global tag: int = 0;", "builtin");

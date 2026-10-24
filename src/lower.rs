@@ -199,6 +199,7 @@ fn check_ident(what: &str, name: &str) -> R<()> {
 fn has_call(e: &Expr) -> bool {
     match e {
         Expr::Call(..) => true,
+        Expr::CommandSuccess { args, .. } => args.iter().any(|(_, e)| has_call(e)),
         Expr::Unary(_, a) | Expr::ToInt(a) | Expr::ToData(a) => has_call(a),
         Expr::Binary(_, a, b) => has_call(a) || has_call(b),
         _ => false,
@@ -207,6 +208,7 @@ fn has_call(e: &Expr) -> bool {
 
 fn collect_calls_expr(e: &Expr, out: &mut Vec<String>) {
     match e {
+        Expr::CommandSuccess { args, .. } => args.iter().for_each(|(_, a)| collect_calls_expr(a, out)),
         Expr::Call(n, args) => {
             out.push(n.clone());
             args.iter().for_each(|a| collect_calls_expr(a, out));
@@ -619,7 +621,7 @@ impl<'a> Lower<'a> {
                 Kind::Int
             }
             Expr::PlayerScore { .. } => Kind::Int,
-            Expr::EntityExists(_) => Kind::Bool,
+            Expr::EntityExists(_) | Expr::CommandSuccess { .. } => Kind::Bool,
         })
     }
 
@@ -720,6 +722,19 @@ impl<'a> Lower<'a> {
             Expr::Unary(UnOp::Not, _) => self.bool_value(e, hint),
             Expr::Binary(op, a, b) if is_arith(*op) => self.eval_arith(*op, a, b, hint),
             Expr::Binary(..) | Expr::Exists(..) | Expr::EntityExists(_) => self.bool_value(e, hint),
+            Expr::CommandSuccess { command, args } => {
+                // always a fresh temp: the arguments may read the variable this is assigned to
+                let d = self.alloc_int()?;
+                // `execute store` writes nothing if the chain ends early, so clear first
+                self.set_const(&d, 0);
+                if args.is_empty() {
+                    let cmd = Command::execute().store(StoreKind::Success, StoreTarget::Score { targets: fake(&d), objective: self.obj.clone() }).run(command.clone());
+                    self.emit(cmd);
+                } else {
+                    self.call_macro(command.clone(), args, Some(&d))?;
+                }
+                Ok(IntVal::Holder(d, true))
+            }
             Expr::PlayerScore { objective, holder } => {
                 let (d, temp) = self.dest(hint)?;
                 let cmd = Command::execute()
@@ -1328,7 +1343,7 @@ impl<'a> Lower<'a> {
             self.emit(cmd);
             return Ok(());
         }
-        self.call_macro(cmd, args)
+        self.call_macro(cmd, args, None)
     }
 
     /// Runs a command whose arguments are only known at run time.
@@ -1338,7 +1353,10 @@ impl<'a> Lower<'a> {
     /// `function ... with storage <ns>:macro`. All argument expressions are evaluated first (they
     /// may call functions that use the scratch storage themselves) and written right before the
     /// call; the keys are removed afterwards so nothing is left behind.
-    fn call_macro(&mut self, cmd: Command, args: &[(Hole, Expr)]) -> R<()> {
+    ///
+    /// With `success`, the helper is `return run <cmd>` so that the command's own success flows out
+    /// of the function call, and it is stored in that holder.
+    fn call_macro(&mut self, cmd: Command, args: &[(Hole, Expr)], success: Option<&HolderName>) -> R<()> {
         enum Val {
             Int(IntVal),
             Data(DataVal),
@@ -1381,9 +1399,16 @@ impl<'a> Lower<'a> {
         self.f.next_macro += 1;
         let id = ResourceLocation::new(&self.ns, &format!("{}/m{n}", self.f.name))?;
         let mut helper = datapack::Function::new();
-        helper.push(cmd);
+        helper.push(if success.is_some() { Command::Return(datapack::Return::Run(Box::new(cmd))) } else { cmd });
         self.pack.add_function(id.clone(), helper)?;
-        self.emit(Command::Function { function: FunctionRef::Id(id), args: datapack::FnArgs::With(DataTarget::Storage(scratch.clone()), None) });
+        let call = Command::Function { function: FunctionRef::Id(id), args: datapack::FnArgs::With(DataTarget::Storage(scratch.clone()), None) };
+        match success {
+            None => self.emit(call),
+            Some(d) => {
+                let wrapped = Command::execute().store(StoreKind::Success, StoreTarget::Score { targets: fake(d), objective: self.obj.clone() }).run(call);
+                self.emit(wrapped);
+            }
+        }
         for (hole, v) in &vals {
             self.drop_data(&slot(hole));
             match v {
