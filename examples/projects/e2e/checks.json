@@ -213,6 +213,18 @@
   "expect": "has 8 [e2e]"
  },
  {
+  "cmd": "scoreboard players get #g.r_for_ent e2e",
+  "expect": "has 2 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_for_moved e2e",
+  "expect": "has 2 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_for_score e2e",
+  "expect": "has 7 [e2e]"
+ },
+ {
   "cmd": "scoreboard players get #g.r_ent_after_kill e2e",
   "expect": "has 1 [e2e]"
  },

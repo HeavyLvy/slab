@@ -27,7 +27,31 @@ fn fight() {
 | `summon("id", x, y, z)` / `summon("id")` | a handle to the new entity (`0`-valued if the summon failed, so `exists` is false). The entity is marked as ours and removed by `_uninstall` |
 | a selector that matches at most one entity: `@s @p @r @n`, or any selector with `limit=1` | converted to a handle wherever an `entity` is expected (`let me = @p;`, an `entity` parameter, ...). Gives the same handle every time for the same entity. A selector that can match several (`@a`, `@e[...]`) is a compile error |
 
-Use `as` (or `for`, later) to act on all of several entities.
+Use `as` to act on all of several entities at once, or `for` to go through them one at a
+time (below).
+
+## Iterating a selector
+
+`for` accepts any selector as the thing it iterates:
+
+```slab
+for z in @e[tag=bosses] {
+    tp(z, 0, 90, 0);        // `z` is one entity: the one this run is executing as
+    pts[z] += 1;
+    tag.add(z, "visited");
+}
+```
+
+The body is a context block (`as `selector` { ... }`) run once per match; inside it the loop
+name is **the current entity as a handle** — an `entity` value you can store, pass, compare
+and act on, exactly like `@s` with an id. Use `_` as the name when the body doesn't need it
+(`for _ in @e[tag=x] { kill(@s); }`).
+
+Because the body runs like a context block:
+
+* `break`/`continue` are errors in it (there is no enclosing compiled loop);
+* assigning to the loop name is an error (it is the entity being visited, not a variable);
+* the order the matches are visited in is Minecraft's (`sort` when you need one).
 
 ## Using one
 
@@ -51,5 +75,4 @@ A handle is a plain integer: copying it copies the reference, and nothing happen
 * an entity must be loaded to be found (the same as any selector);
 * each use searches all loaded entities for the id score, like any selector;
 * reading entity data (`Health`, `Pos`, ...) is not available yet; it needs floats;
-* `for e in @a { }` over many entities is not available yet (use `as @a { }`);
 * a selector with a variable part (`@e[distance=..r]`) is not supported.

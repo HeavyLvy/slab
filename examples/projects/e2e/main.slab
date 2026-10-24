@@ -48,6 +48,9 @@ global r_ent_score: int = 0;
 global r_ent_list: int = 0;
 global r_ent_fn: int = 0;
 global r_ent_struct: int = 0;
+global r_for_ent: int = 0;
+global r_for_moved: int = 0;
+global r_for_score: int = 0;
 global r_str_cat: str = "";
 global r_str_tag: int = 0;
 global r_str_tag_n: int = 0;
@@ -379,6 +382,24 @@ fn entity_test() {
     pts[b] += 3;
     r_ent_score = pts[b];
 
+    // `for` over a selector: one entity at a time, with the match bound as an entity
+    let d = summon("minecraft:marker", 10, 64, 10);
+    let q = summon("minecraft:marker", 11, 64, 11);
+    tag.add(d, "forz");
+    tag.add(q, "forz");
+    let mut n = 0;
+    for z in @e[tag=forz] {
+        n += 1;
+        tp(z, 0, 90, 0);            // the named entity moves, not @s
+        pts[z] = 7;                 // and carries its own score
+    }
+    r_for_ent = n;
+    let mut standing = 0;
+    as @e[type=minecraft:marker, x=0.5, y=90, z=0.5, distance=..0.5] { standing += 1; }
+    r_for_moved = standing;
+    let first = @e[type=minecraft:marker, x=0.5, y=90, z=0.5, distance=..0.5, limit=1];
+    if pts[first] == 7 { r_for_score = 7; }
+
     // kill one: its handle goes stale and every action on it fails (catchable)
     kill(b);
     if !exists(b) { r_ent_after_kill = 1; }
@@ -386,4 +407,6 @@ fn entity_test() {
 
     kill(a);
     kill(c);
+    kill(d);
+    kill(q);
 }

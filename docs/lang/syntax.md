@@ -120,7 +120,7 @@ Precedence, loosest to tightest: range, `||`, `&&`, comparison, `+ -`, `* / %`, 
 | `global`, `const` | IR `Global` (initial value must be constant) / compile-time constant. Globals persist across ticks and `/reload`. |
 | `struct` | A compound in command storage; `p.x` is a field path. Only `int`/`bool`/`str`/`list`/struct fields. |
 | `let`, `let mut` | Locals. Immutable unless `mut` (checked by the type checker). Type inferred from the initializer if omitted. |
-| `if`/`while`/`loop`/`for`/`break`/`continue` | IR `If`/`While`; `loop` is `while true`; `break`/`continue` need IR support (flag variables) - not in the IR yet. `for i in a..b` counts; `for x in list` walks a list. |
+| `if`/`while`/`loop`/`for`/`break`/`continue` | IR `If`/`While`; `loop` is `while true`; `break`/`continue` need IR support (flag variables) - not in the IR yet. `for i in a..b` counts; `for x in list` walks a list; **`for e in @selector` runs the body once per match as a context block, with `e` bound to the current entity** (see `entities.md`, "Iterating a selector": no `break`/`continue` inside, and the name is not assignable). |
 | context blocks | `as`/`at`/`in`/`positioned`/`rotated`/`facing`/`align`/`anchored` map one-to-one to `/execute` sub-commands; the body becomes a function called through the `execute` chain. Inside `as X`, `@s` is the entity; outside, `@s` is whatever the enclosing function was run as. Needs a new IR statement (`Stmt::Context`). |
 | `kills[@s]` (index on an `objective`) | A scoreboard score of an entity / fake player: reads and writes (`+=`) use `scoreboard players ...`. `objective kills = "playerKillCount";` declares it. |
 | `@e[...]` | A selector value (type `entity`/selector). Used with context blocks and builtins (`exists(@e[type=zombie])` -> `execute if entity`). |
@@ -131,4 +131,3 @@ Precedence, loosest to tightest: range, `||`, `&&`, comparison, `+ -`, `* / %`, 
 * `str` supports `+` and `+=` (both sides `str`; use an f-string to mix in numbers), but no `==`, indexing or slicing yet.
 * Floats (via `/compute`), enums, `match`, modules/imports, generics beyond `list<T>`.
 * Whether `if` becomes an expression (`let x = if c { a } else { b };`).
-* `for e in @a { ... }` as sugar for `as @a { ... }`.

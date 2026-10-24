@@ -482,7 +482,6 @@ fn bad_types() {
 fn entity_values() {
     // a single-entity selector becomes a handle; `summon` returns one
     ok(&in_fn("let me = @p; let boss = summon(\"minecraft:zombie\", 1, 64, 2); let e: entity = @s; let n = @n[type=zombie]; let f = @a[limit=1]; print(me); print(boss == e && n != f);"));
-    // handles are values: storable, passable, returnable
     ok("struct Fight { boss: entity, helpers: list<entity> } fn pick() -> entity { return @r; } fn hit(e: entity) -> bool { return kill(e); } fn f() { let fight = Fight { boss: @p, helpers: [@s, pick()] }; hit(fight.boss); for h in fight.helpers { tp(h, 0, 70, 0); } }");
     // and usable as a target anywhere a selector is
     ok(&in_fn("let b = summon(\"minecraft:pig\"); kill(b); tp(b, 1, 2, 3); effect.give(b, \"speed\", 10s); tag.add(b, \"x\"); as b at b { say(\"hi\"); } print(exists(b)); print(tag.has(b, \"x\"));"));
@@ -496,6 +495,108 @@ fn entity_values() {
     one_error("fn f(e: entity) {} fn g() { f(@e[type=pig]); }", "can match several entities");
     // a plain selector value is still not storable
     one_error(&in_fn("let a = @a[tag=x]; print(1);"), "can match several entities");
+}
+
+// ------------------------------------------------------------------ iterating entities
+
+#[test]
+fn for_over_a_selector_binds_the_entity() {
+    // the loop variable is the entity the body runs as: an `entity` value
+    let c = ok("objective pts = \"dummy\"; fn f() { for z in @e[type=zombie] { tp(z, 0, 70, 0); pts[z] += 1; } for _ in @a { print(\"one round\"); } }");
+    let f = &c.hir.fns[0];
+    let mut saw_ctx = false;
+    let mut total = [0, 0];
+    for s in &f.body.stmts {
+        if let Stmt::Context { clauses, body } = s {
+            saw_ctx = true;
+            assert_eq!(clauses.len(), 1);
+            assert!(matches!(clauses[0], CtxClause::As(_)));
+            // the body uses the bound name: `tp(z, ..)` and the `pts[z]` holder, each a handle
+            let mut counts = [0, 0];
+            find_context_entity(body, &mut counts);
+            total[0] += counts[0];
+            total[1] += counts[1];
+        }
+    }
+    assert_eq!(total, [2, 1]);
+    assert!(saw_ctx, "the desugar is a context block");
+}
+
+/// Counts ToEntity expressions and score reads in a statement tree.
+fn find_context_entity(b: &Block, counts: &mut [usize; 2]) {
+    fn expr(e: &Expr, counts: &mut [usize; 2]) {
+        if matches!(e.kind, ExprKind::ToEntity(_)) {
+            counts[0] += 1;
+        }
+        if matches!(e.kind, ExprKind::Score { .. }) {
+            counts[1] += 1;
+        }
+        match &e.kind {
+            ExprKind::ToEntity(inner) => expr(inner, counts),
+            ExprKind::Unary { expr: inner, .. } => expr(inner, counts),
+            ExprKind::Binary { lhs, rhs, .. } => {
+                expr(lhs, counts);
+                expr(rhs, counts);
+            }
+            ExprKind::Index { base, index } => {
+                expr(base, counts);
+                expr(index, counts);
+            }
+            ExprKind::Score { holder, .. } => expr(holder, counts),
+            ExprKind::Field { base, .. } => expr(base, counts),
+            ExprKind::Call { args, .. } | ExprKind::Builtin { args, .. } => {
+                for a in args {
+                    expr(a, counts);
+                }
+            }
+            _ => {}
+        }
+    }
+    for s in &b.stmts {
+        match s {
+            Stmt::Context { clauses, body } => {
+                for c in clauses {
+                    let (CtxClause::As(e) | CtxClause::At(e)) = c else { continue };
+                    expr(e, counts);
+                }
+                find_context_entity(body, counts);
+            }
+            Stmt::Assign { target, value, .. } => {
+                expr(target, counts);
+                expr(value, counts);
+            }
+            Stmt::If { cond, then, els } => {
+                expr(cond, counts);
+                find_context_entity(then, counts);
+                find_context_entity(els, counts);
+            }
+            Stmt::ForRange { start, end, body, .. } => {
+                expr(start, counts);
+                expr(end, counts);
+                find_context_entity(body, counts);
+            }
+            Stmt::ForList { list, body, .. } => {
+                expr(list, counts);
+                find_context_entity(body, counts);
+            }
+            Stmt::Block(b) => find_context_entity(b, counts),
+            Stmt::Expr(e) => expr(e, counts),
+            _ => {}
+        }
+    }
+}
+
+#[test]
+fn for_over_a_selector_rejects_loop_jumps_and_assignment() {
+    one_error(&in_fn("for z in @a { break; }"), "cannot leave a context block");
+    one_error(&in_fn("for z in @a { z = @s; }"), "cannot assign to this expression");
+}
+
+#[test]
+fn for_over_one_entity_selector_works_and_others_error() {
+    ok(&in_fn("for e in @s { tp(e, 0, 70, 0); } for me in @p { tag.add(me, \"seen\"); }"));
+    one_error(&in_fn("let boss = summon(\"minecraft:zombie\", 0, 64, 0); for e in boss { tp(e, 0, 70, 0); }"), "cannot iterate over an `entity`");
+    one_error(&in_fn("for x in 1 { print(x); }"), "cannot iterate over `int`");
 }
 
 // ------------------------------------------------------------------ f-strings
