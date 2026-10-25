@@ -115,6 +115,18 @@ Precedence, loosest to tightest: range, `||`, `&&`, comparison, `+ -`, `* / %`, 
 
 **Statements need `;`** except block-like statements (`if`, `while`, `loop`, `for`, context blocks, bare blocks). There is no implicit "last expression" value: functions return with `return`.
 
+## Error recovery
+
+`parse` stops at the first error, which is what `slab build` reports. `parse_tolerant` (used by `slab check`, the module loader and the language server) keeps going and returns the program it could build together with *every* syntax error, so one typo does not hide the rest and the editor keeps a usable tree while code is half-typed:
+
+* the lexer turns a bad token into a `Tok::Error` token and carries on (errors on such tokens are not reported twice);
+* inside a block, a broken statement is recorded and the parser skips to the next statement start (a `;`, a `}`, or a token that begins a line and a statement); a missing `;` at the end of a line is recorded and the statement is kept;
+* at the top level (and between methods of an `impl`), it skips to the next item keyword at the start of a line;
+* a missing expression becomes an `ExprKind::Error` placeholder that the checker ignores, and `value.` with no field name becomes a field access with an empty name (so completion can still list the fields);
+* at most one error is reported per source position.
+
+The language server hides checker diagnostics inside the item that contains a syntax error, because they are mostly consequences of the damage.
+
 ## Semantics, per construct (to be implemented in the semantic phase)
 
 | Construct | Meaning / lowering plan |

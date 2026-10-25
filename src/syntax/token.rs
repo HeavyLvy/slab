@@ -230,6 +230,8 @@ pub enum Tok {
     AndAnd,
     OrOr,
     Bang,
+    /// Text the lexer could not make a token of (its error is reported by the lexer).
+    Error,
     Eof,
 }
 
@@ -247,6 +249,7 @@ impl Tok {
             Tok::Rel { kind: RelKind::Tilde, .. } => "`~`".to_owned(),
             Tok::Rel { kind: RelKind::Caret, .. } => "`^`".to_owned(),
             Tok::Eof => "end of file".to_owned(),
+            Tok::Error => "an invalid token".to_owned(),
             other => format!("`{}`", other.punct()),
         }
     }

@@ -284,6 +284,9 @@ pub enum ExprKind {
     Path { module: Ident, name: Ident },
     /// `()`: the only value of the type `()`.
     Unit,
+    /// An expression that is missing or could not be parsed (the parser has reported it). Lets
+    /// the rest of the statement, and of the file, still be read.
+    Error,
     Selector(SelectorLit),
     /// `~`, `~1`, `^-2`
     Rel { kind: RelKind, offset: Option<String> },

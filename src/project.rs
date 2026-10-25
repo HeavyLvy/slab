@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 
 use crate::diag::{Diagnostic, SourceFile, SourceMap};
 use crate::syntax::ast::{self, ItemKind};
-use crate::syntax::parse;
+use crate::syntax::parse_tolerant;
 
 pub const ROOT_FILE: &str = "main.slab";
 
@@ -110,15 +110,11 @@ fn load_inner(root_file: &Path, overlay: &Overlay, tolerant: bool) -> Result<(Pr
             })?,
         };
         let file = sources.add(SourceFile::new(path.display().to_string(), text));
-        let program = match parse(&sources.files[file].text) {
-            Ok(p) => p,
-            Err(d) => {
-                diagnostics.push(d.in_file(file));
-                // keep module indices stable even though this one has no usable tree
-                modules.push(Module { name, std: false, file, program: ast::Program { items: Vec::new() } });
-                continue;
-            }
-        };
+        // every syntax error of the file, and whatever could still be read around them (the
+        // imports in it are followed, and the language server checks what is left)
+        let parsed = parse_tolerant(&sources.files[file].text);
+        diagnostics.extend(parsed.errors.into_iter().map(|d| d.in_file(file)));
+        let program = parsed.program;
         for item in &program.items {
             let ItemKind::Import(imp) = &item.kind else { continue };
             let segs: Vec<&str> = imp.path.iter().map(|i| i.name.as_str()).collect();

@@ -1,7 +1,7 @@
 //! Tokens -> AST. Grammar: docs/lang/syntax.md.
 
 use super::ast::*;
-use super::lexer::lex;
+use super::lexer::{lex, lex_tolerant};
 use super::token::{FPart, Kw, Tok, Token};
 use crate::diag::{Diagnostic, Span};
 
@@ -9,8 +9,32 @@ type R<T> = Result<T, Diagnostic>;
 
 /// Parses a whole file. Stops at the first error.
 pub fn parse(src: &str) -> R<Program> {
-    let tokens = lex(src)?;
-    Parser { tokens, pos: 0 }.program()
+    let mut out = parse_tolerant(src);
+    if out.errors.is_empty() { Ok(out.program) } else { Err(out.errors.remove(0)) }
+}
+
+/// What [`parse_tolerant`] makes of a file.
+pub struct Parsed {
+    /// Everything that could be read: items and statements around a mistake are kept, a
+    /// statement or item that could not be read is left out (or kept with an
+    /// [`ExprKind::Error`] where its value should be).
+    pub program: Program,
+    /// Every syntax error found, in source order.
+    pub errors: Vec<Diagnostic>,
+}
+
+/// Parses a whole file and keeps going after a mistake: it skips to the next statement (or
+/// item) and carries on, so one typo does not hide the rest of the file. Editors use this: code
+/// is incomplete most of the time while it is being typed.
+pub fn parse_tolerant(src: &str) -> Parsed {
+    let (tokens, lex_errors) = lex_tolerant(src);
+    let mut p = Parser::new(tokens, Some(src));
+    let program = p.program();
+    let mut errors = lex_errors;
+    errors.append(&mut p.errors);
+    errors.sort_by_key(|d| d.span.start);
+    errors.dedup_by(|a, b| a.span == b.span && a.message == b.message);
+    Parsed { program, errors }
 }
 
 /// Expression-context restrictions.
@@ -29,6 +53,21 @@ const FREE: Flags = Flags { no_struct: false, no_call: false };
 struct Parser {
     tokens: Vec<Token>,
     pos: usize,
+    /// Mistakes found so far; parsing went on after each of them.
+    errors: Vec<Diagnostic>,
+    /// Per token: 0 when something precedes it on its line, 1 when it starts a line, 2 when it
+    /// starts a line at column 0. Recovery uses it to find where the next statement or item begins.
+    fresh: Vec<u8>,
+}
+
+/// Tokens that begin a statement.
+fn starts_stmt(t: &Tok) -> bool {
+    matches!(t, Tok::Kw(Kw::Let | Kw::If | Kw::While | Kw::Loop | Kw::For | Kw::Return | Kw::Break | Kw::Continue) | Tok::Ident(_) | Tok::Hash) || is_ctx_kw(t)
+}
+
+/// Tokens that begin an item.
+fn starts_item(t: &Tok) -> bool {
+    matches!(t, Tok::Kw(Kw::Fn | Kw::Struct | Kw::Enum | Kw::Impl | Kw::Global | Kw::Const | Kw::Objective | Kw::Import | Kw::Pub) | Tok::Hash)
 }
 
 fn is_ctx_kw(t: &Tok) -> bool {
@@ -67,6 +106,127 @@ fn assign_op(t: &Tok) -> Option<AssignOp> {
 }
 
 impl Parser {
+    fn new(tokens: Vec<Token>, src: Option<&str>) -> Parser {
+        let fresh = match src {
+            Some(src) => tokens
+                .iter()
+                .map(|t| {
+                    let start = (t.span.start as usize).min(src.len());
+                    let line_start = src[..start].rfind('\n').map_or(0, |i| i + 1);
+                    if !src[line_start..start].trim().is_empty() {
+                        0
+                    } else if start == line_start {
+                        2
+                    } else {
+                        1
+                    }
+                })
+                .collect(),
+            None => vec![0; tokens.len()],
+        };
+        Parser { tokens, pos: 0, errors: Vec::new(), fresh }
+    }
+
+    // ---- error recovery
+
+    /// Notes a mistake and goes on. Mistakes at text the lexer already reported are dropped.
+    fn record(&mut self, d: Diagnostic) {
+        if self.tokens.iter().any(|t| matches!(t.tok, Tok::Error) && t.span.start <= d.span.start && d.span.start < t.span.end.max(t.span.start + 1)) {
+            return;
+        }
+        // one mistake per position: "expected an expression" and then "expected `)`" at the same
+        // token are one problem
+        if self.errors.iter().any(|e| e.span.start == d.span.start) {
+            return;
+        }
+        self.errors.push(d);
+    }
+
+    fn first_on_line(&self) -> bool {
+        self.fresh[self.pos] > 0
+    }
+
+    /// After a mistake inside a statement: skips to the end of it (just past a `;`), or to where
+    /// the next one starts (a line that begins with a statement keyword or name), or to the `}`
+    /// that closes the block. Always makes progress.
+    fn sync_stmt(&mut self) {
+        let start = self.pos;
+        let mut depth: i32 = 0;
+        loop {
+            let t = self.peek().clone();
+            if t == Tok::Eof {
+                break;
+            }
+            if self.pos > start && depth <= 0 && self.first_on_line() && starts_stmt(&t) {
+                break;
+            }
+            match t {
+                Tok::Semi if depth <= 0 => {
+                    self.next();
+                    break;
+                }
+                Tok::RBrace if depth <= 0 => break,
+                Tok::LBrace | Tok::LParen | Tok::LBracket => depth += 1,
+                Tok::RBrace | Tok::RParen | Tok::RBracket => depth -= 1,
+                _ => {}
+            }
+            self.next();
+        }
+        if self.pos == start && !self.at(&Tok::Eof) && !self.at(&Tok::RBrace) {
+            self.next();
+        }
+    }
+
+    /// After a mistake that left an item unreadable: skips to the next line that starts an item
+    /// at column 0 (or the end of the file).
+    fn sync_item(&mut self) {
+        let start = self.pos;
+        loop {
+            if self.at(&Tok::Eof) {
+                break;
+            }
+            if self.pos > start && self.fresh[self.pos] == 2 && starts_item(self.peek()) {
+                break;
+            }
+            self.next();
+        }
+    }
+
+    /// After a mistake inside an `impl` block: skips to the next method (a line starting with
+    /// `fn`, `pub` or `#`) or to the `}` that closes the block.
+    fn sync_method(&mut self) {
+        let start = self.pos;
+        let mut depth: i32 = 0;
+        loop {
+            let t = self.peek().clone();
+            if t == Tok::Eof {
+                break;
+            }
+            if self.pos > start && depth <= 0 && self.first_on_line() && matches!(t, Tok::Kw(Kw::Fn | Kw::Pub) | Tok::Hash) {
+                break;
+            }
+            match t {
+                Tok::RBrace if depth <= 0 => break,
+                Tok::LBrace | Tok::LParen | Tok::LBracket => depth += 1,
+                Tok::RBrace | Tok::RParen | Tok::RBracket => depth -= 1,
+                _ => {}
+            }
+            self.next();
+        }
+        if self.pos == start && !self.at(&Tok::Eof) && !self.at(&Tok::RBrace) {
+            self.next();
+        }
+    }
+
+    /// Whether the current token ends an expression that is missing its value: a closing
+    /// bracket, `;`, `,`, the end of the file, or a statement that begins on a fresh line.
+    fn at_expr_end(&self) -> bool {
+        match self.peek() {
+            Tok::Semi | Tok::Comma | Tok::RParen | Tok::RBracket | Tok::RBrace | Tok::Eof => true,
+            t => self.first_on_line() && (matches!(t, Tok::Kw(Kw::Let | Kw::If | Kw::While | Kw::Loop | Kw::For | Kw::Return | Kw::Break | Kw::Continue)) || is_ctx_kw(t)),
+        }
+    }
+
     // ---- token access
 
     fn peek(&self) -> &Tok {
@@ -128,7 +288,13 @@ impl Parser {
             return Ok(self.next().span);
         }
         let prev = self.prev_span();
-        Err(Diagnostic::new(format!("expected `;`, found {}", self.peek().describe()), Span { start: prev.end, end: prev.end + 1 }))
+        let d = Diagnostic::new(format!("expected `;`, found {}", self.peek().describe()), Span { start: prev.end, end: prev.end + 1 });
+        // a missing `;` at the end of a line (or before `}`) is noted and the statement kept
+        if self.first_on_line() || self.at(&Tok::RBrace) || self.at(&Tok::Eof) {
+            self.record(d);
+            return Ok(prev);
+        }
+        Err(d)
     }
 
     fn ident(&mut self, what: &str) -> R<Ident> {
@@ -145,12 +311,22 @@ impl Parser {
 
     // ---- items
 
-    fn program(mut self) -> R<Program> {
+    fn program(&mut self) -> Program {
         let mut items = Vec::new();
         while !self.at(&Tok::Eof) {
-            items.push(self.item()?);
+            let before = self.pos;
+            match self.item() {
+                Ok(i) => items.push(i),
+                Err(d) => {
+                    self.record(d);
+                    self.sync_item();
+                    if self.pos == before {
+                        self.next();
+                    }
+                }
+            }
         }
-        Ok(Program { items })
+        Program { items }
     }
 
     fn attr(&mut self) -> R<Attr> {
@@ -329,9 +505,19 @@ impl Parser {
             let start = attrs.first().map(|a| a.span).unwrap_or_else(|| self.span());
             let public = self.eat(&Tok::Kw(Kw::Pub));
             if !self.at(&Tok::Kw(Kw::Fn)) {
-                return self.unexpected("a method (`fn`) or `}`");
+                let d = Diagnostic::new(format!("expected a method (`fn`) or `}}`, found {}", self.peek().describe()), self.span());
+                self.record(d);
+                self.sync_method();
+                continue;
             }
-            let decl = self.fn_decl()?;
+            let decl = match self.fn_decl() {
+                Ok(d) => d,
+                Err(d) => {
+                    self.record(d);
+                    self.sync_method();
+                    continue;
+                }
+            };
             methods.push(ImplFn { attrs, public, decl, span: start.to(self.prev_span()) });
         }
         self.expect(&Tok::RBrace)?;
@@ -440,9 +626,16 @@ impl Parser {
         let mut stmts = Vec::new();
         while !self.at(&Tok::RBrace) {
             if self.at(&Tok::Eof) {
-                return Err(Diagnostic::new("unclosed block, expected `}`", start).hint("this `{` is never closed"));
+                self.record(Diagnostic::new("unclosed block, expected `}`", start).hint("this `{` is never closed"));
+                return Ok(Block { stmts, span: start.to(self.prev_span()) });
             }
-            stmts.push(self.stmt()?);
+            match self.stmt() {
+                Ok(s) => stmts.push(s),
+                Err(d) => {
+                    self.record(d);
+                    self.sync_stmt();
+                }
+            }
         }
         let end = self.expect(&Tok::RBrace)?;
         Ok(Block { stmts, span: start.to(end) })
@@ -455,11 +648,7 @@ impl Parser {
                 self.next();
                 let mutable = self.eat(&Tok::Kw(Kw::Mut));
                 let name = self.ident("a variable name")?;
-                let ty = if self.eat(&Tok::Colon) { Some(self.ty()?) } else { None };
-                self.expect(&Tok::Eq)?;
-                let init = self.expr(FREE)?;
-                self.expect_semi()?;
-                StmtKind::Let { name, mutable, ty, init }
+                self.let_rest(name, mutable)
             }
             Tok::Kw(Kw::If) => return self.if_stmt(),
             Tok::Kw(Kw::While) => {
@@ -499,6 +688,45 @@ impl Parser {
             _ => self.expr_stmt()?,
         };
         Ok(Stmt { kind, span: start.to(self.prev_span()) })
+    }
+
+    /// The rest of `let name ...;`. A mistake after the name is noted and the declaration is
+    /// kept, so later uses of the variable are not reported as unknown.
+    fn let_rest(&mut self, name: Ident, mutable: bool) -> StmtKind {
+        let placeholder = |p: &Parser| {
+            let at = p.prev_span().end;
+            Expr { kind: ExprKind::Error, span: Span { start: at, end: at } }
+        };
+        let mut ty = None;
+        if self.eat(&Tok::Colon) {
+            match self.ty() {
+                Ok(t) => ty = Some(t),
+                Err(d) => {
+                    self.record(d);
+                    self.sync_stmt();
+                    return StmtKind::Let { name, mutable, ty: None, init: placeholder(self) };
+                }
+            }
+        }
+        if let Err(d) = self.expect(&Tok::Eq) {
+            self.record(d);
+            self.sync_stmt();
+            return StmtKind::Let { name, mutable, ty, init: placeholder(self) };
+        }
+        match self.expr(FREE) {
+            Ok(init) => {
+                if let Err(d) = self.expect_semi() {
+                    self.record(d);
+                    self.sync_stmt();
+                }
+                StmtKind::Let { name, mutable, ty, init }
+            }
+            Err(d) => {
+                self.record(d);
+                self.sync_stmt();
+                StmtKind::Let { name, mutable, ty, init: placeholder(self) }
+            }
+        }
     }
 
     fn if_stmt(&mut self) -> R<Stmt> {
@@ -646,9 +874,16 @@ impl Parser {
                     e = Expr { span: e.span.to(end), kind: ExprKind::Call { callee: Box::new(e), args } };
                 }
                 Tok::Dot => {
-                    self.next();
-                    let name = self.ident("a field or method name")?;
-                    e = Expr { span: e.span.to(name.span), kind: ExprKind::Field { base: Box::new(e), name } };
+                    let dot = self.next().span;
+                    // `value.` with nothing after it yet (the name is still being typed)
+                    let name = match self.ident("a field or method name") {
+                        Ok(n) => n,
+                        Err(d) => {
+                            self.record(d);
+                            Ident { name: String::new(), span: Span { start: dot.end, end: dot.end } }
+                        }
+                    };
+                    e = Expr { span: e.span.to(name.span.to(dot)), kind: ExprKind::Field { base: Box::new(e), name } };
                 }
                 Tok::LBracket if !flags.no_call => {
                     self.next();
@@ -776,6 +1011,14 @@ impl Parser {
                 let end = self.expect(&Tok::RBrace)?;
                 return Ok(Expr { span: span.to(end), kind: ExprKind::Compound(fields) });
             }
+            _ if self.at_expr_end() => {
+                // the value is missing: note it, and let the statement go on with a placeholder
+                // point at what was found, unless it is on a later line: then just after the last token
+                let prev = self.prev_span();
+                let at = if self.first_on_line() { Span { start: prev.end, end: prev.end + 1 } } else { self.span() };
+                self.record(Diagnostic::new(format!("expected an expression, found {}", self.peek().describe()), at));
+                return Ok(Expr { kind: ExprKind::Error, span: Span { start: at.start, end: at.start } });
+            }
             _ => return self.unexpected("an expression"),
         };
         Ok(Expr { kind, span: span.to(self.prev_span()) })
@@ -800,7 +1043,7 @@ fn parse_embedded(src: &str, base: u32) -> R<Expr> {
             *sp = shift(*sp);
         }
     }
-    let mut p = Parser { tokens, pos: 0 };
+    let mut p = Parser::new(tokens, None);
     let e = p.expr(FREE).map_err(|mut d| {
         // the embedded text ends at the closing brace, not at the end of the file
         d.message = d.message.replace("end of file", "the closing `}`");
@@ -808,6 +1051,9 @@ fn parse_embedded(src: &str, base: u32) -> R<Expr> {
     })?;
     if !p.at(&Tok::Eof) {
         return p.unexpected("the end of the expression");
+    }
+    if !p.errors.is_empty() {
+        return Err(p.errors.remove(0));
     }
     Ok(e)
 }
@@ -960,6 +1206,41 @@ mod tests {
         parse(src).unwrap_or_else(|e| panic!("parse failed: {} at {:?}\n{src}", e.message, e.span))
     }
 
+    fn messages(src: &str) -> Vec<String> {
+        parse_tolerant(src).errors.into_iter().map(|e| e.message).collect()
+    }
+
+    #[test]
+    fn tolerant_parsing_reports_every_broken_statement_and_item() {
+        let src = "fn a() {\n    let x = ;\n    foo(;\n    let y = 1;\n}\nfn b( {\n}\nfn c() {\n    let z = 2\n    z = 3;\n}\n";
+        let parsed = parse_tolerant(src);
+        assert!(parsed.errors.len() >= 4, "{:?}", messages(src));
+        assert!(parsed.errors.windows(2).all(|w| w[0].span.start < w[1].span.start), "sorted, one per position");
+        // the items around the damage are still there
+        let names: Vec<String> = parsed.program.items.iter().filter_map(|i| if let ItemKind::Fn(f) = &i.kind { Some(f.name.name.clone()) } else { None }).collect();
+        assert!(names.contains(&"a".to_owned()) && names.contains(&"c".to_owned()), "{names:?}");
+        // `parse` still fails with the first of them
+        assert_eq!(err(src).message, messages(src)[0]);
+    }
+
+    #[test]
+    fn a_missing_semicolon_keeps_the_statement() {
+        let src = "fn c() {\n    let z = 2\n    z = 3;\n}\n";
+        let parsed = parse_tolerant(src);
+        assert_eq!(parsed.errors.len(), 1, "{:?}", messages(src));
+        let ItemKind::Fn(f) = &parsed.program.items[0].kind else { panic!() };
+        assert_eq!(f.body.stmts.len(), 2, "both statements survive");
+    }
+
+    #[test]
+    fn a_dot_without_a_name_is_kept_for_completion() {
+        let src = "fn f(p: P) {\n    print(p.);\n}\n";
+        let parsed = parse_tolerant(src);
+        assert!(!parsed.errors.is_empty());
+        let ItemKind::Fn(f) = &parsed.program.items[0].kind else { panic!() };
+        assert_eq!(f.body.stmts.len(), 1);
+    }
+
     fn err(src: &str) -> Diagnostic {
         match parse(src) {
             Ok(p) => panic!("expected an error, parsed {p:#?}"),
@@ -983,6 +1264,7 @@ mod tests {
             ExprKind::Str(s) => format!("{s:?}"),
             ExprKind::Ident(n) => n.clone(),
             ExprKind::Unit => "()".to_owned(),
+            ExprKind::Error => "<error>".to_owned(),
             ExprKind::List(v) => format!("[{}]", v.iter().map(sx).collect::<Vec<_>>().join(" ")),
             ExprKind::Compound(f) => format!("{{{}}}", f.iter().map(|f| format!("{}:{}", f.name, sx(&f.value))).collect::<Vec<_>>().join(" ")),
             ExprKind::Format(parts) => format!(

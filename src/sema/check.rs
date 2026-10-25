@@ -1641,6 +1641,7 @@ impl<'a> Checker<'a> {
                 None
             }
             K::Unit => Some((ConstVal::Unit, Ty::Unit)),
+            K::Error => None,
             K::Ident(name) => {
                 let sym = self.lookup_value(name);
                 if let Some(ValueSym::Variant(eid, vi)) = sym {
@@ -2287,6 +2288,8 @@ impl<'a> Checker<'a> {
                 mk(ExprKind::Format(out), Ty::Str)
             }
             K::Unit => mk(ExprKind::Unit, Ty::Unit),
+            // already reported by the parser
+            K::Error => Expr::error(span),
             K::Ident(name) => self.ident(name, span, expected),
             K::List(items) => self.list_lit(items, expected, span),
             K::Compound(fields) => match expected {
@@ -2549,6 +2552,11 @@ impl<'a> Checker<'a> {
             return Expr::error(span);
         }
         let b = self.expr(base, None);
+        if name.name.is_empty() {
+            // `value.` with the name still to be typed (the parser reported it): keep the base
+            // and its type, so an editor can offer completions
+            return Expr { kind: ExprKind::Field { base: Box::new(b), index: usize::MAX, name: String::new() }, ty: Ty::Error, span };
+        }
         match &b.ty {
             Ty::Struct(id) => match self.structs[id.0].fields.iter().position(|(n, _)| *n == name.name) {
                 Some(i) => {
@@ -2852,6 +2860,10 @@ impl<'a> Checker<'a> {
 
     fn method_call(&mut self, base: &'a ast::Expr, name: &'a ast::Ident, args: &'a [ast::Expr], span: Span) -> Expr {
         let recv = self.expr(base, None);
+        if name.name.is_empty() {
+            self.args_for_errors(args);
+            return Expr::error(span);
+        }
         if recv.ty.is_error() {
             self.args_for_errors(args);
             return Expr::error(span);

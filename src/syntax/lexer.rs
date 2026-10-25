@@ -18,18 +18,40 @@ struct Lexer<'a> {
     pos: usize,
 }
 
+/// Tokens of a file. Stops at the first error.
 pub fn lex(src: &str) -> R<Vec<Token>> {
+    let (tokens, mut errors) = lex_tolerant(src);
+    if errors.is_empty() { Ok(tokens) } else { Err(errors.remove(0)) }
+}
+
+/// Tokens of a file and every lexical error in it. Text that is not a token becomes a
+/// [`Tok::Error`] token so the rest of the file can still be read.
+pub fn lex_tolerant(src: &str) -> (Vec<Token>, Vec<Diagnostic>) {
     let mut l = Lexer { src, pos: 0 };
     let mut out = Vec::new();
+    let mut errors = Vec::new();
     loop {
-        l.skip_trivia()?;
+        if let Err(d) = l.skip_trivia() {
+            // an unterminated block comment swallows the rest of the file
+            errors.push(d);
+            out.push(Token { tok: Tok::Eof, span: Span::new(src.len(), src.len()) });
+            return (out, errors);
+        }
         let start = l.pos;
         let Some(c) = l.peek() else {
             out.push(Token { tok: Tok::Eof, span: Span::new(start, start) });
-            return Ok(out);
+            return (out, errors);
         };
-        let tok = l.token(c)?;
-        out.push(Token { tok, span: Span::new(start, l.pos) });
+        match l.token(c) {
+            Ok(tok) => out.push(Token { tok, span: Span::new(start, l.pos) }),
+            Err(d) => {
+                errors.push(d);
+                if l.pos <= start {
+                    l.bump();
+                }
+                out.push(Token { tok: Tok::Error, span: Span::new(start, l.pos) });
+            }
+        }
     }
 }
 
