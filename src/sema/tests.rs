@@ -178,9 +178,28 @@ fn operators_are_type_checked() {
     one_error(&in_fn("let a = !1; print(a);"), "`!` needs `bool`");
     one_error(&in_fn("let a = -true; print(a);"), "`-` needs `int`");
     one_error(&in_fn("let a = 1 == true; print(a);"), "cannot apply `==` to `int` and `bool`");
-    one_error(&in_fn("let a = \"x\" == \"y\"; print(a);"), "not supported yet");
+    ok(&in_fn("let a = \"x\" == \"y\"; print(a);"));
     one_error(&in_fn("if 1 { }"), "expected `bool`, found `int`");
     one_error(&in_fn("let a = 1.5;"), "floating point");
+}
+
+#[test]
+fn equality_compares_stored_values_and_handles() {
+    // strings, lists, structs, in conditions and as values
+    ok("struct P { x: int, n: str } fn f(a: str, b: str, p: P, q: P, xs: list<int>, ys: list<int>) { if a == b && p != q || xs == ys { print(\"eq\"); } let same = xs == [1, 2]; let e = xs != []; print(same); print(e); print(p == P { x: 1, n: \"a\" }); }");
+    one_error("fn f(a: str, b: int) { print(a == b); }", "cannot apply `==` to `str` and `int`");
+    one_error("fn f(a: list<int>, b: list<str>) { print(a == b); }", "cannot apply `==` to `list<int>` and `list<str>`");
+    one_error("struct A { x: int } struct B { x: int } fn f(a: A, b: B) { print(a == b); }", "cannot apply `==` to `A` and `B`");
+    // a selector is a query, not a value
+    let e = errors(&in_fn("print(@a == @a[tag=x]);"));
+    assert_eq!(e.len(), 2, "each selector is reported: {e:?}");
+    one_error(&in_fn("print(@s == 1);"), "cannot apply `==` to `selector` and `int`");
+    // an entity and a selector that matches one entity compare as entities, either way round
+    ok(&in_fn("let e: Entity = @p; print(e == @s); print(@s == e); print(@s != @p); print(@e[limit=1, tag=x] == e);"));
+    one_error(&in_fn("let e: Entity = @p; print(e == @e[tag=x]);"), "can match several entities");
+    one_error(&in_fn("let e: Entity = @p; print(@a == e);"), "can match several entities");
+    // text constants compare at compile time
+    ok("const A: str = \"x\"; const SAME: bool = A == \"x\"; global g: bool = SAME;");
 }
 
 #[test]

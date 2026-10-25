@@ -47,6 +47,10 @@ Mechanism (`codegen.rs` collects `Holes`, `lower.rs::call_macro` emits):
 
 Constant arguments never use this: `tp(@s, 1, 64, 2)` is the plain command `teleport @s 1 64 2`. A macro call costs about `2n + 3` commands for `n` variables. Values are int tags, which substitute as plain decimals (including negatives). A hole's range can only be checked at run time: an out-of-range duration or a bad index makes that one command fail silently.
 
+## Equality of stored values
+
+`a == b` on `str`, `list`, structs (anything stored in command storage) relies on `data modify <path> set from <other>` **failing when it changes nothing**: the left value is copied to a scratch temporary, then `execute store success score X run data modify <scratch> set from <b>` (or `set value <literal>`) leaves `X = 1` exactly when the two differ; `==` tests `unless X matches 1`, `!=` tests `if`. Three commands plus the temporary's removal, and an owned temporary on the left is used up instead of copied. Two literals are compared by the compiler. Compound key order does not matter, list order does, and tags of different types differ (int `1` and byte `1b`), all verified on 26.3 (`docs/mc/05-verified-by-slab.md`). `Entity` against a selector goes through `ToEntity` (`_ensure_id`) and an ordinary score comparison.
+
 ## Selector variables
 
 A selector with `$name` / `${expr}` options (`docs/lang/semantics.md`, "Selectors") carries its expressions in the HIR (`ExprKind::Selector(sel, holes)`; `Hole(k)` of the selector is `holes[k]`). Wherever codegen turns a selector into part of a command (`target`, `holder`, the `ToEntity` handle), `fill_selector` allocates real holes in that command (a string through `hole_str`, an int through `hole_ir`) and renumbers the selector's own holes with `Selector::remap_holes`. The typed values are `SelectorArg::Dynamic { key, negated, value: Vec<ArgPart> }` (literal text and holes; `name` is rendered quoted) and `SelectorArg::DynScores`. The command becomes an ordinary macro call: `$execute as @e[tag=$(h0),distance=..$(h1)] run function ...`. A selector without variables is unchanged. `Expr::EntityOf` carries the hole arguments too, so `let e: Entity = @e[tag=$t, limit=1]` works.
@@ -77,7 +81,7 @@ A world-acting builtin used as a value becomes `ir::Expr::CommandSuccess`: `set 
 |---|---|
 | `push` onto a list selected by a variable index (`xs[i].push(v)`) | would modify a copy |
 | a score holder must be a selector or string literal (`pts[name]` with a variable `name`) | strings are not substituted into commands |
-| string `==`, string indexing/slicing, selector parts or score-holder names chosen at run time | commands need those at compile time (or a bigger macro design) |
+| string indexing/slicing, selector parts other than the options listed in "Selector variables", score-holder names chosen at run time | commands need those at compile time (or a bigger macro design) |
 | a loop runs at most ~21,000 iterations per tick | `max_command_sequence_length` = 65536 commands; the game stops the whole call chain (docs/mc/05-verified-by-slab.md) |
 | no floats | `/compute` is not used yet |
 

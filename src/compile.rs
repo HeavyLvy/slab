@@ -431,6 +431,27 @@ mod tests {
     }
 
     #[test]
+    fn equality_of_stored_values_copies_one_side_then_sets_it_from_the_other() {
+        // `set` fails when it changes nothing, so "did it change" is "are they different"
+        let c = build_main("fn f(a: str, b: str) -> bool { return a == b; }");
+        let f = fn_text(&c, "t:f");
+        assert!(
+            f.contains("data modify storage t:vars f.t_0 set from storage t:vars f.v_a\nexecute store success score #f.t_0 t run data modify storage t:vars f.t_0 set from storage t:vars f.v_b\ndata remove storage t:vars f.t_0\nexecute store success score #ret t unless score #f.t_0 t matches 1\n"),
+            "{f}"
+        );
+        let c = build_main("fn f(a: list<int>) -> bool { return a != [1, 2]; }");
+        let f = fn_text(&c, "t:f");
+        assert!(f.contains("run data modify storage t:vars f.t_0 set value [1,2]\ndata remove storage t:vars f.t_0\nexecute store success score #ret t if score #f.t_0 t matches 1\n"), "{f}");
+        // two literals are compared by the compiler
+        let c = build_main("fn f(a: str) -> bool { return a != \"b\" && \"a\" == \"a\"; }");
+        assert_eq!(fn_text(&c, "t:f").matches("data modify storage t:vars f.t_0 set").count(), 2, "one comparison, not two: {}", fn_text(&c, "t:f"));
+        // an entity and a one-entity selector are compared as handles
+        let c = build_main("fn f(e: Entity) -> bool { return e == @s; }");
+        let f = fn_text(&c, "t:f");
+        assert!(f.contains("execute as @s run function t:_ensure_id") && f.contains("if score #f.v_e t = #f.t_0 t"), "{f}");
+    }
+
+    #[test]
     fn selector_variables_become_macro_holes() {
         let c = build_main("fn f(t: str, r: int) { for e in @e[tag=$t, distance=..${r + 1}] { kill(e); } kill(@a[tag=$t, limit=1]); if exists(@e[type=$t]) { print(1); } }");
         let f = fn_text(&c, "t:f");

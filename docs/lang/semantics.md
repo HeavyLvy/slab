@@ -49,6 +49,8 @@ Semantic analysis runs over the whole project at once: it first registers every 
 
 ## Builtins (`sema/builtins.rs`)
 
+**Equality** (`==`, `!=`): both sides must have the same type, which can be any storable type: `int`, `bool`, `Entity`, `str`, `list<T>` and structs (compared by contents, field by field and element by element; order matters for lists). A selector that matches one entity may stand on either side of an `Entity` (`boss == @s`, `@s != @p`): it is converted to a handle first, and a selector that can match several entities is the usual error. `int` and `bool` compare as scores; everything else is compared in command storage (below). Selectors and `()` themselves cannot be compared.
+
 Builtins that act on the world return `bool`: **did the command work?** `if !tp(boss, 0, 70, 0) { ... }` catches a missing target. Ignoring the result is free (the plain command is emitted); using it costs one `execute store success`. "Worked" is Minecraft's own notion: it targeted something and changed something, so `tag::add` fails if the tag is already there, `setblock` fails if the block is unchanged, `kill`/`tp`/`effect::give` fail when nothing matches, and a run-time value out of range fails that one command.
 
 | Call | Returns | Notes |

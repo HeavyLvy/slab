@@ -68,6 +68,20 @@ global r_sel_type: int = 0;
 global r_sel_ntype: int = 0;
 global r_sel_picked: int = 0;
 global r_sel_gone: int = 0;
+global r_eq_str_eq: int = 0;
+global r_eq_str_ne: int = 0;
+global r_eq_str_calc: int = 0;
+global r_eq_list_eq: int = 0;
+global r_eq_list_ne: int = 0;
+global r_eq_list_len: int = 0;
+global r_eq_struct_eq: int = 0;
+global r_eq_struct_ne: int = 0;
+global r_eq_or: int = 0;
+global r_eq_loop: int = 0;
+global r_eq_entity: int = 0;
+global r_eq_entity_other: int = 0;
+global r_eq_selector: int = 0;
+global r_eq_nested: int = 0;
 global r_results: int = 0;
 global r_gone: int = 0;
 global r_entities: int = 0;
@@ -293,6 +307,7 @@ fn world_test() {
     entity_test();
     string_test();
     selector_test();
+    equality_test();
 
     // one owned entity is left alive on purpose: `_uninstall` must remove it
     summon("minecraft:marker", bx, 64, bx);
@@ -341,6 +356,52 @@ fn spawn_at(x: int) -> Entity {
 }
 
 // Entity values: a variable holds an entity and acts on it. Run by the harness after world_test.
+struct Pair2 { a: int, name: str, tags: list<str> }
+
+fn eq_str(a: str, b: str) -> bool { return a == b; }
+
+// `==` / `!=` on strings, lists, structs, and an entity against a selector.
+fn equality_test() {
+    if eq_str("abc", "abc") { r_eq_str_eq = 1; }
+    if !eq_str("abc", "abd") { r_eq_str_ne = 1; }
+    let part = "b";
+    if "a" + part + "c" == "abc" { r_eq_str_calc = 1; }
+
+    let xs = [1, 2, 3];
+    if xs == [1, 2, 3] { r_eq_list_eq = 1; }
+    if xs != [3, 2, 1] && xs != [1, 2] && xs != [1, 2, 4] { r_eq_list_ne = 1; }
+    let empty: list<int> = [];
+    if empty == [] && empty != xs { r_eq_list_len = 1; }
+
+    let p = Pair2 { a: 1, name: "n", tags: ["x", "y"] };
+    let mut q = Pair2 { a: 1, name: "n", tags: ["x", "y"] };
+    if p == q { r_eq_struct_eq = 1; }
+    q.tags.push("z");
+    if p != q { r_eq_struct_ne = 1; }
+
+    // ||, && and a loop condition re-evaluate the comparison each time
+    let s = "x";
+    if s == "no" || s != "yes" { r_eq_or = 1; }
+    let mut grown = "";
+    let mut n = 0;
+    while grown != "aaa" { grown += "a"; n += 1; }
+    r_eq_loop = n;
+
+    // an entity and a selector for one entity
+    let m1 = summon("minecraft:marker", 6, 64, 6);
+    let m2 = summon("minecraft:marker", 7, 64, 6);
+    tag::add(m1, "eq1");
+    tag::add(m2, "eq2");
+    if m1 == @e[tag=eq1, limit=1] && @e[tag=eq1, limit=1] == m1 { r_eq_entity = 1; }
+    if m2 != @e[tag=eq1, limit=1] && m1 != m2 && !(m1 == m2) { r_eq_entity_other = 1; }
+    if @e[tag=eq1, limit=1] == @e[tag=eq1, limit=1] && @e[tag=eq1, limit=1] != @e[tag=eq2, limit=1] { r_eq_selector = 1; }
+    let pairs = [m1, m2];
+    let other = [m1, m2];
+    if pairs == other && pairs != [m2, m1] { r_eq_nested = 1; }
+    kill(m1);
+    kill(m2);
+}
+
 // Selector options chosen at run time: `$name` and `${expr}` inside `@e[...]`.
 fn selector_test() {
     // three markers, all tagged "seltest"; two of them also "dyn"

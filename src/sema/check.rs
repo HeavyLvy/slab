@@ -1169,6 +1169,8 @@ impl<'a> Checker<'a> {
                 BinOp::And | BinOp::Or => bad(self),
             },
             (Str(a), Str(b)) if op == BinOp::Add => Some((Str(a + &b), Ty::Str)),
+            (Str(a), Str(b)) if op == BinOp::Eq => Some((Bool(a == b), Ty::Bool)),
+            (Str(a), Str(b)) if op == BinOp::Ne => Some((Bool(a != b), Ty::Bool)),
             (Bool(a), Bool(b)) => match op {
                 BinOp::And => Some((Bool(a && b), Ty::Bool)),
                 BinOp::Or => Some((Bool(a || b), Ty::Bool)),
@@ -1798,8 +1800,15 @@ impl<'a> Checker<'a> {
     }
 
     fn binary(&mut self, op: BinOp, lhs: &'a ast::Expr, rhs: &'a ast::Expr, span: Span) -> Expr {
-        let l = self.expr(lhs, None);
-        let r = self.expr(rhs, None);
+        let mut l = self.expr(lhs, None);
+        let comparing = matches!(op, BinOp::Eq | BinOp::Ne);
+        // the left side gives the right one its expected type (`xs == []`, `e == @s`)
+        let mut r = if comparing && !matches!(l.ty, Ty::Selector | Ty::Error) { self.expr(rhs, Some(&l.ty.clone())) } else { self.expr(rhs, None) };
+        if comparing && matches!((&l.ty, &r.ty), (Ty::Selector, Ty::Entity | Ty::Selector)) {
+            // a selector that matches one entity stands for that entity
+            l = self.coerce_to_entity(l);
+            r = self.coerce_to_entity(r);
+        }
         let poisoned = l.ty.is_error() || r.ty.is_error();
         let result = match op {
             BinOp::Add if !poisoned && l.ty == Ty::Str && r.ty == Ty::Str => {
@@ -1825,8 +1834,9 @@ impl<'a> Checker<'a> {
                 if !poisoned {
                     if l.ty != r.ty {
                         self.bin_error(op, &l.ty, &r.ty, span);
-                    } else if !matches!(l.ty, Ty::Int | Ty::Bool | Ty::Entity) {
-                        let msg = format!("`{}` on `{}` values is not supported yet (only `int`, `bool` and `Entity`)", op_str(op), self.tn(&l.ty));
+                    } else if !l.ty.is_storable() {
+                        // selectors and coordinates are queries, not values; `()` has nothing to compare
+                        let msg = format!("`{}` cannot compare values of type `{}`", op_str(op), self.tn(&l.ty));
                         self.error(span, msg);
                     }
                 }

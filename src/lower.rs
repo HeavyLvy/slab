@@ -594,6 +594,13 @@ impl<'a> Lower<'a> {
                 self.expect_score(a, "`not`")?;
                 Kind::Bool
             }
+            Expr::Binary(BinOp::Eq | BinOp::Ne, a, b) if self.kind_of(a)? == Kind::Data => {
+                // structural equality of two stored values (strings, lists, structs, ...)
+                if self.kind_of(b)? != Kind::Data {
+                    err!("`==` compares two Data values or two Int/Bool values, not one of each");
+                }
+                Kind::Bool
+            }
             Expr::Binary(op, a, b) => {
                 self.expect_score(a, "a binary operator")?;
                 self.expect_score(b, "a binary operator")?;
@@ -899,6 +906,7 @@ impl<'a> Lower<'a> {
             Expr::Unary(UnOp::Not, a) => self.cond(a, !negate),
             Expr::Binary(BinOp::And, a, b) => self.and_or(true, a, b, negate),
             Expr::Binary(BinOp::Or, a, b) => self.and_or(false, a, b, negate),
+            Expr::Binary(op @ (BinOp::Eq | BinOp::Ne), a, b) if self.kind_of(a)? == Kind::Data => self.data_equal(a, b, (*op == BinOp::Ne) != negate),
             Expr::Binary(op, a, b) if is_cmp(*op) => self.compare(*op, a, b, negate),
             Expr::Exists(r, path) => {
                 let loc = self.ref_loc(r)?.extend(path)?;
@@ -974,6 +982,49 @@ impl<'a> Lower<'a> {
             cond: Condition::Score { target: fake(&flag), objective: self.obj.clone(), test: ScoreTest::Matches(IntRange::exactly(1)) },
         };
         Ok(Cond { kind: CondKind::Tests(vec![test]), temps: vec![flag] })
+    }
+
+    /// `a == b` (or `a != b` when `differ`) on stored values, by structure. `data modify <t> set
+    /// from <b>` fails when it changes nothing, so: copy `a` to a scratch value, `store success`
+    /// of setting it from `b` is 1 exactly when they differ (verified on 26.3, int `1` and byte `1b`
+    /// differ, compound key order does not matter; docs/mc/05-verified-by-slab.md).
+    fn data_equal(&mut self, a: &Expr, b: &Expr, differ: bool) -> R<Cond> {
+        let mut av = self.eval_data(a)?;
+        if has_call(b)
+            && let DataVal::Loc(l, false) = &av
+        {
+            let t = self.alloc_data()?;
+            self.assign_data(&t, &DataVal::Loc(l.clone(), false));
+            av = DataVal::Loc(t, true);
+        }
+        let bv = self.eval_data(b)?;
+        if let (DataVal::Const(x), DataVal::Const(y)) = (&av, &bv) {
+            return Ok(Cond::constant((x != y) == differ));
+        }
+        // the scratch copy of `a` (an owned temporary can be used up as it is)
+        let scratch = match av {
+            DataVal::Loc(l, true) => l,
+            other => {
+                let t = self.alloc_data()?;
+                self.assign_data(&t, &other);
+                t
+            }
+        };
+        let source = match &bv {
+            DataVal::Const(n) => ModifySource::Value(n.clone()),
+            DataVal::Loc(l, _) => ModifySource::From { source: l.target(), path: Some(l.path.clone()) },
+        };
+        let changed = self.alloc_int()?;
+        let modify = Command::Data(Data::Modify { target: scratch.target(), path: scratch.path.clone(), op: ModifyOp::Set, source });
+        let store = Command::execute().store(StoreKind::Success, StoreTarget::Score { targets: fake(&changed), objective: self.obj.clone() }).run(modify);
+        self.emit(store);
+        self.release_data(&DataVal::Loc(scratch, true));
+        self.release_data(&bv);
+        let test = Test {
+            negate: !differ,
+            cond: Condition::Score { target: fake(&changed), objective: self.obj.clone(), test: ScoreTest::Matches(IntRange::exactly(1)) },
+        };
+        Ok(Cond { kind: CondKind::Tests(vec![test]), temps: vec![changed] })
     }
 
     fn compare(&mut self, op: BinOp, a: &Expr, b: &Expr, negate: bool) -> R<Cond> {
