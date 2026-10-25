@@ -458,7 +458,7 @@ mod tests {
         let f = fn_text(&c, "t:f");
         assert!(f.contains("unless data storage t:vars {f:{v_a:\"b\"}}") && !f.contains("data modify") && f.matches("execute").count() == 1, "the literal comparison folds away: {f}");
         // an entity and a one-entity selector are compared as handles
-        let c = build_main("fn f(e: Entity) -> bool { return e == @s; }");
+        let c = build_main("fn f(e: EntityId) -> bool { return e == @s; }");
         let f = fn_text(&c, "t:f");
         assert!(f.contains("execute as @s run function t:_ensure_id") && f.contains("if score #f.v_e t = #f.t_0 t"), "{f}");
     }
@@ -596,7 +596,7 @@ mod tests {
 
     #[test]
     fn a_selector_becomes_a_handle_through_the_id_helper() {
-        let c = build_main("fn f() -> Entity { let me = @p; return me; }");
+        let c = build_main("fn f() -> EntityId { let me = @p; return me; }");
         let f = fn_text(&c, "t:f");
         // the id is read back from #new_id after the helper ran for the matched entity
         assert!(f.contains("scoreboard players set #new_id t 0\nexecute as @p run function t:_ensure_id\n"), "{f}");
@@ -621,7 +621,7 @@ mod tests {
 
     #[test]
     fn summon_as_a_value_creates_and_numbers_the_entity() {
-        let c = build_main("fn f(x: int) -> Entity { return summon(\"minecraft:zombie\", x, 64, 3); }");
+        let c = build_main("fn f(x: int) -> EntityId { return summon(\"minecraft:zombie\", x, 64, 3); }");
         let f = fn_text(&c, "t:f");
         assert!(f.contains("scoreboard players set #new_id t 0"), "{f}");
         assert_eq!(fn_text(&c, "t:f/m0"), "$execute positioned $(h0) 64 3 summon minecraft:zombie run function t:_new_entity\n");
@@ -634,7 +634,7 @@ mod tests {
 
     #[test]
     fn a_handle_is_found_again_by_its_id() {
-        let c = build_main("fn f(b: Entity) -> bool { tp(b, 1, 2, 3); effect::give(b, \"speed\", 10s); return kill(b); }");
+        let c = build_main("fn f(b: EntityId) -> bool { tp(b, 1, 2, 3); effect::give(b, \"speed\", 10s); return kill(b); }");
         let f = fn_text(&c, "t:f");
         assert_eq!(fn_text(&c, "t:f/m0"), "$teleport @e[scores={t_id=$(h0)},limit=1] 1 2 3\n");
         assert_eq!(fn_text(&c, "t:f/m1"), "$effect give @e[scores={t_id=$(h0)},limit=1] minecraft:speed 10\n");
@@ -645,7 +645,7 @@ mod tests {
 
     #[test]
     fn handles_work_as_context_targets_scores_and_existence_tests() {
-        let c = build_main("objective pts = \"dummy\"; fn f(b: Entity) { as b at b { say(\"x\"); } pts[b] += 2; print(exists(b)); }");
+        let c = build_main("objective pts = \"dummy\"; fn f(b: EntityId) { as b at b { say(\"x\"); } pts[b] += 2; print(exists(b)); }");
         let f = fn_text(&c, "t:f");
         assert!(f.contains("function t:f/m0 with storage t:macro"), "{f}");
         assert_eq!(fn_text(&c, "t:f/m0"), "$execute as @e[scores={t_id=$(h0)},limit=1] at @e[scores={t_id=$(h1)},limit=1] run function t:f/b0\n");
@@ -655,7 +655,7 @@ mod tests {
 
     #[test]
     fn handles_are_ints_inside_lists_and_structs() {
-        let c = build_main("struct S { e: Entity } fn f(a: Entity) { let xs = [a, a]; let s = S { e: a }; kill(xs[0]); kill(s.e); }");
+        let c = build_main("struct S { e: EntityId } fn f(a: EntityId) { let xs = [a, a]; let s = S { e: a }; kill(xs[0]); kill(s.e); }");
         let f = fn_text(&c, "t:f");
         // stored as int tags like any int
         assert!(f.contains("execute store result storage t:vars f.t_0 int 1 run scoreboard players get #f.v_a t") || f.contains("int 1 run scoreboard players get #f.v_a t"), "{f}");

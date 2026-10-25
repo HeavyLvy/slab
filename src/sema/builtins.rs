@@ -129,7 +129,7 @@ impl BParam {
     }
 
     /// The kind a declared parameter type stands for: the pseudo types `Target` (a selector or
-    /// an `Entity`), `Coord` and `any`, plus `int` and `str`, either `const` or not.
+    /// an `EntityId`), `Coord` and `any`, plus `int` and `str`, either `const` or not.
     pub fn from_type(name: &str, constant: bool) -> Option<BParam> {
         Some(match (name, constant) {
             ("Target", false) => BParam::Selector,

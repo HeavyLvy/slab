@@ -42,11 +42,11 @@ Items are private to their file unless declared `pub`: `pub fn`, `pub struct`, `
 
 ## Built-in modules
 
-Two modules are part of the language and need no file of your own (their source is embedded in the compiler): **`std`** (`print`) and **`game`** (everything that touches Minecraft). `game` has the submodules `game::tag` and `game::effect` and the type `game::Entity`. They follow the same rules as any module, with two differences: a full path always works without an import (`game::say("hi")`, `game::tag::add(e, "x")`, `let e: game::Entity = game::summon("minecraft:cow");`), and a path may have more than two segments. `import a::b::c;` also imports one item (`c`) when `a::b` is a module and `c` is in it, for the standard library and for your own modules.
+Two modules are part of the language and need no file of your own (their source is embedded in the compiler): **`std`** (`print`) and **`game`** (everything that touches Minecraft). `game` has the submodules `game::tag` and `game::effect` and the type `game::EntityId`. They follow the same rules as any module, with two differences: a full path always works without an import (`game::say("hi")`, `game::tag::add(e, "x")`, `let e: game::EntityId = game::summon("minecraft:cow");`), and a path may have more than two segments. `import a::b::c;` also imports one item (`c`) when `a::b` is a module and `c` is in it, for the standard library and for your own modules.
 
 ```slab
 import std::print;            // one item, usable as print(..)
-import game::*;               // everything game has: say, kill, tp, summon, Entity, and the modules tag and effect
+import game::*;               // everything game has: say, kill, tp, summon, EntityId, and the modules tag and effect
 import game::tag;             // the submodule, used as tag::add(..)
 import game::summon as spawn; // renamed
 import game::tag::{add, has}; // items of a submodule

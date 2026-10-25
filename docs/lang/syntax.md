@@ -35,7 +35,7 @@ fn fib(n: int) -> int {
 * Whitespace separates tokens. Comments: `// to end of line`, `/* block, nests */`.
 * Identifiers: `[A-Za-z_][A-Za-z0-9_]*`. Keywords (cannot be identifiers):
   `fn let mut if else while loop for in return break continue struct enum impl global const objective pub import true false as at positioned rotated facing align anchored`.
-* **Paths** use `::`: `util::clamp`, `game::tag::add`, `game::Entity`. `import a::b;`, `import a::b as c;`, `import a::{x, y};` and `import a::*;` (docs/lang/modules.md).
+* **Paths** use `::`: `util::clamp`, `game::tag::add`, `game::EntityId`. `import a::b;`, `import a::b as c;`, `import a::{x, y};` and `import a::*;` (docs/lang/modules.md).
 * Integers: decimal with `_` separators (`1_000`), or hex `0xFF`. They are `i64` in the AST and range-checked to `i32` later.
 * **Time literals**: an integer directly followed by `t` (ticks), `s` (seconds, x20) or `d` (days, x24000): `5t`, `10s`, `1d`. They are plain integers (ticks) with no separate type.
 * Floats (`1.5`) lex, but are rejected by the type checker until floats exist.
@@ -140,8 +140,8 @@ The language server hides checker diagnostics inside the item that contains a sy
 | `if`/`while`/`loop`/`for`/`break`/`continue` | IR `If`/`While`; `loop` is `while true`; `break`/`continue` need IR support (flag variables) - not in the IR yet. `for i in a..b` counts; `for x in list` walks a list; **`for e in @selector` runs the body once per match as a context block, with `e` bound to the current entity** (see `entities.md`, "Iterating a selector": no `break`/`continue` inside, and the name is not assignable). |
 | context blocks | `as`/`at`/`in`/`positioned`/`rotated`/`facing`/`align`/`anchored` map one-to-one to `/execute` sub-commands; the body becomes a function called through the `execute` chain. Inside `as X`, `@s` is the entity; outside, `@s` is whatever the enclosing function was run as. Needs a new IR statement (`Stmt::Context`). |
 | `kills[@s]` (index on an `objective`) | A scoreboard score of an entity / fake player: reads and writes (`+=`) use `scoreboard players ...`. `objective kills = "playerKillCount";` declares it. |
-| `@e[...]` | A selector value (type `game::Entity`/selector). Used with context blocks and builtins (`exists(@e[type=zombie])` -> `execute if entity`). |
-| builtins | The built-in modules `std` (`print`) and `game` (`say`, `exists`, `tp`, `setblock`, `summon`, `kill`, `tag::*`, `effect::*`, the `Entity` type) are resolved by path in the type checker and become typed `datapack::Command`s (`docs/lang/modules.md`, "Built-in modules"). |
+| `@e[...]` | A selector value (type `game::EntityId`/selector). Used with context blocks and builtins (`exists(@e[type=zombie])` -> `execute if entity`). |
+| builtins | The built-in modules `std` (`print`) and `game` (`say`, `exists`, `tp`, `setblock`, `summon`, `kill`, `tag::*`, `effect::*`, the `EntityId` type) are resolved by path in the type checker and become typed `datapack::Command`s (`docs/lang/modules.md`, "Built-in modules"). |
 
 ## Open questions
 

@@ -388,19 +388,19 @@ fn world_test() {
 }
 
 struct Duel {
-    left: Entity,
-    right: Entity,
+    left: EntityId,
+    right: EntityId,
 }
 
-fn raise(e: Entity, y: int) -> bool {
+fn raise(e: EntityId, y: int) -> bool {
     return tp(e, 8, y, 8);
 }
 
-fn spawn_at(x: int) -> Entity {
+fn spawn_at(x: int) -> EntityId {
     return summon("minecraft:marker", x, 64, 8);
 }
 
-// Entity values: a variable holds an entity and acts on it. Run by the harness after world_test.
+// EntityId values: a variable holds an entity and acts on it. Run by the harness after world_test.
 struct Pair2 { a: int, name: str, tags: list<str> }
 
 fn eq_str(a: str, b: str) -> bool { return a == b; }
@@ -628,7 +628,7 @@ fn selector_test() {
     r_sel_ntype = c;                     // none
 
     // a selector with a variable can become an entity, and works as a target
-    let picked: Entity = @e[tag=seltest, tag=$t, limit=1];
+    let picked: EntityId = @e[tag=seltest, tag=$t, limit=1];
     tag::add(picked, "picked");
     r_sel_picked = 0;
     if exists(@e[tag=picked]) { r_sel_picked = 1; }

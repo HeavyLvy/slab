@@ -3,7 +3,7 @@
 `std` and `game` (with `game::tag` and `game::effect`) are written in slab. Their sources are
 files in the compiler (`src/stdlib/std.slab`, `game.slab`, `game/tag.slab`, `game/effect.slab`),
 embedded with `include_str!` and loaded into every project as ordinary modules (`src/stdlib.rs`,
-`src/project.rs`). Hover or ctrl+click on `kill`, `tag::add`, `Entity`, ... in the editor opens
+`src/project.rs`). Hover or ctrl+click on `kill`, `tag::add`, `EntityId`, ... in the editor opens
 the declaration and its `///` documentation.
 
 ## Intrinsics
@@ -22,13 +22,13 @@ Parameter types in an intrinsic are one of:
 
 | Type | Accepts |
 |---|---|
-| `Target` | a selector (`@a[tag=x]`) or an `Entity` |
+| `Target` | a selector (`@a[tag=x]`) or an `EntityId` |
 | `Coord` | an `int` expression or a relative coordinate (`~`, `^2`) |
 | `any` | any storable value (for `print`) |
 | `str`, `int` | an expression; a computed one reaches the command at run time (a macro) |
 | `const str`, `const int` | a value known at compile time (it becomes part of a selector) |
 
-The result is `bool` (did the command work), an `Entity` (`summon`), or nothing.
+The result is `bool` (did the command work), an `EntityId` (`summon`), or nothing.
 
 `id` must be one of the names in `sema::builtins::IDS`; code generation (`codegen.rs`,
 `builtin_command` / `builtin_stmt`) matches on it and builds the typed commands. A test checks
@@ -43,10 +43,10 @@ The methods of both are declared in `impl<T> Option<T>` / `impl<T, E> Result<T, 
 
 ## Compiler types
 
-`#[lang("entity")] pub struct Entity {}` in `game.slab` binds the name `Entity` to the type the
+`#[lang("entity")] pub struct EntityId {}` in `game.slab` binds the name `EntityId` to the type the
 compiler provides for entity handles (an `int` id on the scoreboard, `docs/lang/entities.md`).
 Selector conversion (`let me = @p;`), `for e in @e`, context blocks and every target argument
-keep working; the declaration is where `game::Entity`, `import game::Entity;` and hover come from.
+keep working; the declaration is where `game::EntityId`, `import game::EntityId;` and hover come from.
 
 ## How it is wired
 
@@ -56,7 +56,7 @@ keep working; the declaration is where `game::Entity`, `import game::Entity;` an
   The language server writes the files there (read-only) when it starts, so go-to-definition has a
   real file to open; the compiler itself never touches the disk for them.
 - A full path (`game::say(..)`) works without an import: `std` and `game` are always known.
-  Everything else is the normal module system: `import game::*;` brings in the functions, `Entity`
+  Everything else is the normal module system: `import game::*;` brings in the functions, `EntityId`
   and the submodules `tag` and `effect`; `import game::tag;` is the module; `import std::print;`
   is one item (also `as` another name).
 - Nothing is in scope without an import, and a bare `print(..)` is an error whose hint names the

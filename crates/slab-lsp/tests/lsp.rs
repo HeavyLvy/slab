@@ -299,7 +299,7 @@ fn completion_modes() {
     let at = src.find("game::").unwrap() + "game::".len();
     let items = completion::completions(&ws, &uri, at).unwrap();
     assert!(items.iter().any(|i| i.label == "summon" && i.kind == 3 && i.detail.as_deref().is_some_and(|d| d.starts_with("fn summon(kind: str"))), "{items:?}");
-    assert!(items.iter().any(|i| i.label == "Entity" && i.kind == 22) && items.iter().any(|i| i.label == "tag" && i.kind == 9), "{items:?}");
+    assert!(items.iter().any(|i| i.label == "EntityId" && i.kind == 22) && items.iter().any(|i| i.label == "tag" && i.kind == 9), "{items:?}");
     let at = src.find("effect::\n").unwrap() + "effect::".len();
     let items = completion::completions(&ws, &uri, at).unwrap();
     assert!(items.iter().any(|i| i.label == "give") && items.iter().any(|i| i.label == "clear"), "{items:?}");

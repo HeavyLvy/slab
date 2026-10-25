@@ -100,7 +100,7 @@ fn type_items(state: &ProjectState, module: usize) -> Option<Vec<Item>> {
         Item { label: "bool".into(), kind: 14, detail: None, docs: None, insert: None },
         Item { label: "str".into(), kind: 14, detail: None, docs: None, insert: None },
         Item { label: "list<T>".into(), kind: 14, detail: None, docs: None, insert: Some("list<${1:int}>".to_owned()) },
-        Item { label: "game::Entity".into(), kind: 22, detail: Some("a reference to one entity".into()), docs: None, insert: None },
+        Item { label: "game::EntityId".into(), kind: 22, detail: Some("a reference to one entity".into()), docs: None, insert: None },
     ];
     for m in &state.modules {
         for def in m.defs.defs().iter().filter(|d| matches!(d.kind, DefKind::Struct | DefKind::Enum)) {
@@ -215,7 +215,7 @@ fn member_items(ws: &Workspace, uri: &str, module: usize, offset: usize) -> Opti
     let type_name = match ty {
         Ty::Struct(id) => hir.structs.get(id.0).map(|s| s.name.clone()),
         Ty::Enum(id, _) => hir.enums.get(id.0).map(|e| e.name.clone()),
-        Ty::Entity => Some("Entity".to_owned()),
+        Ty::Entity => Some("EntityId".to_owned()),
         _ => None,
     };
     if let Some(type_name) = type_name {
