@@ -295,6 +295,23 @@ fn holes() -> Function {
         op: ModifyOp::Set,
         source: ModifySource::Template(vec![TemplatePart::Lit("a \"quoted\" $(not a hole) ".into()), TemplatePart::Hole(Hole(0)), TemplatePart::Lit("-".into()), TemplatePart::Hole(Hole(1))]),
     }));
+    // selector options chosen at run time
+    {
+        use ArgPart::{Hole as H, Lit};
+        let dynamic = |key, negated, value| SelectorArg::Dynamic { key, negated, value };
+        let sel = Selector::e()
+            .arg(dynamic(DynKey::Tag, false, vec![H(Hole(0))]))
+            .arg(dynamic(DynKey::Tag, true, vec![Lit("pre_".into()), H(Hole(1))]))
+            .arg(dynamic(DynKey::Distance, false, vec![Lit("..".into()), H(Hole(2))]))
+            .arg(dynamic(DynKey::Type, false, vec![H(Hole(3))]))
+            .arg(dynamic(DynKey::Limit, false, vec![H(Hole(4))]))
+            .arg(SelectorArg::DynScores(vec![(word("zoo_pts"), vec![H(Hole(5)), Lit("..".into())])]));
+        f.push(Command::Kill(Some(sel)));
+        let by_name = Selector::a().arg(dynamic(DynKey::Name, false, vec![Lit("Mr ".into()), H(Hole(0))])).arg(dynamic(DynKey::Gamemode, true, vec![H(Hole(1))]));
+        f.push(Command::Teleport { targets: by_name, dest: Pos::here() });
+        let at = Selector::e().arg(dynamic(DynKey::X, false, vec![H(Hole(0))])).arg(dynamic(DynKey::Level, false, vec![H(Hole(1)), Lit("..".into()), H(Hole(2))]));
+        f.push(Command::execute().clause(Clause::As(at)).run(Command::say("held")));
+    }
     f.push(Command::Kill(Some(Selector::entity_id(word("zoo_id"), Hole(0)))));
     f.push(Command::Teleport { targets: Selector::entity_id(word("zoo_id"), Hole(1)).tag(word("zoo_dummy")), dest: Pos::here() });
     f
@@ -317,7 +334,7 @@ fn main() {
         all.push(Command::call(id.clone()));
         pack.add_function(id, f).unwrap();
     }
-    all.push(Command::Function { function: FunctionRef::Id(rl("zoo:holes")), args: FnArgs::Inline(Compound::new().with("h0", 3).with("h1", 2)) });
+    all.push(Command::Function { function: FunctionRef::Id(rl("zoo:holes")), args: FnArgs::Inline(Compound::new().with("h0", 3).with("h1", 2).with("h2", 5).with("h3", "cow").with("h4", 1).with("h5", 0)) });
     for (name, f) in [("returns", returns()), ("returns_all", returns_all()), ("mac", mac()), ("holes", holes())] {
         pack.add_function(ResourceLocation::new("zoo", name).unwrap(), f).unwrap();
     }

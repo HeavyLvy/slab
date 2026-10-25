@@ -245,6 +245,54 @@
   "expect": "Test passed"
  },
  {
+  "cmd": "scoreboard players get #g.r_sel_tag e2e",
+  "expect": "has 2 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_sel_ntag e2e",
+  "expect": "has 1 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_sel_dist e2e",
+  "expect": "has 2 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_sel_far e2e",
+  "expect": "has 1 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_sel_lo e2e",
+  "expect": "has 1 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_sel_exact e2e",
+  "expect": "has 1 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_sel_limit2 e2e",
+  "expect": "has 2 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_sel_limit1 e2e",
+  "expect": "has 1 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_sel_type e2e",
+  "expect": "has 3 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_sel_ntype e2e",
+  "expect": "has 0 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_sel_picked e2e",
+  "expect": "has 1 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_sel_gone e2e",
+  "expect": "has 1 [e2e]"
+ },
+ {
   "cmd": "scoreboard players get #g.r_ent_stale_tp e2e",
   "expect": "has 1 [e2e]"
  },

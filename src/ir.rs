@@ -87,7 +87,7 @@ pub enum Expr {
     PlayerScore { objective: String, holder: ScoreHolder, args: Vec<(Hole, Expr)> },
     /// Int: a handle to the one entity matching the selector, giving it an id on first use; 0 if
     /// nothing matches. Needs `Program::entities`.
-    EntityOf(Selector),
+    EntityOf { selector: Selector, args: Vec<(Hole, Expr)> },
     /// Int: runs `command`, which creates an entity and ends in `function <ns>:_new_entity`, and
     /// gives the handle of the new entity (0 if the command failed). Needs `Program::entities`.
     NewEntity { command: Box<Command>, args: Vec<(Hole, Expr)> },

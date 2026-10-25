@@ -47,6 +47,10 @@ Mechanism (`codegen.rs` collects `Holes`, `lower.rs::call_macro` emits):
 
 Constant arguments never use this: `tp(@s, 1, 64, 2)` is the plain command `teleport @s 1 64 2`. A macro call costs about `2n + 3` commands for `n` variables. Values are int tags, which substitute as plain decimals (including negatives). A hole's range can only be checked at run time: an out-of-range duration or a bad index makes that one command fail silently.
 
+## Selector variables
+
+A selector with `$name` / `${expr}` options (`docs/lang/semantics.md`, "Selectors") carries its expressions in the HIR (`ExprKind::Selector(sel, holes)`; `Hole(k)` of the selector is `holes[k]`). Wherever codegen turns a selector into part of a command (`target`, `holder`, the `ToEntity` handle), `fill_selector` allocates real holes in that command (a string through `hole_str`, an int through `hole_ir`) and renumbers the selector's own holes with `Selector::remap_holes`. The typed values are `SelectorArg::Dynamic { key, negated, value: Vec<ArgPart> }` (literal text and holes; `name` is rendered quoted) and `SelectorArg::DynScores`. The command becomes an ordinary macro call: `$execute as @e[tag=$(h0),distance=..$(h1)] run function ...`. A selector without variables is unchanged. `Expr::EntityOf` carries the hole arguments too, so `let e: Entity = @e[tag=$t, limit=1]` works.
+
 ## String values
 
 `str` values can be used where a command takes text. Which arguments take a run-time string: `say`, `tag::add`/`tag::remove` (tag name), `effect::give` (effect id), `setblock` (block id), `summon` (entity type). A literal (or a join of literals, folded by the checker) is validated at compile time and rendered into the command as before; anything else becomes a macro hole (`Arg::Hole`, `$(hN)`) whose value is the string stored in `<ns>:macro`. Not yet: selector parts (`tag=` in `@e[..]`), `tag::has`, score-holder names, `pts["name"]`: those still need compile-time text.

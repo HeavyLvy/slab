@@ -609,7 +609,7 @@ impl<'a> Gen<'a> {
             h::ExprKind::List(_) | h::ExprKind::Struct { .. } => self.aggregate(e),
             h::ExprKind::Local(id) => ir::Expr::var(&self.local_names[id.0]),
             h::ExprKind::Global(id) => ir::Expr::global(&self.global_names[id.0]),
-            h::ExprKind::Selector(_) | h::ExprKind::Rel { .. } => {
+            h::ExprKind::Selector(..) | h::ExprKind::Rel { .. } => {
                 self.err(e.span, "a selector or coordinate cannot be used as a value here");
                 ir::Expr::Int(0)
             }
@@ -703,13 +703,16 @@ impl<'a> Gen<'a> {
                 let holder = self.holder(holder, &mut holes);
                 ir::Expr::PlayerScore { objective: self.objective_names[objective.0].clone(), holder, args: holes.args }
             }
-            h::ExprKind::ToEntity(inner) => match self.selector(inner) {
-                Some(sel) => {
-                    self.entities = true;
-                    ir::Expr::EntityOf(sel)
+            h::ExprKind::ToEntity(inner) => {
+                let mut holes = Holes::default();
+                match self.selector(inner, &mut holes) {
+                    Some(selector) => {
+                        self.entities = true;
+                        ir::Expr::EntityOf { selector, args: holes.args }
+                    }
+                    None => ir::Expr::Int(0),
                 }
-                None => ir::Expr::Int(0),
-            },
+            }
             h::ExprKind::Error => ir::Expr::Int(0),
         }
     }
@@ -816,7 +819,7 @@ impl<'a> Gen<'a> {
     /// whose id is the handle's value (a hole filled at run time).
     fn target(&mut self, e: &h::Expr, holes: &mut Holes) -> Option<Selector> {
         match &e.kind {
-            h::ExprKind::Selector(s) => Some(s.clone()),
+            h::ExprKind::Selector(s, hs) => Some(self.fill_selector(s, hs, holes)),
             _ if e.ty == Ty::Entity => {
                 self.entities = true;
                 let hole = self.hole(holes, e);
@@ -829,9 +832,25 @@ impl<'a> Gen<'a> {
         }
     }
 
-    fn selector(&mut self, e: &h::Expr) -> Option<Selector> {
+    /// A selector literal whose run-time options (`tag=$t`) become holes of the command being built.
+    fn fill_selector(&mut self, sel: &Selector, exprs: &[h::Expr], holes: &mut Holes) -> Selector {
+        let mut sel = sel.clone();
+        if !exprs.is_empty() {
+            let real: Vec<Hole> = exprs
+                .iter()
+                .map(|e| {
+                    let v = self.expr(e);
+                    if e.ty == Ty::Str { self.hole_str(holes, v) } else { self.hole_ir(holes, v) }
+                })
+                .collect();
+            sel.remap_holes(|h| real[h.0 as usize]);
+        }
+        sel
+    }
+
+    fn selector(&mut self, e: &h::Expr, holes: &mut Holes) -> Option<Selector> {
         match &e.kind {
-            h::ExprKind::Selector(s) => Some(s.clone()),
+            h::ExprKind::Selector(s, hs) => Some(self.fill_selector(s, hs, holes)),
             _ => {
                 self.err(e.span, "expected a selector literal such as `@a[tag=x]`");
                 None
@@ -841,7 +860,7 @@ impl<'a> Gen<'a> {
 
     fn holder(&mut self, e: &h::Expr, holes: &mut Holes) -> ScoreHolder {
         match &e.kind {
-            h::ExprKind::Selector(s) => ScoreHolder::Selector(s.clone()),
+            h::ExprKind::Selector(s, hs) => ScoreHolder::Selector(self.fill_selector(s, hs, holes)),
             _ if e.ty == Ty::Entity => match self.target(e, holes) {
                 Some(sel) => ScoreHolder::Selector(sel),
                 None => ScoreHolder::All,

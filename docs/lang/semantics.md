@@ -71,6 +71,8 @@ Methods: `list.push(x)` (needs a mutable place), `list.len()`, `str.len()`. Whet
 
 `@e[type=zombie, distance=..10, tag=!boss, scores={kills=1..}, limit=1]` is converted to the datapack module's typed `Selector` during checking, so unknown keys, bad numbers/ranges/ids/names and repeated single-use options are compile errors with the span of the offending argument. Supported keys: `x y z dx dy dz distance x_rotation y_rotation level limit sort tag team name gamemode type predicate scores`. `nbt=` and `advancements=` are not supported yet.
 
+**Variables in selectors**: `$name` / `${expression}` in an option value is filled in at run time (`@e[tag=$t, distance=..${r * 2}, scores={kills=$min..}]`, `tag=!$t`, `tag=pre_$suffix`). The text-like options (`tag team name type gamemode`) take a `str`; the numeric ones (`limit x y z dx dy dz`, and each end of `distance x_rotation y_rotation level` and of a score range) take an `int`, as a whole value or as a range end (`..$r`, `$a..$b`), not mixed with other characters. `sort`, `predicate`, `nbt` and `advancements` cannot take a variable. The selector still works wherever a selector does (`for`, `as`/`at`, builtin targets, `objective[holder]`, `exists`). A selector with a variable is not provably one entity, so `let e: Entity = @e[limit=$n]` is an error (a literal `limit=1` is needed). A value that is not valid where it lands (a tag with a space, an unknown entity type) makes that one command do nothing at run time.
+
 ## Diagnostics
 
 * Errors are collected for the whole program and reported in source order. An expression that already failed gets the internal `{error}` type, which is compatible with everything, so one mistake produces one error (`let y = x + 1;` with an unknown `x` reports only `x`).

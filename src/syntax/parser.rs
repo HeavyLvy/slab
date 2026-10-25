@@ -705,6 +705,80 @@ fn parse_embedded(src: &str, base: u32) -> R<Expr> {
     Ok(e)
 }
 
+/// Replaces the run-time parts of a selector value (`$name`, `${expression}`) with markers and
+/// parses their expressions. `start` is the value's offset in the file.
+fn extract_holes(value: &str, start: u32) -> R<(String, Vec<Expr>)> {
+    if !value.contains('$') {
+        return Ok((value.to_owned(), Vec::new()));
+    }
+    let mut out = String::new();
+    let mut holes = Vec::new();
+    let mut chars = value.char_indices().peekable();
+    while let Some((i, c)) = chars.next() {
+        if c != '$' {
+            out.push(c);
+            continue;
+        }
+        let at = start + i as u32;
+        let bad = |d: &str| Diagnostic::new(d.to_owned(), Span { start: at, end: at + 1 }).hint("write `$name`, `${expression}`, or `$$` for a literal dollar sign");
+        match chars.peek().copied() {
+            Some((_, '$')) => {
+                chars.next();
+                out.push('$');
+            }
+            Some((_, '{')) => {
+                chars.next();
+                let body_start = i + 2;
+                let (mut depth, mut quote, mut end) = (1usize, None::<char>, None);
+                while let Some((j, c)) = chars.next() {
+                    match (quote, c) {
+                        (Some(_), '\\') => {
+                            chars.next();
+                        }
+                        (Some(q), c) if c == q => quote = None,
+                        (Some(_), _) => {}
+                        (None, '"' | '\'') => quote = Some(c),
+                        (None, '{') => depth += 1,
+                        (None, '}') => {
+                            depth -= 1;
+                            if depth == 0 {
+                                end = Some(j);
+                                break;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                let Some(end) = end else {
+                    return Err(Diagnostic::new("`${` in a selector is never closed", Span { start: at, end: at + 2 }).hint("end the expression with `}`"));
+                };
+                let text = &value[body_start..end];
+                if text.trim().is_empty() {
+                    return Err(Diagnostic::new("empty `${}` in a selector", Span { start: at, end: start + end as u32 + 1 }).hint("put an expression between the braces"));
+                }
+                holes.push(parse_embedded(text, start + body_start as u32)?);
+                out.push_str(&format!("$(h{})", holes.len() - 1));
+            }
+            Some((_, n)) if n.is_alphabetic() || n == '_' => {
+                let begin = i + 1;
+                let mut end = begin;
+                while let Some(&(j, c)) = chars.peek() {
+                    if c.is_alphanumeric() || c == '_' {
+                        end = j + c.len_utf8();
+                        chars.next();
+                    } else {
+                        break;
+                    }
+                }
+                holes.push(parse_embedded(&value[begin..end], start + begin as u32)?);
+                out.push_str(&format!("$(h{})", holes.len() - 1));
+            }
+            _ => return Err(bad("`$` in a selector must be followed by a name or `{expression}`")),
+        }
+    }
+    Ok((out, holes))
+}
+
 /// Splits the raw text between a selector's brackets into `key=value` pairs. Commas and `=`
 /// inside `{}`, `[]`, `()` or quotes do not split.
 fn split_selector_args(raw: &str, raw_span: Span) -> R<Vec<SelectorArg>> {
@@ -762,7 +836,11 @@ fn split_selector_args(raw: &str, raw_span: Span) -> R<Vec<SelectorArg>> {
         if key.is_empty() || !key.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
             return Err(Diagnostic::new(format!("invalid selector argument name `{key}`"), span));
         }
-        out.push(SelectorArg { key: key.to_owned(), value: trimmed[eq + 1..].trim().to_owned(), span });
+        let raw_value = &trimmed[eq + 1..];
+        let value = raw_value.trim();
+        let value_start = (base + s + lead + eq + 1 + (raw_value.len() - raw_value.trim_start().len())) as u32;
+        let (value, holes) = extract_holes(value, value_start)?;
+        out.push(SelectorArg { key: key.to_owned(), value, span, holes });
     }
     Ok(out)
 }
@@ -1048,6 +1126,29 @@ mod tests {
             other => panic!("{other:?}"),
         }
         assert!(matches!(p.items[4].kind, ItemKind::Objective { .. }));
+    }
+
+    #[test]
+    fn selector_options_can_use_variables() {
+        let p = ok(r#"fn f() { kill(@e[tag=$t, distance=..${r * 2}, scores={kills=$n..}, name="a$$b", type=zombie]); }"#);
+        let ItemKind::Fn(f) = &p.items[0].kind else { panic!() };
+        let StmtKind::Expr(call) = &f.body.stmts[0].kind else { panic!() };
+        let ExprKind::Call { args, .. } = &call.kind else { panic!() };
+        let ExprKind::Selector(sel) = &args[0].kind else { panic!("{:?}", args[0]) };
+        let values: Vec<(&str, &str, usize)> = sel.args.iter().map(|a| (a.key.as_str(), a.value.as_str(), a.holes.len())).collect();
+        assert_eq!(
+            values,
+            [("tag", "$(h0)", 1), ("distance", "..$(h0)", 1), ("scores", "{kills=$(h0)..}", 1), ("name", "\"a$b\"", 0), ("type", "zombie", 0)]
+        );
+        assert_eq!(sx(&sel.args[1].holes[0]), "(Mul r 2)");
+        // the hole expression keeps its position in the file
+        let src = "fn f() { kill(@e[tag=$t]); }";
+        let ExprKind::Selector(sel) = &(match &ok(src).items[0].kind { ItemKind::Fn(f) => match &f.body.stmts[0].kind { StmtKind::Expr(c) => match &c.kind { ExprKind::Call { args, .. } => args[0].clone(), _ => panic!() }, _ => panic!() }, _ => panic!() }).kind else { panic!() };
+        let hole = &sel.args[0].holes[0];
+        assert_eq!(&src[hole.span.start as usize..hole.span.end as usize], "t");
+        assert!(err("fn f() { kill(@e[tag=$]); }").message.contains("followed by a name"));
+        assert!(err("fn f() { kill(@e[tag=${}]); }").message.contains("empty `${}`"));
+        assert!(err("fn f() { kill(@e[tag=${x]); }").message.contains("never closed"));
     }
 
     #[test]

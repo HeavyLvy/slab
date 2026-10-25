@@ -341,7 +341,7 @@ fn selectors_are_validated_and_typed() {
     let c = ok(&in_fn("kill(@e[type=zombie, tag=!boss, distance=..10, limit=1]);"));
     match &c.hir.fns[0].body.stmts[0] {
         Stmt::Expr(Expr { kind: ExprKind::Builtin { name: "kill", args }, .. }) => match &args[0].kind {
-            ExprKind::Selector(s) => assert_eq!(s.to_string(), "@e[type=minecraft:zombie,tag=!boss,distance=..10,limit=1]"),
+            ExprKind::Selector(s, _) => assert_eq!(s.to_string(), "@e[type=minecraft:zombie,tag=!boss,distance=..10,limit=1]"),
             other => panic!("{other:?}"),
         },
         other => panic!("{other:?}"),
@@ -352,6 +352,30 @@ fn selectors_are_validated_and_typed() {
     assert!(e[1].contains("positive integer"));
     one_error(&in_fn("kill(1);"), "expected a `selector` or an `Entity`, found `int`");
     one_error(&in_fn("let n = @s + 1;"), "cannot apply `+`");
+}
+
+#[test]
+fn selector_options_can_use_variables() {
+    // the values of the `$name` parts become expressions of the selector
+    let c = ok(&in_fn("let t = \"x\"; let r = 3; kill(@e[tag=$t, distance=..${r * 2}, limit=$r]);"));
+    let found = c.hir.fns[0].body.stmts.iter().find_map(|s| match s {
+        Stmt::Expr(Expr { kind: ExprKind::Builtin { args, .. }, .. }) => match &args[0].kind {
+            ExprKind::Selector(sel, holes) => Some((sel.to_string(), holes.iter().map(|h| h.ty.clone()).collect::<Vec<_>>())),
+            _ => None,
+        },
+        _ => None,
+    });
+    assert_eq!(found, Some(("@e[tag=$(h0),distance=..$(h1),limit=$(h2)]".to_owned(), vec![Ty::Str, Ty::Int, Ty::Int])));
+    // usable wherever a selector is: for, as, targets, score holders
+    ok("objective pts = \"dummy\"; fn f(t: str, n: int) { for e in @e[tag=$t] { pts[e] += n; } as @a[team=$t] { kill(@s); } pts[@a[tag=$t, limit=1]] = n; print(exists(@e[type=$t])); }");
+    // the variable has the type the option needs
+    one_error(&in_fn("let n = 1; kill(@e[tag=$n]);"), "expected `str`, found `int`");
+    one_error(&in_fn("let s = \"a\"; kill(@e[limit=$s]);"), "expected `int`, found `str`");
+    one_error(&in_fn("kill(@e[tag=$nope]);"), "cannot find `nope`");
+    one_error(&in_fn("let r = 1; kill(@e[sort=$r]);"), "cannot take a variable");
+    // a limit chosen at run time is not provably one entity
+    one_error(&in_fn("let n = 1; let e: Entity = @e[limit=$n];"), "can match several entities");
+    ok(&in_fn("let t = \"a\"; let e: Entity = @e[tag=$t, limit=1]; print(e);"));
 }
 
 #[test]

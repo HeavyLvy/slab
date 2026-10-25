@@ -380,7 +380,7 @@ impl ProjectState {
                 let docs = named_def_docs(self, hir, o.module, &o.name).map_or_else(String::new, |d| format!("\n\n{d}"));
                 Some(format!("```slab\nobjective {}\n```\na scoreboard score; read or write with `{}[holder]`{docs}", o.name, o.name))
             }
-            HirKind::Selector(_) => {
+            HirKind::Selector(..) => {
                 let raw = self.expr_text(module, &ctx.expr);
                 Some(format!("```slab\n{raw}\n```\n{} — usable where a selector is expected", ty(&ctx.expr.ty)))
             }

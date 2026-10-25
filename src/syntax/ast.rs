@@ -188,8 +188,12 @@ pub enum BinOp {
 #[derive(Clone, Debug, PartialEq)]
 pub struct SelectorArg {
     pub key: String,
+    /// The value as written, except that every `$name` / `${expression}` is replaced by the
+    /// marker `$(hN)`, where `N` indexes `holes`. (`$$` writes a literal dollar sign.)
     pub value: String,
     pub span: Span,
+    /// The expressions of the run-time parts of the value, in order.
+    pub holes: Vec<Expr>,
 }
 
 #[derive(Clone, Debug, PartialEq)]

@@ -431,6 +431,22 @@ mod tests {
     }
 
     #[test]
+    fn selector_variables_become_macro_holes() {
+        let c = build_main("fn f(t: str, r: int) { for e in @e[tag=$t, distance=..${r + 1}] { kill(e); } kill(@a[tag=$t, limit=1]); if exists(@e[type=$t]) { print(1); } }");
+        let f = fn_text(&c, "t:f");
+        // the loop runs `as` through a macro; the strings and numbers are passed in storage
+        assert!(f.contains("data modify storage t:macro h0 set from storage t:vars f.v_t"), "{f}");
+        let helpers: Vec<String> = (0..6).filter_map(|i| c.pack.function(&ResourceLocation::parse(&format!("t:f/m{i}")).unwrap()).map(|h| h.render())).collect();
+        let has = |line: &str| helpers.iter().any(|h| h.contains(line));
+        assert!(has("$execute as @e[tag=$(h0),distance=..$(h1)] run function t:f/b0\n"), "{helpers:?}");
+        assert!(has("$kill @a[tag=$(h0),limit=1]\n"), "{helpers:?}");
+        assert!(has("$return run execute if entity @e[type=$(h0)]"), "{helpers:?}");
+        // a selector without variables is unchanged
+        let c = build_main("fn f() { kill(@e[tag=a]); }");
+        assert_eq!(fn_text(&c, "t:f"), "kill @e[tag=a]\n");
+    }
+
+    #[test]
     fn exists_and_tag_has_still_test_directly() {
         let c = build_main("fn f() -> bool { return exists(@e[tag=a]) && tag::has(@s, \"b\"); }");
         let f = fn_text(&c, "t:f");

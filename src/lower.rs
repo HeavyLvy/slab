@@ -199,7 +199,7 @@ fn check_ident(what: &str, name: &str) -> R<()> {
 fn has_call(e: &Expr) -> bool {
     match e {
         Expr::Call(..) => true,
-        Expr::CommandSuccess { args, .. } | Expr::NewEntity { args, .. } | Expr::PlayerScore { args, .. } => args.iter().any(|(_, e)| has_call(e)),
+        Expr::CommandSuccess { args, .. } | Expr::NewEntity { args, .. } | Expr::PlayerScore { args, .. } | Expr::EntityOf { args, .. } => args.iter().any(|(_, e)| has_call(e)),
         Expr::Unary(_, a) | Expr::ToInt(a) | Expr::ToData(a) => has_call(a),
         Expr::Binary(_, a, b) => has_call(a) || has_call(b),
         Expr::Concat(parts) => parts.iter().any(has_call),
@@ -209,7 +209,7 @@ fn has_call(e: &Expr) -> bool {
 
 fn collect_calls_expr(e: &Expr, out: &mut Vec<String>) {
     match e {
-        Expr::CommandSuccess { args, .. } | Expr::NewEntity { args, .. } | Expr::PlayerScore { args, .. } => args.iter().for_each(|(_, a)| collect_calls_expr(a, out)),
+        Expr::CommandSuccess { args, .. } | Expr::NewEntity { args, .. } | Expr::PlayerScore { args, .. } | Expr::EntityOf { args, .. } => args.iter().for_each(|(_, a)| collect_calls_expr(a, out)),
         Expr::Call(n, args) => {
             out.push(n.clone());
             args.iter().for_each(|a| collect_calls_expr(a, out));
@@ -626,7 +626,7 @@ impl<'a> Lower<'a> {
                 Kind::Int
             }
             Expr::Concat(_) => Kind::Data,
-            Expr::PlayerScore { .. } | Expr::EntityOf(_) | Expr::NewEntity { .. } => Kind::Int,
+            Expr::PlayerScore { .. } | Expr::EntityOf { .. } | Expr::NewEntity { .. } => Kind::Int,
             Expr::EntityExists(_) | Expr::CommandSuccess { .. } => Kind::Bool,
         })
     }
@@ -750,13 +750,13 @@ impl<'a> Lower<'a> {
                 self.run_command(cmd, args)?;
                 Ok(IntVal::Holder(d, temp))
             }
-            Expr::EntityOf(sel) => {
+            Expr::EntityOf { selector: sel, args } => {
                 self.require_entities()?;
                 // `_ensure_id` leaves the id in #new_id; clear it so "no match" reads as 0
                 let new_id = self.entity_holder("#new_id")?;
                 self.set_const(&new_id, 0);
                 let id = self.fn_id("_ensure_id")?;
-                self.emit(Command::execute().clause(datapack::Clause::As(sel.clone())).run(Command::call(id)));
+                self.run_command(Command::execute().clause(datapack::Clause::As(sel.clone())).run(Command::call(id)), args)?;
                 let (d, temp) = self.dest(hint)?;
                 self.copy_score(&d, &new_id);
                 Ok(IntVal::Holder(d, temp))

@@ -5,7 +5,7 @@ use std::fmt::{self, Write};
 
 use super::error::{Check, Result, bail};
 use super::names::{HolderName, Hole, IdOrTag, Objective, ResourceLocation, Word};
-use super::nbt::{Compound, NbtPath, write_quoted};
+use super::nbt::{Compound, NbtPath, write_quoted, write_quoted_body};
 
 // ---------------------------------------------------------------- coordinates
 
@@ -359,8 +359,93 @@ impl Check for FloatRange {
 keyword_enum!(SelectorVar { P => "@p", R => "@r", A => "@a", E => "@e", S => "@s", N => "@n" });
 keyword_enum!(Sort { Nearest => "nearest", Furthest => "furthest", Random => "random", Arbitrary => "arbitrary" });
 
+/// One piece of a selector value that is only partly known at compile time: literal text or a
+/// run-time hole (`$(hN)`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ArgPart {
+    Lit(String),
+    Hole(Hole),
+}
+
+/// The selector options whose value may be chosen at run time (`tag=$t`, `distance=..$r`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DynKey {
+    Tag,
+    Team,
+    Name,
+    Type,
+    Gamemode,
+    Limit,
+    X,
+    Y,
+    Z,
+    Dx,
+    Dy,
+    Dz,
+    Distance,
+    XRotation,
+    YRotation,
+    Level,
+}
+
+impl DynKey {
+    fn as_str(self) -> &'static str {
+        match self {
+            DynKey::Tag => "tag",
+            DynKey::Team => "team",
+            DynKey::Name => "name",
+            DynKey::Type => "type",
+            DynKey::Gamemode => "gamemode",
+            DynKey::Limit => "limit",
+            DynKey::X => "x",
+            DynKey::Y => "y",
+            DynKey::Z => "z",
+            DynKey::Dx => "dx",
+            DynKey::Dy => "dy",
+            DynKey::Dz => "dz",
+            DynKey::Distance => "distance",
+            DynKey::XRotation => "x_rotation",
+            DynKey::YRotation => "y_rotation",
+            DynKey::Level => "level",
+        }
+    }
+
+    /// Whether a literal piece of the value may contain this character.
+    fn literal_ok(self, c: char) -> bool {
+        match self {
+            DynKey::Tag | DynKey::Team => c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.' | '+'),
+            DynKey::Type => c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '_' | '-' | '.' | ':' | '/' | '#'),
+            DynKey::Gamemode => c.is_ascii_lowercase(),
+            DynKey::Name => !c.is_control(),
+            _ => c.is_ascii_digit() || matches!(c, '.' | '-' | '+'),
+        }
+    }
+}
+
+fn write_parts(f: &mut fmt::Formatter<'_>, parts: &[ArgPart], quoted: bool) -> fmt::Result {
+    if quoted {
+        f.write_char('"')?;
+    }
+    for p in parts {
+        match p {
+            ArgPart::Lit(s) if quoted => write_quoted_body(f, s)?,
+            ArgPart::Lit(s) => f.write_str(s)?,
+            ArgPart::Hole(h) => write!(f, "{h}")?,
+        }
+    }
+    if quoted {
+        f.write_char('"')?;
+    }
+    Ok(())
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum SelectorArg {
+    /// An option whose value is built from literal text and run-time holes. A value that is not
+    /// valid where it lands makes the whole command fail when it runs.
+    Dynamic { key: DynKey, negated: bool, value: Vec<ArgPart> },
+    /// `scores={obj=range,...}` where the ends of the ranges may be holes.
+    DynScores(Vec<(Objective, Vec<ArgPart>)>),
     X(f64),
     Y(f64),
     Z(f64),
@@ -412,6 +497,8 @@ impl SelectorArg {
     /// The key as written, used for the "applied twice" check.
     fn key(&self) -> &'static str {
         match self {
+            SelectorArg::Dynamic { key, .. } => key.as_str(),
+            SelectorArg::DynScores(_) => "scores",
             SelectorArg::X(_) => "x",
             SelectorArg::Y(_) => "y",
             SelectorArg::Z(_) => "z",
@@ -438,7 +525,8 @@ impl SelectorArg {
     fn negated(&self) -> bool {
         matches!(
             self,
-            SelectorArg::Tag { negated: true, .. }
+            SelectorArg::Dynamic { negated: true, .. }
+                | SelectorArg::Tag { negated: true, .. }
                 | SelectorArg::Team { negated: true, .. }
                 | SelectorArg::Name { negated: true, .. }
                 | SelectorArg::Type { negated: true, .. }
@@ -452,6 +540,8 @@ impl SelectorArg {
     /// tag/predicate/nbt always; name/team/type/gamemode only in their negated form.
     fn repeatable(&self) -> bool {
         match self {
+            SelectorArg::Dynamic { key: DynKey::Tag, .. } => true,
+            SelectorArg::Dynamic { key: DynKey::Team | DynKey::Name | DynKey::Type | DynKey::Gamemode, .. } => self.negated(),
             SelectorArg::Tag { .. } | SelectorArg::Predicate { .. } | SelectorArg::Nbt { .. } => true,
             SelectorArg::Team { .. }
             | SelectorArg::Name { .. }
@@ -470,6 +560,21 @@ impl fmt::Display for SelectorArg {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let key = self.key();
         match self {
+            SelectorArg::Dynamic { key, negated, value } => {
+                write!(f, "{}={}", key.as_str(), bang(*negated))?;
+                write_parts(f, value, *key == DynKey::Name)
+            }
+            SelectorArg::DynScores(entries) => {
+                f.write_str("scores={")?;
+                for (i, (obj, parts)) in entries.iter().enumerate() {
+                    if i > 0 {
+                        f.write_char(',')?;
+                    }
+                    write!(f, "{obj}=")?;
+                    write_parts(f, parts, false)?;
+                }
+                f.write_char('}')
+            }
             SelectorArg::X(v) | SelectorArg::Y(v) | SelectorArg::Z(v) | SelectorArg::Dx(v) | SelectorArg::Dy(v) | SelectorArg::Dz(v) => {
                 write!(f, "{key}={v}")
             }
@@ -505,6 +610,34 @@ impl fmt::Display for SelectorArg {
 impl Check for SelectorArg {
     fn check(&self) -> Result<()> {
         match self {
+            SelectorArg::Dynamic { key, value, .. } => {
+                for p in value {
+                    if let ArgPart::Lit(s) = p
+                        && let Some(c) = s.chars().find(|c| !key.literal_ok(*c))
+                    {
+                        bail!("`{c}` cannot be part of the `{}` value of a selector", key.as_str());
+                    }
+                }
+                if value.is_empty() {
+                    bail!("the `{}` value of a selector cannot be empty", key.as_str());
+                }
+                Ok(())
+            }
+            SelectorArg::DynScores(entries) => {
+                if entries.is_empty() {
+                    bail!("scores={{}} needs at least one objective");
+                }
+                for (_, parts) in entries {
+                    for p in parts {
+                        if let ArgPart::Lit(s) = p
+                            && let Some(c) = s.chars().find(|c| !(c.is_ascii_digit() || matches!(c, '.' | '-')))
+                        {
+                            bail!("`{c}` cannot be part of a score range");
+                        }
+                    }
+                }
+                Ok(())
+            }
             SelectorArg::X(v) | SelectorArg::Y(v) | SelectorArg::Z(v) | SelectorArg::Dx(v) | SelectorArg::Dy(v) | SelectorArg::Dz(v)
                 if !v.is_finite() =>
             {
@@ -596,13 +729,32 @@ impl Selector {
         self.arg(SelectorArg::score(objective, range))
     }
 
+    /// Renumbers the run-time holes of the dynamic options (the caller allocates the real hole
+    /// numbers for the command being built). `EntityId` holes are not touched.
+    pub fn remap_holes(&mut self, mut f: impl FnMut(Hole) -> Hole) {
+        let mut map = |parts: &mut Vec<ArgPart>| {
+            for p in parts {
+                if let ArgPart::Hole(h) = p {
+                    *h = f(*h);
+                }
+            }
+        };
+        for a in &mut self.args {
+            match a {
+                SelectorArg::Dynamic { value, .. } => map(value),
+                SelectorArg::DynScores(entries) => entries.iter_mut().for_each(|(_, parts)| map(parts)),
+                _ => {}
+            }
+        }
+    }
+
     /// True when the selector can only ever match one entity, which several arguments
     /// require ("Only one entity is allowed" is a parse error otherwise).
     pub fn is_single(&self) -> bool {
         match self.var {
             SelectorVar::S | SelectorVar::P | SelectorVar::R | SelectorVar::N => {
                 // `@n[limit=2]` is allowed and then matches several.
-                !self.args.iter().any(|a| matches!(a, SelectorArg::Limit(n) if *n > 1))
+                !self.args.iter().any(|a| matches!(a, SelectorArg::Limit(n) if *n > 1) || matches!(a, SelectorArg::Dynamic { key: DynKey::Limit, .. }))
             }
             SelectorVar::A | SelectorVar::E => self.args.iter().any(|a| matches!(a, SelectorArg::Limit(1) | SelectorArg::EntityId { .. })),
         }
@@ -751,6 +903,41 @@ impl fmt::Display for OptPath<'_> {
 mod tests {
     use super::*;
     use crate::datapack::names::{holder, rl, word};
+
+    #[test]
+    fn dynamic_selector_options() {
+        use ArgPart::{Hole as H, Lit};
+        let dynamic = |key, negated, value| SelectorArg::Dynamic { key, negated, value };
+        let sel = Selector::e()
+            .arg(dynamic(DynKey::Tag, false, vec![H(Hole(0))]))
+            .arg(dynamic(DynKey::Tag, true, vec![Lit("pre_".into()), H(Hole(1))]))
+            .arg(dynamic(DynKey::Distance, false, vec![Lit("..".into()), H(Hole(2))]))
+            .arg(dynamic(DynKey::Type, false, vec![H(Hole(3))]))
+            .arg(dynamic(DynKey::Name, false, vec![Lit("Mr \"X\" ".into()), H(Hole(4))]))
+            .arg(dynamic(DynKey::Limit, false, vec![H(Hole(5))]))
+            .arg(SelectorArg::DynScores(vec![(word("kills"), vec![H(Hole(6)), Lit("..".into())]), (word("deaths"), vec![Lit("..3".into())])]));
+        assert_eq!(
+            sel.to_string(),
+            "@e[tag=$(h0),tag=!pre_$(h1),distance=..$(h2),type=$(h3),name=\"Mr \\\"X\\\" $(h4)\",limit=$(h5),scores={kills=$(h6)..,deaths=..3}]"
+        );
+        assert!(sel.check().is_ok());
+        // a dynamic limit is not provably one entity, even on `@s`-like selectors
+        assert!(!sel.is_single());
+        assert!(!Selector::p().arg(dynamic(DynKey::Limit, false, vec![H(Hole(0))])).is_single());
+        assert!(Selector::p().is_single());
+        // the same single-use option twice is rejected, a negated one may repeat
+        let twice = Selector::e().arg(dynamic(DynKey::Distance, false, vec![H(Hole(0))])).arg(SelectorArg::Distance(FloatRange::at_most(3.0)));
+        assert!(twice.check().is_err());
+        let types = Selector::e().arg(dynamic(DynKey::Type, true, vec![H(Hole(0))])).arg(dynamic(DynKey::Type, true, vec![H(Hole(1))]));
+        assert!(types.check().is_ok());
+        // literal pieces must fit the option
+        assert!(Selector::e().arg(dynamic(DynKey::Tag, false, vec![Lit("a b".into()), H(Hole(0))])).check().is_err());
+        assert!(Selector::e().arg(dynamic(DynKey::Limit, false, vec![Lit("x".into())])).check().is_err());
+        // renumbering for the command it ends up in
+        let mut s = Selector::e().arg(dynamic(DynKey::Tag, false, vec![H(Hole(0))])).arg(SelectorArg::DynScores(vec![(word("p"), vec![H(Hole(1))])]));
+        s.remap_holes(|h| Hole(h.0 + 5));
+        assert_eq!(s.to_string(), "@e[tag=$(h5),scores={p=$(h6)}]");
+    }
 
     #[test]
     fn coordinates() {

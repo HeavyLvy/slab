@@ -251,7 +251,15 @@ impl Walker<'_> {
                     }
                 }
             }
-            ExprKind::Int(_) | ExprKind::Float(_) | ExprKind::Str(_) | ExprKind::Bool(_) | ExprKind::Selector(_) | ExprKind::Rel { .. } => {}
+            ExprKind::Selector(lit) => {
+                // `$name` / `${expr}` in an option value are ordinary expressions
+                for a in &lit.args {
+                    for h in &a.holes {
+                        self.expr(h, Role::Plain);
+                    }
+                }
+            }
+            ExprKind::Int(_) | ExprKind::Float(_) | ExprKind::Str(_) | ExprKind::Bool(_) | ExprKind::Rel { .. } => {}
         }
     }
 
@@ -570,7 +578,12 @@ fn visit_hir_expr(e: &HirExpr, offset: usize, best: &mut Option<(u32, HirExpr)>)
             visit_hir_expr(index, offset, best);
         }
         HirExprKind::Score { holder, .. } => visit_hir_expr(holder, offset, best),
-        HirExprKind::Int(_) | HirExprKind::Bool(_) | HirExprKind::Str(_) | HirExprKind::Global(_) | HirExprKind::Local(_) | HirExprKind::Selector(_) | HirExprKind::Rel { .. } | HirExprKind::Error => {}
+        HirExprKind::Int(_) | HirExprKind::Bool(_) | HirExprKind::Str(_) | HirExprKind::Global(_) | HirExprKind::Local(_) | HirExprKind::Rel { .. } | HirExprKind::Error => {}
+        HirExprKind::Selector(_, holes) => {
+            for h in holes {
+                visit_hir_expr(h, offset, best);
+            }
+        }
     }
 }
 

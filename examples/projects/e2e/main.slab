@@ -56,6 +56,18 @@ global r_for_score: int = 0;
 global r_str_cat: str = "";
 global r_str_tag: int = 0;
 global r_str_tag_n: int = 0;
+global r_sel_tag: int = 0;
+global r_sel_ntag: int = 0;
+global r_sel_dist: int = 0;
+global r_sel_far: int = 0;
+global r_sel_lo: int = 0;
+global r_sel_exact: int = 0;
+global r_sel_limit2: int = 0;
+global r_sel_limit1: int = 0;
+global r_sel_type: int = 0;
+global r_sel_ntype: int = 0;
+global r_sel_picked: int = 0;
+global r_sel_gone: int = 0;
 global r_results: int = 0;
 global r_gone: int = 0;
 global r_entities: int = 0;
@@ -280,6 +292,7 @@ fn world_test() {
 
     entity_test();
     string_test();
+    selector_test();
 
     // one owned entity is left alive on purpose: `_uninstall` must remove it
     summon("minecraft:marker", bx, 64, bx);
@@ -328,6 +341,68 @@ fn spawn_at(x: int) -> Entity {
 }
 
 // Entity values: a variable holds an entity and acts on it. Run by the harness after world_test.
+// Selector options chosen at run time: `$name` and `${expr}` inside `@e[...]`.
+fn selector_test() {
+    // three markers, all tagged "seltest"; two of them also "dyn"
+    let m1 = summon("minecraft:marker", 2, 64, 2);
+    let m2 = summon("minecraft:marker", 3, 64, 2);
+    let m3 = summon("minecraft:marker", 14, 64, 14);
+    for m in [m1, m2, m3] { tag::add(m, "seltest"); }
+    let t = "dyn";
+    tag::add(m1, t);
+    tag::add(m3, t);
+    pts[m1] = 5;
+    pts[m2] = 9;
+
+    let near = 2;
+    let far = 10;
+    let lo = 6;
+    let five = 5;
+    let n = 2;
+    let ty = "minecraft:marker";
+
+    let mut c = 0;
+    for _ in @e[tag=seltest, tag=$t] { c += 1; }
+    r_sel_tag = c;                       // m1, m3
+    c = 0;
+    for _ in @e[tag=seltest, tag=!$t] { c += 1; }
+    r_sel_ntag = c;                      // m2
+    c = 0;
+    for _ in @e[tag=seltest, x=2, y=64, z=2, distance=..${near}] { c += 1; }
+    r_sel_dist = c;                      // m1, m2
+    c = 0;
+    for _ in @e[tag=seltest, x=2, y=64, z=2, distance=$far..] { c += 1; }
+    r_sel_far = c;                       // m3
+    c = 0;
+    for _ in @e[tag=seltest, scores={pts=$lo..}] { c += 1; }
+    r_sel_lo = c;                        // m2
+    c = 0;
+    for _ in @e[tag=seltest, scores={pts=$five}] { c += 1; }
+    r_sel_exact = c;                     // m1
+    c = 0;
+    for _ in @e[tag=seltest, limit=$n] { c += 1; }
+    r_sel_limit2 = c;
+    c = 0;
+    for _ in @e[tag=seltest, limit=${n - 1}] { c += 1; }
+    r_sel_limit1 = c;
+    c = 0;
+    for _ in @e[tag=seltest, type=$ty] { c += 1; }
+    r_sel_type = c;                      // all three
+    c = 0;
+    for _ in @e[tag=seltest, type=!$ty] { c += 1; }
+    r_sel_ntype = c;                     // none
+
+    // a selector with a variable can become an entity, and works as a target
+    let picked: Entity = @e[tag=seltest, tag=$t, limit=1];
+    tag::add(picked, "picked");
+    r_sel_picked = 0;
+    if exists(@e[tag=picked]) { r_sel_picked = 1; }
+
+    for e in @e[tag=seltest] { kill(e); }
+    r_sel_gone = 1;
+    if exists(@e[tag=seltest]) { r_sel_gone = 0; }
+}
+
 // Strings: joining, f-strings as values, and strings chosen at run time as command arguments.
 fn string_test() {
     let kind = "mark";

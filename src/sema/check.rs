@@ -1525,11 +1525,11 @@ impl<'a> Checker<'a> {
 
     fn coerce_to_entity(&mut self, h: Expr) -> Expr {
         match &h.kind {
-            ExprKind::Selector(sel) if sel.is_single() => {
+            ExprKind::Selector(sel, _) if sel.is_single() => {
                 let span = h.span;
                 Expr { kind: ExprKind::ToEntity(Box::new(h)), ty: Ty::Entity, span }
             }
-            ExprKind::Selector(sel) => {
+            ExprKind::Selector(sel, _) => {
                 let msg = format!("`{sel}` can match several entities, so it cannot be one entity value");
                 self.error_hint(h.span, msg, "use a selector for one entity (`@s`, `@p`, `@r`, `@n`, or `limit=1`), or act on all of them with `as`");
                 Expr::error(h.span)
@@ -1599,7 +1599,15 @@ impl<'a> Checker<'a> {
                 None => Expr::error(span),
             },
             K::Selector(lit) => match selector::convert(lit) {
-                Ok(sel) => mk(ExprKind::Selector(sel), Ty::Selector),
+                Ok(c) => {
+                    let mut holes = Vec::new();
+                    for slot in &c.holes {
+                        let e = self.expr(&lit.args[slot.arg].holes[slot.index], Some(&slot.ty));
+                        self.mismatch(e.span, &slot.ty, &e.ty);
+                        holes.push(e);
+                    }
+                    mk(ExprKind::Selector(c.selector, holes), Ty::Selector)
+                }
                 Err(ds) => {
                     let file = self.file();
                     self.errors.extend(ds.into_iter().map(|d| d.in_file(file)));
@@ -1637,7 +1645,7 @@ impl<'a> Checker<'a> {
     /// The entity the body of a `for e in @a { }` runs as, as a handle: an `entity`-typed
     /// read of the id score of the current `@s` (`docs/lang/entities.md`).
     fn current_entity(&mut self, span: Span) -> Expr {
-        let sel = Expr { kind: ExprKind::Selector(crate::datapack::Selector::new(crate::datapack::SelectorVar::S)), ty: Ty::Selector, span };
+        let sel = Expr { kind: ExprKind::Selector(crate::datapack::Selector::new(crate::datapack::SelectorVar::S), Vec::new()), ty: Ty::Selector, span };
         Expr { kind: ExprKind::ToEntity(Box::new(sel)), ty: Ty::Entity, span }
     }
 

@@ -159,7 +159,9 @@ pub enum ExprKind {
     Struct { id: StructId, fields: Vec<Expr> },
     Local(LocalId),
     Global(GlobalId),
-    Selector(Selector),
+    /// A selector literal. The expressions fill the run-time parts of its options (`$name`,
+    /// `${expression}`): `Hole(k)` of the selector is `holes[k]`; empty for a plain selector.
+    Selector(Selector, Vec<Expr>),
     /// The entity handle of a selector literal that matches (at most) one entity.
     ToEntity(Box<Expr>),
     Rel { kind: RelKind, offset: Option<String> },
