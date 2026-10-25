@@ -10,7 +10,7 @@ Status: **draft for review, nothing implemented.** "(decided)" marks what you al
 4. `game::run_command("...")` returns `Option<int>` (None = failed). **(decided)**
 5. World-acting builtins (`tp`, `kill`, `tag::add`, `effect::give`, `setblock`, `summon`, ...) return `Result<_, ()>` instead of `bool`. **(decided)**
 6. `==` / `!=` for `str`, enums (so `Option` / `Result`), and `Entity` vs a one-entity selector. **(decided)**
-7. A real entity type with information (name, tags, position, ...). **(decided: wanted; shape is question 1)**
+7. A real entity type with information (name, tags, position, ...). **(decided: EntityId handle + Entity snapshot)**
 8. Pay only for what you use: a result nobody looks at compiles to the plain command, with no `execute store`. **(decided)**
 9. Out of scope: generic functions, the `?` operator, typed arguments for builtins (parked, modded ids must keep working).
 
