@@ -10,6 +10,7 @@ pub fn keyword(k: Kw) -> &'static str {
         Kw::Let => "```slab\nlet [mut] name[: type] = value;\n```\nDeclares a local variable. Variables cannot be assigned again unless declared `mut`; the type is inferred from the value when it is left out.",
         Kw::Mut => "Makes a variable assignable: `let mut count = 0; count += 1;`.",
         Kw::If => "```slab\nif condition { ... } else if condition { ... } else { ... }\n```\nRuns a block when the condition (a `bool`) is true. Conditions need no parentheses.",
+        Kw::Match => "```slab\nmatch value {\n    Some(x) if x > 0 => x,\n    Some(_) => 0,\n    None => return,\n}\n```\nPicks the first arm whose pattern fits the value (and whose `if` guard holds). Patterns: `_`, a name (binds the value), literals, `Variant(p, ..)`, `A | B`. It must cover every case, and can be used as a value. `if let Some(x) = value { .. } else { .. }` is the one-arm form.",
         Kw::Else => "The branch of an `if` that runs when its condition is false.",
         Kw::While => "```slab\nwhile condition { ... }\n```\nRepeats a block while the condition holds. A loop can run about 21,000 times in one tick (Minecraft's command limit).",
         Kw::Loop => "```slab\nloop { ... }\n```\nRepeats a block forever; leave it with `break`.",

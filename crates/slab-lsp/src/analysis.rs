@@ -192,6 +192,17 @@ impl Walker<'_> {
                     }
                 }
             }
+            StmtKind::IfLet { pat, value, then, els } => {
+                self.pattern(pat);
+                self.expr(value, Role::Plain);
+                self.block(then);
+                if let Some(boxed) = els {
+                    match &**boxed {
+                        ast::Else::Block(b) => self.block(b),
+                        ast::Else::If(inner) => self.stmt(inner),
+                    }
+                }
+            }
             StmtKind::While { cond, body } => {
                 self.expr(cond, Role::Plain);
                 self.block(body);
@@ -296,7 +307,43 @@ impl Walker<'_> {
                     }
                 }
             }
+            ExprKind::Match { scrut, arms } => {
+                self.expr(scrut, Role::Plain);
+                for a in arms {
+                    self.pattern(&a.pat);
+                    if let Some(g) = &a.guard {
+                        self.expr(g, Role::Plain);
+                    }
+                    match &a.body {
+                        ast::ArmBody::Expr(x) => self.expr(x, Role::Plain),
+                        ast::ArmBody::Block(b) => self.block(b),
+                    }
+                }
+            }
             ExprKind::Int(_) | ExprKind::Float(_) | ExprKind::Str(_) | ExprKind::Bool(_) | ExprKind::Unit | ExprKind::Error | ExprKind::Rel { .. } => {}
+        }
+    }
+
+    fn pattern(&mut self, p: &ast::Pattern) {
+        match &p.kind {
+            // a lower-case bare name is a new variable; `None` and friends are variants
+            ast::PatKind::Ident(id) => {
+                let binding = id.name.chars().next().is_some_and(|c| c.is_lowercase() || c == '_');
+                self.emit(id.span, &id.name, if binding { Role::LetName } else { Role::Plain });
+            }
+            ast::PatKind::Variant { module, name, fields, .. } => {
+                if let Some(m) = module {
+                    self.emit(m.span, &m.name, Role::ModuleName);
+                    self.emit(name.span, &name.name, Role::PathItem);
+                } else {
+                    self.emit(name.span, &name.name, Role::Callee);
+                }
+                for f in fields {
+                    self.pattern(f);
+                }
+            }
+            ast::PatKind::Or(alts) => alts.iter().for_each(|a| self.pattern(a)),
+            ast::PatKind::Wild | ast::PatKind::Int(_) | ast::PatKind::Bool(_) | ast::PatKind::Str(_) => {}
         }
     }
 
@@ -370,6 +417,16 @@ fn stmt<'a>(s: &'a ast::Stmt, f: &mut impl FnMut(&'a ast::Expr)) {
         }
         StmtKind::If { cond, then, els } => {
             visit(cond, f);
+            block(then, f);
+            if let Some(boxed) = els {
+                match &**boxed {
+                    ast::Else::Block(b) => block(b, f),
+                    ast::Else::If(inner) => stmt(inner, f),
+                }
+            }
+        }
+        StmtKind::IfLet { value, then, els, .. } => {
+            visit(value, f);
             block(then, f);
             if let Some(boxed) = els {
                 match &**boxed {
@@ -641,6 +698,18 @@ fn visit_hir_expr(e: &HirExpr, offset: usize, best: &mut Option<(u32, HirExpr)>)
             visit_hir_expr(index, offset, best);
         }
         HirExprKind::Score { holder, .. } => visit_hir_expr(holder, offset, best),
+        HirExprKind::Match { scrut, arms } => {
+            visit_hir_expr(scrut, offset, best);
+            for a in arms {
+                if let Some(g) = &a.guard {
+                    visit_hir_expr(g, offset, best);
+                }
+                visit_hir_block(&a.body, offset, best);
+                if let Some(v) = &a.value {
+                    visit_hir_expr(v, offset, best);
+                }
+            }
+        }
         HirExprKind::Int(_) | HirExprKind::Bool(_) | HirExprKind::Str(_) | HirExprKind::Global(_) | HirExprKind::Local(_) | HirExprKind::Rel { .. } | HirExprKind::Error => {}
         HirExprKind::Selector(_, holes) => {
             for h in holes {

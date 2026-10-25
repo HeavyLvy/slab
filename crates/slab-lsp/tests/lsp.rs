@@ -516,3 +516,22 @@ fn selectors_complete_and_explain_their_options() {
     let h = state.hover(module.unwrap(), src.find("@e)").unwrap()).unwrap();
     assert!(h.contains("all entities") && h.contains("`sort=") && h.contains("`scores="), "{h}");
 }
+
+#[test]
+fn match_bindings_hover_and_complete() {
+    let d = Dir::new("matchlsp", &[("main.slab", "")]);
+    let mut ws = Workspace::default();
+    let uri = file_uri(&d.0.join("main.slab"));
+    let src = "import std::print;\nfn f(o: Option<int>) {\n    match o {\n        Some(count) => print(count),\n        None => print(0),\n    }\n    if let Some(extra) = o { print(extra); }\n}\n";
+    let publishes = ws.open(&uri, src, 1);
+    assert!(publishes[0].diagnostics.is_empty(), "{:?}", publishes[0].diagnostics.iter().map(|d| d.message.clone()).collect::<Vec<_>>());
+    let (_, doc, module) = ws.locate(&uri).unwrap();
+    let state = ws.project(&slab_lsp::state::root_for(&doc.path).0).unwrap();
+    let hover = |needle: &str, extra: usize| state.hover(module.unwrap(), src.find(needle).unwrap() + extra).unwrap_or_default();
+    assert!(hover("print(count)", 6).contains("let count: int"), "{}", hover("print(count)", 6));
+    assert!(hover("Some(count)", 7).contains("let count: int"));
+    assert!(hover("match o", 0).contains("first arm whose pattern fits"));
+    let at = src.find("print(extra)").unwrap();
+    let items = completion::completions(&ws, &uri, at).unwrap();
+    assert!(items.iter().any(|i| i.label == "extra" && i.kind == 6), "{items:?}");
+}

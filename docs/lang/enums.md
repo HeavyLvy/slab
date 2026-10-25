@@ -61,6 +61,29 @@ pub enum Result<T, E> { Ok(T), Err(E) }
 
 `default` is always evaluated. `unwrap()` and `expect()` on `None` / `Err` have no panic to use: they print `slab: unwrap on None (main.slab:12)` to chat and return from the function (zero value of its return type; a context block, which cannot be left, only prints). Built with `--abort-on-unwrap` they also stop the pack (`datapack disable "file/<namespace>"`, or the `--pack-id` you give).
 
+## Taking a value apart: `match` and `if let`
+
+```slab
+enum Phase { Waiting, Running(int), Done(str) }
+
+fn label(p: Phase) -> str {
+    return match p {
+        Phase::Waiting => "waiting",
+        Phase::Running(n) if n > 10 => "a long time",
+        Phase::Running(n) => f"running, {n}s left",
+        Phase::Done(winner) => f"{winner} won",
+    };
+}
+
+let secs = match remaining {         // Option<int>
+    Some(s) => s,
+    None => return,                  // `return`, `break` and `continue` fit any value
+};
+if let Ok(n) = run_command("data get entity @s Health") { print(n); } else { print("failed"); }
+```
+
+Patterns are `_`, a name, a literal (`int`, `bool`, `str`), `Variant(p, ..)` and `A | B`, nested as deep as you like. The checker proves the arms cover every case (`this match does not cover `None``) and warns about arms that can never run. Not yet: bindings inside `A | B`, `while let`, ranges in patterns (`1..5`), and patterns for structs or lists. `docs/lang/compiled-output.md` shows the commands a `match` becomes.
+
 ## Constants and globals
 
 Enum values can be constants and global initialisers when their payload is constant: `global start: Option<int> = Some(7);`, `const NOTHING: Option<str> = None;`.
@@ -71,4 +94,4 @@ A value is a compound in command storage: `{t: <variant index>, f0: .., f1: ..}`
 
 ## What comes next
 
-`match` and `if let` to take a value apart, commands that return `Result`, and `game::run_command`. The plan is in `docs/lang/plan-enums-results.md`.
+Commands that return `Result` instead of `bool`, and struct-like variants. The plan is in `docs/lang/plan-enums-results.md`.

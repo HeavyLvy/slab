@@ -124,6 +124,24 @@ global r_pos_fetch: int = 0;
 global r_pos_alive: int = 0;
 global r_pos_gone: int = 0;
 global r_pos_sel: int = 0;
+global r_match_unit: int = 0;
+global r_match_guard: int = 0;
+global r_match_payload: int = 0;
+global r_match_str: int = 0;
+global r_match_int: int = 0;
+global r_match_bool: int = 0;
+global r_match_strlit: int = 0;
+global r_match_nested: int = 0;
+global r_match_early_some: int = 0;
+global r_match_early_none: int = 0;
+global r_match_continue: int = 0;
+global r_match_iflet: int = 0;
+global r_match_iflet_else: int = 0;
+global r_match_else_if_let: int = 0;
+global r_match_result_ok: int = 0;
+global r_match_result_err: int = 0;
+global r_match_stmt: int = 0;
+global r_match_shadow: int = 0;
 global r_cmd_value: int = 0;
 global r_cmd_ok: int = 0;
 global r_cmd_err: int = 0;
@@ -360,6 +378,7 @@ fn world_test() {
     enum_test();
     impl_test();
     command_test();
+    match_test();
 
     // one owned entity is left alive on purpose: `_uninstall` must remove it
     summon("minecraft:marker", bx, 64, bx);
@@ -528,6 +547,118 @@ fn command_test() {
     run_command("scoreboard players set #cmd e2e 0");
     let zero = run_command("scoreboard players get #cmd e2e");
     if zero.is_ok() && zero.unwrap_or(5) == 0 { r_cmd_zero = 1; }
+}
+
+enum Figure {
+    Dot,
+    Line(int, int),
+    Named(str),
+}
+
+fn figure_word(s: Figure) -> str {
+    return match s {
+        Figure::Dot => "dot",
+        Figure::Line(a, b) if a == b => "square-ish",
+        Figure::Line(a, _) => f"line {a}",
+        Figure::Named(n) => n,
+    };
+}
+
+fn bucket(n: int) -> int {
+    return match n {
+        1 | 2 => 10,
+        3 => 20,
+        x if x > 100 => 30,
+        _ => 40,
+    };
+}
+
+fn early(o: Option<int>) -> int {
+    let v = match o {
+        Some(v) => v,
+        None => return -1,
+    };
+    return v * 2;
+}
+
+fn sum_some(xs: list<Option<int>>) -> int {
+    let mut total = 0;
+    for x in xs {
+        let v = match x {
+            Some(v) => v,
+            None => continue,
+        };
+        total += v;
+    }
+    return total;
+}
+
+// `match` and `if let`: patterns, guards, nesting, and `return` / `continue` inside arms.
+fn match_test() {
+    if figure_word(Figure::Dot) == "dot" { r_match_unit = 1; }
+    if figure_word(Figure::Line(3, 3)) == "square-ish" { r_match_guard = 1; }
+    if figure_word(Figure::Line(7, 9)) == "line 7" { r_match_payload = 1; }
+    if figure_word(Figure::Named("zed")) == "zed" { r_match_str = 1; }
+    r_match_int = bucket(1) + bucket(3) + bucket(500) + bucket(7);
+    let flag = true;
+    let other = false;
+    r_match_bool = (match flag { true => 1, false => 2 }) * 10 + match other { true => 1, false => 2 };
+    let word = "b";
+    r_match_strlit = match word {
+        "a" => 1,
+        "b" => 2,
+        _ => 3,
+    };
+    let deep: Option<Option<int>> = Some(Some(4));
+    let mid: Option<Option<int>> = Some(None);
+    let none: Option<Option<int>> = None;
+    let mut nested = 0;
+    for o in [deep, mid, none] {
+        nested += match o {
+            Some(Some(n)) => n,
+            Some(None) => 5,
+            None => 6,
+        };
+    }
+    r_match_nested = nested;
+    r_match_early_some = early(Some(4));
+    r_match_early_none = early(None);
+    let some_nine: Option<int> = Some(9);
+    let missing: Option<int> = None;
+    r_match_continue = sum_some([Some(5), None, Some(7), None]);
+    if let Some(v) = some_nine { r_match_iflet = v; } else { r_match_iflet = 0; }
+    if let Some(v) = missing { r_match_iflet_else = v; } else { r_match_iflet_else = -5; }
+    let res: Result<int, str> = Err("seven");
+    if let Ok(v) = res {
+        r_match_else_if_let = v;
+    } else if let Err(e) = res {
+        r_match_else_if_let = e.len();
+    }
+    run_command("scoreboard players set #cmd e2e 33");
+    r_match_result_ok = match run_command("scoreboard players get #cmd e2e") {
+        Ok(n) => n,
+        Err(_) => -9,
+    };
+    r_match_result_err = match run_command("scoreboard players get #nobody e2e") {
+        Ok(n) => n,
+        Err(_) => -9,
+    };
+    // a statement match with block arms; a binding in an arm shadows an outer name
+    let mut hits = 0;
+    let n = 3;
+    match some_nine {
+        Some(n) => {
+            hits += 1;
+            r_match_shadow = n;
+        }
+        None => { hits += 100; }
+    }
+    match missing {
+        Some(_) => hits += 100,
+        None => hits += 4,
+    }
+    r_match_stmt = hits;
+    r_match_shadow += n;
 }
 
 // `==` / `!=` on strings, lists, structs, and an entity against a selector.

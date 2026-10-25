@@ -166,6 +166,8 @@ pub enum StmtKind {
     /// `target` is a name, a field access or an index expression.
     Assign { target: Expr, op: AssignOp, value: Expr },
     If { cond: Expr, then: Block, els: Option<Box<Else>> },
+    /// `if let pattern = value { .. } else { .. }`
+    IfLet { pat: Pattern, value: Expr, then: Block, els: Option<Box<Else>> },
     While { cond: Expr, body: Block },
     Loop { body: Block },
     For { var: Ident, iter: Expr, body: Block },
@@ -298,4 +300,44 @@ pub enum ExprKind {
     Call { callee: Box<Expr>, args: Vec<Expr> },
     Field { base: Box<Expr>, name: Ident },
     Index { base: Box<Expr>, index: Box<Expr> },
+    /// `match value { pattern => body, ... }`
+    Match { scrut: Box<Expr>, arms: Vec<MatchArm> },
+}
+
+/// One arm of a `match`: `pattern [if guard] => body`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MatchArm {
+    pub pat: Pattern,
+    pub guard: Option<Expr>,
+    pub body: ArmBody,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum ArmBody {
+    /// `pattern => expression`
+    Expr(Expr),
+    /// `pattern => { statements }`, also `=> return x`, `=> break`, `=> continue`.
+    Block(Block),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Pattern {
+    pub kind: PatKind,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum PatKind {
+    /// `_`
+    Wild,
+    /// A bare name: a new variable, unless it names a unit variant in scope (`None`).
+    Ident(Ident),
+    Int(i64),
+    Bool(bool),
+    Str(String),
+    /// `Some(p)`, `Option::None`, `util::Shape::Line(a, b)`; `parens` tells `Dot()` from `Dot`.
+    Variant { module: Option<Ident>, name: Ident, fields: Vec<Pattern>, parens: bool },
+    /// `A | B`
+    Or(Vec<Pattern>),
 }

@@ -1028,3 +1028,55 @@ fn a_module_can_import_itself_never() {
     let e = project_errors(&[("main", "import util; fn main() {}"), ("util", "import util; pub fn f() {}")]);
     assert!(e[0].1.contains("cannot import itself"), "{e:?}");
 }
+
+// ------------------------------------------------------------------ match and if let
+
+#[test]
+fn match_checks_patterns_and_gives_a_value() {
+    let c = ok("enum Phase { Waiting, Running(int), Done(str) }\nfn f(p: Phase) -> str { return match p { Phase::Waiting => \"w\", Phase::Running(n) if n > 3 => \"long\", Phase::Running(_) => \"r\", Phase::Done(w) => w }; }");
+    assert_eq!(c.hir.fns[0].ret, Ty::Str);
+    ok(&in_fn("let o = Some(3); let n = match o { Some(v) => v, None => 0 }; print(n);"));
+    ok(&in_fn("let n = 4; match n { 1 | 2 => print(\"s\"), x if x > 10 => print(\"b\"), _ => {} }"));
+    ok(&in_fn("let s = \"a\"; let k = match s { \"a\" => 1, _ => 2 }; print(k); let b = true; match b { true => print(1), false => print(2) }"));
+    ok(&in_fn("let o: Option<Option<int>> = None; match o { Some(Some(v)) => print(v), Some(None) => print(0), None => print(1) }"));
+    // `return`, `break` and `continue` fit any value
+    ok("fn f(o: Option<int>) -> int { let v = match o { Some(v) => v, None => return 0 }; return v; }");
+    ok(&in_fn("let o = Some(1); loop { let v = match o { Some(v) => v, None => break }; print(v); break; }"));
+}
+
+#[test]
+fn if_let_is_a_one_arm_match() {
+    ok(&in_fn("let o = Some(3); if let Some(v) = o { print(v); } else { print(0); }"));
+    ok(&in_fn("let r: Result<int, str> = Ok(1); if let Err(e) = r { print(e); } else if let Ok(v) = r { print(v); }"));
+    // the arm's bindings are not visible afterwards
+    one_error(&in_fn("let o = Some(3); if let Some(v) = o { print(v); } print(v);"), "cannot find `v`");
+}
+
+#[test]
+fn match_must_cover_every_case() {
+    one_error(&in_fn("let o = Some(1); match o { Some(_) => print(1) }"), "does not cover `None`");
+    one_error(&in_fn("let o: Option<Option<int>> = None; match o { None => print(0), Some(None) => print(1) }"), "does not cover `Some(Some(_))`");
+    one_error(&in_fn("let n = 1; match n { 1 => print(1), 2 => print(2) }"), "does not cover `_`");
+    one_error(&in_fn("let b = true; match b { true => print(1) }"), "does not cover `false`");
+    // a guarded arm does not count
+    one_error(&in_fn("let o = Some(1); match o { Some(v) if v > 0 => print(1), None => print(0) }"), "does not cover `Some(_)`");
+}
+
+#[test]
+fn match_reports_mistakes_in_patterns_and_arms() {
+    one_error(&in_fn("let o = Some(1); match o { Ok(_) => print(1), _ => print(2) }"), "variant of `Result`");
+    one_error(&in_fn("let o = Some(1); match o { Some(a, b) => print(a), None => print(0) }"), "has 1 value but the pattern has 2");
+    one_error(&in_fn("let o = Some(1); match o { Some => print(1), None => print(0) }"), "write `Some(_)`");
+    one_error(&in_fn("let n = 1; match n { \"a\" => print(1), _ => print(2) }"), "expected `int`, found `str`");
+    one_error(&in_fn("let o = Some(1); let x = match o { Some(v) => v, None => \"none\" }; print(x);"), "mismatched types");
+    one_error(&in_fn("let o = Some(1); let x = match o { Some(v) => { print(v); } None => 0 }; print(x);"), "this arm gives no value");
+    one_error(&in_fn("let o = Some(1); match o { Some(v) | None => print(1) }"), "cannot bind variables");
+}
+
+#[test]
+fn unreachable_arms_warn() {
+    let w = warnings(&in_fn("let o = Some(1); match o { _ => print(1), Some(_) => print(2) }"));
+    assert!(w.iter().any(|m| m.contains("unreachable pattern")), "{w:?}");
+    let w = warnings(&in_fn("let o = Some(1); match o { Some(_) => print(1), None => print(2), _ => print(3) }"));
+    assert!(w.iter().any(|m| m.contains("unreachable pattern")), "{w:?}");
+}

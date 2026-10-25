@@ -62,7 +62,7 @@ struct Parser {
 
 /// Tokens that begin a statement.
 fn starts_stmt(t: &Tok) -> bool {
-    matches!(t, Tok::Kw(Kw::Let | Kw::If | Kw::While | Kw::Loop | Kw::For | Kw::Return | Kw::Break | Kw::Continue) | Tok::Ident(_) | Tok::Hash) || is_ctx_kw(t)
+    matches!(t, Tok::Kw(Kw::Let | Kw::If | Kw::Match | Kw::While | Kw::Loop | Kw::For | Kw::Return | Kw::Break | Kw::Continue) | Tok::Ident(_) | Tok::Hash) || is_ctx_kw(t)
 }
 
 /// Tokens that begin an item.
@@ -223,7 +223,7 @@ impl Parser {
     fn at_expr_end(&self) -> bool {
         match self.peek() {
             Tok::Semi | Tok::Comma | Tok::RParen | Tok::RBracket | Tok::RBrace | Tok::Eof => true,
-            t => self.first_on_line() && (matches!(t, Tok::Kw(Kw::Let | Kw::If | Kw::While | Kw::Loop | Kw::For | Kw::Return | Kw::Break | Kw::Continue)) || is_ctx_kw(t)),
+            t => self.first_on_line() && (matches!(t, Tok::Kw(Kw::Let | Kw::If | Kw::Match | Kw::While | Kw::Loop | Kw::For | Kw::Return | Kw::Break | Kw::Continue)) || is_ctx_kw(t)),
         }
     }
 
@@ -651,6 +651,12 @@ impl Parser {
                 self.let_rest(name, mutable)
             }
             Tok::Kw(Kw::If) => return self.if_stmt(),
+            Tok::Kw(Kw::Match) => {
+                // a `match` statement needs no `;`
+                let e = self.match_expr()?;
+                self.eat(&Tok::Semi);
+                StmtKind::Expr(e)
+            }
             Tok::Kw(Kw::While) => {
                 self.next();
                 let cond = self.expr(HEAD)?;
@@ -731,9 +737,22 @@ impl Parser {
 
     fn if_stmt(&mut self) -> R<Stmt> {
         let start = self.expect(&Tok::Kw(Kw::If))?;
+        if self.eat(&Tok::Kw(Kw::Let)) {
+            let pat = self.pattern()?;
+            self.expect(&Tok::Eq)?;
+            let value = self.expr(HEAD)?;
+            let then = self.block()?;
+            let els = self.else_part()?;
+            return Ok(Stmt { kind: StmtKind::IfLet { pat, value, then, els }, span: start.to(self.prev_span()) });
+        }
         let cond = self.expr(HEAD)?;
         let then = self.block()?;
-        let els = if self.eat(&Tok::Kw(Kw::Else)) {
+        let els = self.else_part()?;
+        Ok(Stmt { kind: StmtKind::If { cond, then, els }, span: start.to(self.prev_span()) })
+    }
+
+    fn else_part(&mut self) -> R<Option<Box<Else>>> {
+        Ok(if self.eat(&Tok::Kw(Kw::Else)) {
             if self.at_kw(Kw::If) {
                 Some(Box::new(Else::If(Box::new(self.if_stmt()?))))
             } else {
@@ -741,8 +760,138 @@ impl Parser {
             }
         } else {
             None
+        })
+    }
+
+    // ---- match and patterns
+
+    /// `match value { pattern [if guard] => body, ... }`
+    fn match_expr(&mut self) -> R<Expr> {
+        let start = self.expect(&Tok::Kw(Kw::Match))?;
+        let scrut = self.expr(HEAD)?;
+        let open = self.expect(&Tok::LBrace)?;
+        let mut arms = Vec::new();
+        while !self.at(&Tok::RBrace) {
+            if self.at(&Tok::Eof) {
+                return Err(Diagnostic::new("unclosed `match`, expected `}`", open).hint("this `{` is never closed"));
+            }
+            let arm_start = self.span();
+            let pat = self.pattern()?;
+            let guard = if self.eat(&Tok::Kw(Kw::If)) { Some(self.expr(FREE)?) } else { None };
+            self.expect(&Tok::FatArrow)?;
+            let body = match self.peek() {
+                Tok::LBrace => ArmBody::Block(self.block()?),
+                Tok::Kw(Kw::Return | Kw::Break | Kw::Continue) => {
+                    let s = self.span();
+                    let kind = match self.next().tok {
+                        Tok::Kw(Kw::Return) => StmtKind::Return(if self.at(&Tok::Comma) || self.at(&Tok::RBrace) { None } else { Some(self.expr(FREE)?) }),
+                        Tok::Kw(Kw::Break) => StmtKind::Break,
+                        _ => StmtKind::Continue,
+                    };
+                    let span = s.to(self.prev_span());
+                    ArmBody::Block(Block { stmts: vec![Stmt { kind, span }], span })
+                }
+                _ => {
+                    let e = self.expr(FREE)?;
+                    // `pattern => x += 1` is an assignment statement
+                    match assign_op(self.peek()) {
+                        Some(op) if matches!(e.kind, ExprKind::Ident(_) | ExprKind::Path { .. } | ExprKind::Field { .. } | ExprKind::Index { .. }) => {
+                            self.next();
+                            let value = self.expr(FREE)?;
+                            let span = e.span.to(value.span);
+                            ArmBody::Block(Block { stmts: vec![Stmt { kind: StmtKind::Assign { target: e, op, value }, span }], span })
+                        }
+                        _ => ArmBody::Expr(e),
+                    }
+                }
+            };
+            let span = arm_start.to(self.prev_span());
+            arms.push(MatchArm { pat, guard, body, span });
+            // arms are separated by commas; after a `{ block }` the comma is optional
+            let braced = matches!(arms.last().map(|a| &a.body), Some(ArmBody::Block(_))) && self.tokens[self.pos - 1].tok == Tok::RBrace;
+            if !self.eat(&Tok::Comma) && !braced && !self.at(&Tok::RBrace) {
+                return self.unexpected("`,` or `}` after a match arm");
+            }
+        }
+        let end = self.expect(&Tok::RBrace)?;
+        Ok(Expr { kind: ExprKind::Match { scrut: Box::new(scrut), arms }, span: start.to(end) })
+    }
+
+    /// A pattern, with `A | B` alternatives.
+    fn pattern(&mut self) -> R<Pattern> {
+        let start = self.span();
+        let first = self.pattern_atom()?;
+        if !self.at(&Tok::Pipe) {
+            return Ok(first);
+        }
+        let mut alts = vec![first];
+        while self.eat(&Tok::Pipe) {
+            alts.push(self.pattern_atom()?);
+        }
+        Ok(Pattern { kind: PatKind::Or(alts), span: start.to(self.prev_span()) })
+    }
+
+    fn pattern_atom(&mut self) -> R<Pattern> {
+        let span = self.span();
+        let kind = match self.peek().clone() {
+            Tok::Int(n) => {
+                self.next();
+                PatKind::Int(n)
+            }
+            Tok::Minus => {
+                self.next();
+                match self.peek().clone() {
+                    Tok::Int(n) => {
+                        self.next();
+                        PatKind::Int(-n)
+                    }
+                    _ => return self.unexpected("a number"),
+                }
+            }
+            Tok::Str(s) => {
+                self.next();
+                PatKind::Str(s)
+            }
+            Tok::Kw(Kw::True) => {
+                self.next();
+                PatKind::Bool(true)
+            }
+            Tok::Kw(Kw::False) => {
+                self.next();
+                PatKind::Bool(false)
+            }
+            Tok::LParen if self.peek_at(1) == &Tok::RParen => {
+                // `()`: the only value of the unit type
+                self.next();
+                self.next();
+                PatKind::Wild
+            }
+            Tok::Ident(name) if name == "_" => {
+                self.next();
+                PatKind::Wild
+            }
+            Tok::Ident(_) => {
+                let first = self.ident("a pattern")?;
+                let (module, name) = self.path_tail(first, "a variant name after `::`")?;
+                if self.eat(&Tok::LParen) {
+                    let mut fields = Vec::new();
+                    while !self.at(&Tok::RParen) {
+                        fields.push(self.pattern()?);
+                        if !self.eat(&Tok::Comma) {
+                            break;
+                        }
+                    }
+                    self.expect(&Tok::RParen)?;
+                    PatKind::Variant { module, name, fields, parens: true }
+                } else if module.is_some() {
+                    PatKind::Variant { module, name, fields: Vec::new(), parens: false }
+                } else {
+                    PatKind::Ident(name)
+                }
+            }
+            _ => return self.unexpected("a pattern"),
         };
-        Ok(Stmt { kind: StmtKind::If { cond, then, els }, span: start.to(self.prev_span()) })
+        Ok(Pattern { kind, span: span.to(self.prev_span()) })
     }
 
     fn context(&mut self) -> R<StmtKind> {
@@ -792,7 +941,7 @@ impl Parser {
     fn can_start_expr(&self, flags: Flags) -> bool {
         match self.peek() {
             Tok::Int(_) | Tok::Float(_) | Tok::Str(_) | Tok::Ident(_) | Tok::Selector { .. } | Tok::Rel { .. } => true,
-            Tok::Kw(Kw::True | Kw::False) => true,
+            Tok::Kw(Kw::True | Kw::False | Kw::Match) => true,
             Tok::LParen | Tok::LBracket | Tok::Minus | Tok::Bang => true,
             Tok::LBrace => !flags.no_struct,
             _ => false,
@@ -949,6 +1098,7 @@ impl Parser {
                 }
                 ExprKind::Format(out)
             }
+            Tok::Kw(Kw::Match) => return self.match_expr(),
             Tok::Kw(Kw::True) => {
                 self.next();
                 ExprKind::Bool(true)
@@ -1241,6 +1391,44 @@ mod tests {
         assert_eq!(f.body.stmts.len(), 1);
     }
 
+    fn first_stmt(src: &str) -> StmtKind {
+        func(&format!("fn f() {{ {src} }}")).body.stmts.into_iter().next().expect("a statement").kind
+    }
+
+    #[test]
+    fn match_arms_and_patterns() {
+        let StmtKind::Expr(Expr { kind: ExprKind::Match { scrut, arms }, .. }) = first_stmt("match o { Some(1) | None => a(), Phase::Run(n, _) if n > 1 => { b(); } x => x += 1, _ => return 5, -3 => continue, \"s\" => break, true => c() }") else { panic!("a match statement") };
+        assert_eq!(sx(&scrut), "o");
+        assert_eq!(arms.len(), 7);
+        assert!(matches!(&arms[0].pat.kind, PatKind::Or(alts) if alts.len() == 2));
+        assert!(matches!(&arms[1].pat.kind, PatKind::Variant { module: Some(m), fields, parens: true, .. } if m.name == "Phase" && fields.len() == 2));
+        assert!(arms[1].guard.is_some() && matches!(arms[1].body, ArmBody::Block(_)));
+        assert!(matches!(&arms[2].pat.kind, PatKind::Ident(i) if i.name == "x"));
+        assert!(matches!(&arms[2].body, ArmBody::Block(b) if matches!(b.stmts[0].kind, StmtKind::Assign { .. })), "an assignment arm");
+        assert!(matches!(&arms[3].pat.kind, PatKind::Wild) && matches!(&arms[3].body, ArmBody::Block(b) if matches!(b.stmts[0].kind, StmtKind::Return(Some(_)))));
+        assert!(matches!(&arms[4].pat.kind, PatKind::Int(-3)) && matches!(&arms[5].pat.kind, PatKind::Str(s) if s == "s") && matches!(&arms[6].pat.kind, PatKind::Bool(true)));
+    }
+
+    #[test]
+    fn match_is_an_expression_and_if_let_a_statement() {
+        let StmtKind::Let { init, .. } = first_stmt("let x = match o { Some(v) => v, None => 0 };") else { panic!() };
+        assert!(matches!(init.kind, ExprKind::Match { .. }));
+        // a struct literal is not a scrutinee: `match p {` opens the arms
+        assert!(matches!(first_stmt("match p { _ => {} }"), StmtKind::Expr(_)));
+        let StmtKind::IfLet { pat, els, .. } = first_stmt("if let Ok(v) = r { a(); } else if let Err(e) = r { b(); } else { c(); }") else { panic!("an if let") };
+        assert!(matches!(pat.kind, PatKind::Variant { .. }));
+        assert!(matches!(els.as_deref(), Some(Else::If(inner)) if matches!(inner.kind, StmtKind::IfLet { .. })));
+        // no `;` needed after a match statement
+        assert_eq!(func("fn f() { match o { _ => {} } a(); }").body.stmts.len(), 2);
+    }
+
+    #[test]
+    fn match_syntax_errors() {
+        assert!(err("fn f() { match o { Some(x) x } }").message.contains("`=>`"));
+        assert!(err("fn f() { match o { Some(x) => x Some(y) => y } }").message.contains("`,` or `}`"));
+        assert!(err("fn f() { match o { => 1 } }").message.contains("a pattern"));
+    }
+
     fn err(src: &str) -> Diagnostic {
         match parse(src) {
             Ok(p) => panic!("expected an error, parsed {p:#?}"),
@@ -1290,6 +1478,7 @@ mod tests {
             ExprKind::Call { callee, args } => format!("(call {} {})", sx(callee), args.iter().map(sx).collect::<Vec<_>>().join(" ")),
             ExprKind::Field { base, name } => format!("(. {} {})", sx(base), name.name),
             ExprKind::Index { base, index } => format!("(idx {} {})", sx(base), sx(index)),
+            ExprKind::Match { scrut, arms } => format!("(match {} {})", sx(scrut), arms.len()),
         }
     }
 

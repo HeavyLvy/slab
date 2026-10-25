@@ -207,11 +207,68 @@ pub enum ExprKind {
     Index { base: Box<Expr>, index: Box<Expr> },
     /// `objective[holder]`: a scoreboard score (an lvalue).
     Score { objective: ObjectiveId, holder: Box<Expr> },
+    /// `match` (and `if let`, as a two-arm match). The arms are tried in order and the first
+    /// whose pattern fits (and whose guard holds) runs. A statement has type `()`.
+    Match { scrut: Box<Expr>, arms: Vec<MatchArm> },
     /// Produced after an error; never reaches lowering because errors stop the pipeline.
     Error,
 }
 
+/// One arm of a [`ExprKind::Match`]. `body` runs first (it may bind nothing: bindings are the
+/// pattern's), then `value` is the arm's result when the match is used as a value.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MatchArm {
+    pub pat: Pat,
+    pub guard: Option<Expr>,
+    pub body: Block,
+    pub value: Option<Expr>,
+}
+
+/// A checked pattern. Variant patterns list every payload field (`Wild` for the ones ignored).
+#[derive(Clone, Debug, PartialEq)]
+pub enum Pat {
+    Wild,
+    /// Binds the matched value to a new local.
+    Bind(LocalId),
+    Int(i32),
+    Bool(bool),
+    Str(String),
+    Variant { index: usize, fields: Vec<Pat> },
+    /// Alternatives; none of them binds anything.
+    Or(Vec<Pat>),
+}
+
 impl Expr {
+    /// The direct sub-expressions (not the statements inside a `match`).
+    pub fn for_each_child(&self, f: &mut dyn FnMut(&Expr)) {
+        match &self.kind {
+            ExprKind::Call { args, .. } | ExprKind::Builtin { args, .. } => args.iter().for_each(f),
+            ExprKind::Format(parts) => {
+                for p in parts {
+                    if let FormatPart::Expr(e) = p {
+                        f(e);
+                    }
+                }
+            }
+            ExprKind::List(es) | ExprKind::Struct { fields: es, .. } | ExprKind::Variant { args: es, .. } | ExprKind::Selector(_, es) => es.iter().for_each(f),
+            ExprKind::ToEntity(e) | ExprKind::Unary { expr: e, .. } | ExprKind::Field { base: e, .. } | ExprKind::Score { holder: e, .. } => f(e),
+            ExprKind::Binary { lhs, rhs, .. } => {
+                f(lhs);
+                f(rhs);
+            }
+            ExprKind::Method { recv, args, .. } => {
+                f(recv);
+                args.iter().for_each(f);
+            }
+            ExprKind::Index { base, index } => {
+                f(base);
+                f(index);
+            }
+            ExprKind::Match { scrut, .. } => f(scrut),
+            ExprKind::Int(_) | ExprKind::Bool(_) | ExprKind::Str(_) | ExprKind::Unit | ExprKind::Local(_) | ExprKind::Global(_) | ExprKind::Rel { .. } | ExprKind::Error => {}
+        }
+    }
+
     fn calls(&self, out: &mut Vec<FuncId>) {
         match &self.kind {
             ExprKind::Call { func, args } => {
@@ -238,6 +295,18 @@ impl Expr {
             ExprKind::Index { base, index } => {
                 base.calls(out);
                 index.calls(out);
+            }
+            ExprKind::Match { scrut, arms } => {
+                scrut.calls(out);
+                for a in arms {
+                    if let Some(g) = &a.guard {
+                        g.calls(out);
+                    }
+                    a.body.calls(out);
+                    if let Some(v) = &a.value {
+                        v.calls(out);
+                    }
+                }
             }
             ExprKind::Int(_) | ExprKind::Bool(_) | ExprKind::Str(_) | ExprKind::Unit | ExprKind::Local(_) | ExprKind::Global(_) | ExprKind::Rel { .. } | ExprKind::Error => {}
         }
@@ -323,6 +392,8 @@ impl Stmt {
             Stmt::Return(_) | Stmt::Break | Stmt::Continue => true,
             Stmt::If { then, els, .. } => then.diverges() && els.diverges(),
             Stmt::Block(b) => b.diverges(),
+            // a match is exhaustive, so it diverges when every arm does
+            Stmt::Expr(Expr { kind: ExprKind::Match { arms, .. }, .. }) => arms.iter().all(|a| a.body.diverges()),
             // `loop` only ends through `break`
             Stmt::Loop { body } => !body.breaks(),
             _ => false,
@@ -335,6 +406,7 @@ impl Stmt {
             Stmt::If { then, els, .. } => then.breaks() || els.breaks(),
             Stmt::Block(b) => b.breaks(),
             Stmt::Context { body, .. } => body.breaks(),
+            Stmt::Expr(Expr { kind: ExprKind::Match { arms, .. }, .. }) => arms.iter().any(|a| a.body.breaks()),
             _ => false,
         }
     }

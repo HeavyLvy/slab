@@ -81,6 +81,28 @@ fn unique(used: &mut HashSet<String>, base: String) -> String {
     (2..).map(|n| format!("{base}_{n}")).find(|c| used.insert(c.clone())).expect("infinite iterator")
 }
 
+/// An arm ready to be placed: its condition (`None`: always), the statements run when it is
+/// chosen (bindings first), and its guard with the statements the guard needs.
+type ArmCode = (Option<ir::Expr>, Vec<ir::Stmt>, Option<(Vec<ir::Stmt>, ir::Expr)>);
+
+/// The value a pattern is matched against, readable as often as needed.
+#[derive(Clone)]
+enum MatchVal {
+    /// An int-like value (int, bool, entity handle) as an expression.
+    Score(ir::Expr),
+    /// A stored value: a variable and the path inside it.
+    Data(ir::VarRef, NbtPath),
+}
+
+impl MatchVal {
+    fn read(&self, ty: &Ty) -> ir::Expr {
+        match self {
+            MatchVal::Score(e) => e.clone(),
+            MatchVal::Data(var, path) => from_data(ir::Expr::Field(var.clone(), path.clone()), ty),
+        }
+    }
+}
+
 fn kind_of(ty: &Ty) -> ir::Kind {
     match ty {
         // an entity handle is an int id
@@ -627,6 +649,10 @@ impl<'a> Gen<'a> {
                 self.flush(out);
                 out.push(ir::Stmt::Append { target: var, path, value: v });
             }
+            h::ExprKind::Match { scrut, arms } => {
+                self.match_value(e, scrut, arms);
+                self.flush(out);
+            }
             _ => {
                 let v = self.expr(e);
                 self.flush(out);
@@ -682,6 +708,7 @@ impl<'a> Gen<'a> {
                 let args = args.iter().map(|a| self.expr(a)).collect();
                 ir::Expr::Call(self.fn_names[func.0].clone(), args)
             }
+            h::ExprKind::Match { scrut, arms } => self.match_value(e, scrut, arms),
             h::ExprKind::Builtin { name, args } => match *name {
                 "exists" | "tag.has" => {
                     let mut holes = Holes::default();
@@ -997,6 +1024,154 @@ impl<'a> Gen<'a> {
             then.push(ir::Stmt::Return(if ret == Ty::Unit { None } else { Some(self.default_ir(&ret)) }));
         }
         self.pre.push(ir::Stmt::If { cond: bad, then, els: Vec::new() });
+    }
+
+    // ------------------------------------------------ match
+
+    /// A pattern against a value: the condition for it to fit (`None`: always) and the bindings
+    /// it makes, each a local with the expression that reads its value.
+    fn pattern_test(&self, p: &h::Pat, val: &MatchVal, ty: &Ty, binds: &mut Vec<(h::LocalId, ir::Expr)>) -> Option<ir::Expr> {
+        let and = |a: Option<ir::Expr>, b: Option<ir::Expr>| match (a, b) {
+            (Some(a), Some(b)) => Some(ir::Expr::bin(ir::BinOp::And, a, b)),
+            (a, None) => a,
+            (None, b) => b,
+        };
+        match p {
+            h::Pat::Wild => None,
+            h::Pat::Bind(l) => {
+                binds.push((*l, val.read(ty)));
+                None
+            }
+            h::Pat::Int(n) => Some(ir::Expr::bin(ir::BinOp::Eq, val.read(ty), ir::Expr::Int(*n))),
+            h::Pat::Bool(b) => Some(ir::Expr::bin(ir::BinOp::Eq, val.read(ty), ir::Expr::Int(*b as i32))),
+            h::Pat::Str(s) => Some(ir::Expr::bin(ir::BinOp::Eq, val.read(ty), ir::Expr::Data(Nbt::str(s.clone())))),
+            h::Pat::Variant { index, fields } => {
+                let MatchVal::Data(var, path) = val else { return None };
+                let Ty::Enum(id, targs) = ty else { return None };
+                let mut cond = Some(ir::Expr::bin(
+                    ir::BinOp::Eq,
+                    ir::Expr::ToInt(Box::new(ir::Expr::Field(var.clone(), path.clone().key("t")))),
+                    ir::Expr::Int(*index as i32),
+                ));
+                for (i, (sub, fty)) in fields.iter().zip(&self.hir.enums[id.0].variants[*index].fields).enumerate() {
+                    let fty = fty.subst(targs);
+                    if fty == Ty::Unit {
+                        continue;
+                    }
+                    let at = path.clone().key(format!("f{i}"));
+                    let inner = if is_scalar(&fty) {
+                        MatchVal::Score(ir::Expr::ToInt(Box::new(ir::Expr::Field(var.clone(), at))))
+                    } else {
+                        MatchVal::Data(var.clone(), at)
+                    };
+                    cond = and(cond, self.pattern_test(sub, &inner, &fty, binds));
+                }
+                cond
+            }
+            h::Pat::Or(alts) => {
+                let mut out: Option<Option<ir::Expr>> = None;
+                for a in alts {
+                    let c = self.pattern_test(a, val, ty, &mut Vec::new());
+                    out = Some(match (out, c) {
+                        (None, c) => c,
+                        (Some(Some(x)), Some(c)) => Some(ir::Expr::bin(ir::BinOp::Or, x, c)),
+                        _ => None,
+                    });
+                }
+                out.flatten()
+            }
+        }
+    }
+
+    /// `match` / `if let`: arms tried in order. Without guards it becomes an `if / else` chain;
+    /// with guards, a flag says whether an arm already ran. A match used as a value assigns the
+    /// chosen arm's value to a temporary.
+    fn match_value(&mut self, e: &h::Expr, scrut: &h::Expr, arms: &[h::MatchArm]) -> ir::Expr {
+        let sv = self.expr(scrut);
+        let val = if is_scalar(&scrut.ty) {
+            let name = match sv {
+                ir::Expr::Var(n) => n,
+                other => {
+                    let t = self.fresh("scrut");
+                    self.pre.push(ir::Stmt::Let { name: t.clone(), kind: kind_of(&scrut.ty), init: Some(other) });
+                    t
+                }
+            };
+            MatchVal::Score(ir::Expr::var(&name))
+        } else {
+            MatchVal::Data(self.data_var(sv), NbtPath::new())
+        };
+        let result = (e.ty != Ty::Unit).then(|| self.fresh("m"));
+        if let Some(r) = &result {
+            self.pre.push(ir::Stmt::Let { name: r.clone(), kind: kind_of(&e.ty), init: Some(self.default_ir(&e.ty)) });
+        }
+        let saved = std::mem::take(&mut self.pre);
+        let guarded = arms.iter().any(|a| a.guard.is_some());
+        let done = guarded.then(|| self.fresh("done"));
+        // each arm: its condition, and what runs when it is chosen
+        let mut parts: Vec<ArmCode> = Vec::new();
+        for arm in arms {
+            let mut binds = Vec::new();
+            let cond = self.pattern_test(&arm.pat, &val, &scrut.ty, &mut binds);
+            let mut run: Vec<ir::Stmt> = binds
+                .into_iter()
+                .map(|(l, read)| {
+                    let info = &self.hir.fns[self.cur_fn].locals[l.0];
+                    ir::Stmt::Let { name: self.local_names[l.0].clone(), kind: kind_of(&info.ty), init: Some(read) }
+                })
+                .collect();
+            let guard = arm.guard.as_ref().map(|g| self.expr_pre(g));
+            run.extend(self.block(&arm.body));
+            if let (Some(r), Some(v)) = (&result, &arm.value) {
+                let (pre, v) = self.expr_pre(v);
+                run.extend(pre);
+                run.push(ir::Stmt::Assign { target: ir::VarRef::Local(r.clone()), value: v });
+            }
+            parts.push((cond, run, guard));
+        }
+        self.pre = saved;
+        match done {
+            None => {
+                let mut chain: Vec<ir::Stmt> = Vec::new();
+                let last = parts.len().saturating_sub(1);
+                for (i, (cond, run, _)) in parts.into_iter().enumerate().rev() {
+                    // the last arm of an exhaustive match needs no test (the checker proved it)
+                    chain = match cond {
+                        Some(c) if i != last => vec![ir::Stmt::If { cond: c, then: run, els: chain }],
+                        _ => run,
+                    };
+                }
+                self.pre.extend(chain);
+            }
+            Some(done) => {
+                self.pre.push(ir::Stmt::Let { name: done.clone(), kind: ir::Kind::Int, init: Some(ir::Expr::Int(0)) });
+                let set_done = ir::Stmt::Assign { target: ir::VarRef::Local(done.clone()), value: ir::Expr::Int(1) };
+                for (cond, run, guard) in parts {
+                    let not_done = ir::Expr::bin(ir::BinOp::Eq, ir::Expr::var(&done), ir::Expr::Int(0));
+                    let cond = match cond {
+                        Some(c) => ir::Expr::bin(ir::BinOp::And, not_done, c),
+                        None => not_done,
+                    };
+                    // the bindings come first, then the guard sees them; `run` starts with them
+                    let n_binds = run.iter().take_while(|s| matches!(s, ir::Stmt::Let { .. })).count();
+                    let (binds, rest) = run.split_at(n_binds);
+                    let mut then = binds.to_vec();
+                    let chosen: Vec<ir::Stmt> = std::iter::once(set_done.clone()).chain(rest.iter().cloned()).collect();
+                    match guard {
+                        Some((pre, g)) => {
+                            then.extend(pre);
+                            then.push(ir::Stmt::If { cond: g, then: chosen, els: Vec::new() });
+                        }
+                        None => then.extend(chosen),
+                    }
+                    self.pre.push(ir::Stmt::If { cond, then, els: Vec::new() });
+                }
+            }
+        }
+        match result {
+            Some(r) => ir::Expr::var(&r),
+            None => ir::Expr::Int(0),
+        }
     }
 
     /// The methods of `Option` and `Result` that the standard library declares as intrinsics.
@@ -1379,17 +1554,36 @@ fn from_data(e: ir::Expr, ty: &Ty) -> ir::Expr {
 /// Whether the statement contains a `break` / `continue` that targets the enclosing loop
 /// (nested loops have their own).
 fn jumps(s: &h::Stmt) -> (bool, bool) {
+    let or = |(a, b): (bool, bool), (c, d): (bool, bool)| (a || c, b || d);
     match s {
         h::Stmt::Break => (true, false),
         h::Stmt::Continue => (false, true),
-        h::Stmt::If { then, els, .. } => {
-            let (a, b) = jumps_block(then);
-            let (c, d) = jumps_block(els);
-            (a || c, b || d)
-        }
+        h::Stmt::If { cond, then, els } => or(or(jumps_expr(cond), jumps_block(then)), jumps_block(els)),
         h::Stmt::Block(b) => jumps_block(b),
+        h::Stmt::Let { init: e, .. } | h::Stmt::Expr(e) | h::Stmt::Return(Some(e)) => jumps_expr(e),
+        h::Stmt::Assign { target, value, .. } => or(jumps_expr(target), jumps_expr(value)),
         _ => (false, false),
     }
+}
+
+/// `break`/`continue` inside the arms of a `match` used anywhere in the expression.
+fn jumps_expr(e: &h::Expr) -> (bool, bool) {
+    let mut acc = (false, false);
+    if let h::ExprKind::Match { arms, .. } = &e.kind {
+        for a in arms {
+            let (x, y) = jumps_block(&a.body);
+            acc = (acc.0 || x, acc.1 || y);
+            for sub in a.guard.iter().chain(a.value.iter()) {
+                let (x, y) = jumps_expr(sub);
+                acc = (acc.0 || x, acc.1 || y);
+            }
+        }
+    }
+    e.for_each_child(&mut |c| {
+        let (x, y) = jumps_expr(c);
+        acc = (acc.0 || x, acc.1 || y);
+    });
+    acc
 }
 
 fn jumps_block(b: &h::Block) -> (bool, bool) {

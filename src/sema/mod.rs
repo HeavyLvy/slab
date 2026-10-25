@@ -2,6 +2,7 @@
 
 pub mod builtins;
 mod check;
+mod matching;
 pub mod hir;
 mod selector;
 pub mod ty;

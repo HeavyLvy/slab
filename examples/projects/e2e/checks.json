@@ -509,6 +509,78 @@
   "expect": "has 1 [e2e]"
  },
  {
+  "cmd": "scoreboard players get #g.r_match_unit e2e",
+  "expect": "has 1 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_match_guard e2e",
+  "expect": "has 1 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_match_payload e2e",
+  "expect": "has 1 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_match_str e2e",
+  "expect": "has 1 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_match_int e2e",
+  "expect": "has 100 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_match_bool e2e",
+  "expect": "has 12 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_match_strlit e2e",
+  "expect": "has 2 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_match_nested e2e",
+  "expect": "has 15 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_match_early_some e2e",
+  "expect": "has 8 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_match_early_none e2e",
+  "expect": "has -1 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_match_continue e2e",
+  "expect": "has 12 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_match_iflet e2e",
+  "expect": "has 9 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_match_iflet_else e2e",
+  "expect": "has -5 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_match_else_if_let e2e",
+  "expect": "has 5 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_match_result_ok e2e",
+  "expect": "has 33 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_match_result_err e2e",
+  "expect": "has -9 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_match_stmt e2e",
+  "expect": "has 5 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_match_shadow e2e",
+  "expect": "has 12 [e2e]"
+ },
+ {
   "cmd": "scoreboard players get #g.r_pos_x e2e",
   "expect": "has 5 [e2e]"
  },

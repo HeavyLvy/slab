@@ -126,7 +126,7 @@
       "name": "keyword.control.context.slab"
     },
     "control-keywords": {
-      "match": "\\b(?:if|else|while|loop|for|in|return|break|continue)\\b",
+      "match": "\\b(?:if|else|while|loop|for|in|return|break|continue|match)\\b",
       "name": "keyword.control.slab"
     },
     "decl-const": {

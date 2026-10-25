@@ -177,7 +177,13 @@ impl Lexer<'_> {
                     two(self, '=', Tok::MinusEq, Tok::Minus)
                 }
             }
-            '=' => two(self, '=', Tok::EqEq, Tok::Eq),
+            '=' => {
+                if self.eat('>') {
+                    Tok::FatArrow
+                } else {
+                    two(self, '=', Tok::EqEq, Tok::Eq)
+                }
+            }
             '!' => two(self, '=', Tok::NotEq, Tok::Bang),
             '<' => two(self, '=', Tok::Le, Tok::Lt),
             '>' => two(self, '=', Tok::Ge, Tok::Gt),
@@ -193,11 +199,7 @@ impl Lexer<'_> {
                 }
             }
             '|' => {
-                if self.eat('|') {
-                    Tok::OrOr
-                } else {
-                    return self.err("expected `||` (there is no bitwise `|`)", start);
-                }
+                if self.eat('|') { Tok::OrOr } else { Tok::Pipe }
             }
             '"' => return self.string(start),
             '@' => return self.selector(start),

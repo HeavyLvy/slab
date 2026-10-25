@@ -399,6 +399,58 @@ scoreboard objectives add demo dummy
 execute unless data storage demo:globals start run data modify storage demo:globals start set value {t:1,f0:3}
 ```
 
+### `match` and `if let`
+
+Without guards, a `match` is an `if`/`else` chain: the first arm whose pattern fits runs. The tag `t` of the enum is read, payloads are copied into the arm's bindings, and the last arm of an exhaustive match needs no test. Used as a value, the chosen arm assigns a temporary.
+
+```slab show=pick
+fn pick(o: Option<int>) -> int {
+    return match o {
+        Some(v) => v + 1,
+        None => 0,
+    };
+}
+```
+```mcfunction
+# function demo:pick
+scoreboard players set #pick.v_m demo 0
+execute store result score #pick.t_0 demo run data get storage demo:vars pick.v_o.t
+execute store success score #pick.t_1 demo if score #pick.t_0 demo matches 1
+execute if score #pick.t_1 demo matches 1 run function demo:pick/b0
+execute unless score #pick.t_1 demo matches 1 run function demo:pick/b1
+scoreboard players operation #ret demo = #pick.v_m demo
+data remove storage demo:vars pick.v_o
+return 1
+```
+
+With a guard, a flag records that an arm already ran, because the guard is only known after the bindings exist:
+
+```slab show=big
+fn big(o: Option<int>) -> str {
+    return match o {
+        Some(v) if v > 9 => "big",
+        Some(_) => "small",
+        None => "none",
+    };
+}
+```
+```mcfunction
+# function demo:big
+data modify storage demo:vars big.v_m set value ""
+scoreboard players set #big.v_done demo 0
+execute store result score #big.t_0 demo run data get storage demo:vars big.v_o.t
+execute if score #big.v_done demo matches 0 if score #big.t_0 demo matches 1 run function demo:big/b0
+execute store result score #big.t_0 demo run data get storage demo:vars big.v_o.t
+execute if score #big.v_done demo matches 0 if score #big.t_0 demo matches 1 run function demo:big/b2
+execute store result score #big.t_0 demo run data get storage demo:vars big.v_o.t
+execute if score #big.v_done demo matches 0 if score #big.t_0 demo matches 0 run function demo:big/b3
+data modify storage demo:ret v set from storage demo:vars big.v_m
+function demo:big/_drop
+return 1
+```
+
+`int`, `bool` and `str` patterns compare with `==` (a `str` against a literal is one `execute if data` test); `A | B` is `||` of the tests. `if let P = v { A } else { B }` is the same as `match v { P => A, _ => B }`.
+
 ## Methods
 
 A method is an ordinary function named after its type (`Point::sum` is `point__sum`) whose first parameter is `self`. `p.sum()` and `Point::sum(p)` are the same call: the receiver is copied into `self`, like any argument.

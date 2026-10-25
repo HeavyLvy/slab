@@ -5,6 +5,7 @@ use std::collections::{HashMap, HashSet};
 
 use super::builtins::{self, BParam, BRet, Intrinsic};
 use super::hir::*;
+use super::matching;
 use super::selector;
 use super::ty::{EnumId, StructId, Ty};
 use crate::datapack::{HolderName, ResourceLocation, Word};
@@ -119,6 +120,24 @@ struct StructInfo<'a> {
     module: usize,
     decl: &'a ast::StructDecl,
     fields: Vec<(String, Ty)>,
+}
+
+/// One arm as the checker sees it, whether it comes from a `match` or an `if let`.
+struct ArmIn<'a> {
+    /// `None`: matches anything (the `else` of an `if let`).
+    pat: Option<&'a ast::Pattern>,
+    guard: Option<&'a ast::Expr>,
+    body: ArmSrc<'a>,
+    span: Span,
+}
+
+enum ArmSrc<'a> {
+    Block(&'a ast::Block),
+    Expr(&'a ast::Expr),
+    /// `else if ..` of an `if let`
+    ElseIf(&'a ast::Stmt),
+    /// no `else`
+    Empty,
 }
 
 struct EnumInfo<'a> {
@@ -2035,6 +2054,30 @@ impl<'a> Checker<'a> {
             }
             K::Context { clauses, body } => self.context_stmt(clauses, body),
             K::Block(b) => Stmt::Block(self.block(b)),
+            K::IfLet { pat, value, then, els } => {
+                let scrut = self.match_scrutinee(value);
+                let arms = vec![
+                    ArmIn { pat: Some(pat), guard: None, body: ArmSrc::Block(then), span: pat.span },
+                    ArmIn { pat: None, guard: None, body: match els.as_deref() {
+                        None => ArmSrc::Empty,
+                        Some(ast::Else::Block(b)) => ArmSrc::Block(b),
+                        Some(ast::Else::If(st)) => ArmSrc::ElseIf(st),
+                    }, span: s.span },
+                ];
+                Stmt::Expr(self.match_arms(scrut, arms, None, true, s.span))
+            }
+            K::Expr(e) if matches!(e.kind, ast::ExprKind::Match { .. }) => {
+                let ast::ExprKind::Match { scrut, arms } = &e.kind else { unreachable!() };
+                let scrut = self.match_scrutinee(scrut);
+                let arms: Vec<ArmIn<'a>> = arms
+                    .iter()
+                    .map(|a| ArmIn { pat: Some(&a.pat), guard: a.guard.as_ref(), body: match &a.body {
+                        ast::ArmBody::Block(b) => ArmSrc::Block(b),
+                        ast::ArmBody::Expr(x) => ArmSrc::Expr(x),
+                    }, span: a.span })
+                    .collect();
+                Stmt::Expr(self.match_arms(scrut, arms, None, true, e.span))
+            }
             K::Expr(e) => {
                 let hir = self.expr(e, None);
                 if !matches!(hir.kind, ExprKind::Call { .. } | ExprKind::Builtin { .. } | ExprKind::Method { .. } | ExprKind::Error) {
@@ -2043,6 +2086,216 @@ impl<'a> Checker<'a> {
                 Stmt::Expr(hir)
             }
         }
+    }
+
+    // ------------------------------------------------------------------ match
+
+    /// The value a `match` or `if let` looks at: any storable value (a selector that matches one
+    /// entity becomes the entity).
+    fn match_scrutinee(&mut self, e: &'a ast::Expr) -> Expr {
+        let mut v = self.expr(e, None);
+        if v.ty == Ty::Selector {
+            v = self.coerce_to_entity(v);
+        }
+        if !v.ty.is_error() && !v.ty.is_storable() {
+            let msg = format!("cannot match on a value of type `{}`", self.tn(&v.ty));
+            self.error(e.span, msg);
+            return Expr::error(e.span);
+        }
+        v
+    }
+
+    /// Checks the arms of a `match`/`if let`. `as_stmt`: the arms' values are dropped and each
+    /// arm may have its own type; otherwise all arms produce one type (arms that return, break
+    /// or continue fit any).
+    fn match_arms(&mut self, scrut: Expr, arms: Vec<ArmIn<'a>>, expected: Option<&Ty>, as_stmt: bool, span: Span) -> Expr {
+        let vtys = |c: &Self| -> Vec<Vec<(String, Vec<Ty>)>> { c.enums.iter().map(|e| e.variants.clone()).collect() };
+        let table = vtys(self);
+        let variants = |id: EnumId| table.get(id.0).cloned().unwrap_or_default();
+        let mut out: Vec<MatchArm> = Vec::new();
+        let mut result: Option<Ty> = expected.filter(|t| !t.is_error() && **t != Ty::Unit).cloned();
+        let mut rows: Vec<Vec<Pat>> = Vec::new();
+        for arm in arms {
+            self.fctx().scopes.push(HashMap::new());
+            let mut names = Vec::new();
+            let pat = match arm.pat {
+                Some(p) => self.pattern(p, &scrut.ty, &mut names),
+                None => Pat::Wild,
+            };
+            let guard = arm.guard.map(|g| self.expect_bool(g));
+            // an arm that can never run: the rows before it already cover everything it matches
+            if !scrut.ty.is_error() && arm.pat.is_some() && !matching::useful(&rows, std::slice::from_ref(&pat), std::slice::from_ref(&scrut.ty), &variants) {
+                self.warn(arm.pat.map_or(arm.span, |p| p.span), "unreachable pattern: an earlier arm already matches everything this one does");
+            }
+            let (body, value) = match arm.body {
+                ArmSrc::Empty => (Block::default(), None),
+                ArmSrc::Block(b) => {
+                    let body = self.block(b);
+                    if !as_stmt && !body.diverges() {
+                        self.error_hint(b.span, "this arm gives no value", "a match used as a value needs an expression after `=>`, or a block that ends in `return`, `break` or `continue`");
+                    }
+                    (body, None)
+                }
+                ArmSrc::ElseIf(st) => (Block { stmts: vec![self.stmt(st)] }, None),
+                ArmSrc::Expr(x) if as_stmt => {
+                    let hir = self.expr(x, None);
+                    if !matches!(hir.kind, ExprKind::Call { .. } | ExprKind::Builtin { .. } | ExprKind::Method { .. } | ExprKind::Match { .. } | ExprKind::Error) {
+                        self.warn(x.span, "this expression has no effect");
+                    }
+                    (Block { stmts: vec![Stmt::Expr(hir)] }, None)
+                }
+                ArmSrc::Expr(x) => {
+                    let v = self.expr(x, result.as_ref());
+                    match &result {
+                        None => result = Some(v.ty.clone()).filter(|t| !t.is_error()).or(result),
+                        Some(t) => self.mismatch(v.span, &t.clone(), &v.ty),
+                    }
+                    (Block::default(), Some(v))
+                }
+            };
+            self.fctx().scopes.pop();
+            if guard.is_none() && !scrut.ty.is_error() {
+                rows.push(vec![pat.clone()]);
+            }
+            out.push(MatchArm { pat, guard, body, value });
+        }
+        if !scrut.ty.is_error()
+            && let Some(w) = matching::witness(&rows, std::slice::from_ref(&scrut.ty), &variants)
+        {
+            let what = w.first().cloned().unwrap_or_else(|| "_".to_owned());
+            let hint = if what == "_" { "add an arm with `_ =>` to cover the rest".to_owned() } else { format!("add an arm for `{what}`, or `_ =>` to cover the rest") };
+            self.error_hint(scrut.span, format!("this `match` does not cover `{what}`"), hint);
+        }
+        let ty = if as_stmt { Ty::Unit } else { result.unwrap_or(Ty::Unit) };
+        Expr { kind: ExprKind::Match { scrut: Box::new(scrut), arms: out }, ty, span }
+    }
+
+    /// Checks a pattern against the type it must match, declaring its bindings in the current
+    /// scope. `names` collects the binding names (a name may appear once per pattern).
+    fn pattern(&mut self, p: &'a ast::Pattern, ty: &Ty, names: &mut Vec<String>) -> Pat {
+        use ast::PatKind as P;
+        if ty.is_error() {
+            // still declare the names, so the arm body does not complain about unknown variables
+            self.declare_pattern_names(p, names);
+            return Pat::Wild;
+        }
+        match &p.kind {
+            P::Wild => Pat::Wild,
+            P::Int(n) => {
+                if *ty != Ty::Int {
+                    self.mismatch(p.span, ty, &Ty::Int);
+                    return Pat::Wild;
+                }
+                if !fits_i32(*n) {
+                    self.error(p.span, "integer literal is out of range for `int`");
+                    return Pat::Wild;
+                }
+                Pat::Int(*n as i32)
+            }
+            P::Bool(b) => {
+                if *ty != Ty::Bool {
+                    self.mismatch(p.span, ty, &Ty::Bool);
+                    return Pat::Wild;
+                }
+                Pat::Bool(*b)
+            }
+            P::Str(s) => {
+                if *ty != Ty::Str {
+                    self.mismatch(p.span, ty, &Ty::Str);
+                    return Pat::Wild;
+                }
+                Pat::Str(s.clone())
+            }
+            P::Ident(id) => match self.lookup_value(&id.name) {
+                Some(ValueSym::Variant(eid, vi)) => self.variant_pattern(eid, vi, &[], false, p.span, ty, names),
+                _ => self.binding(id, ty, names),
+            },
+            P::Variant { module, name, fields, parens } => {
+                let found = match module {
+                    Some(m) => match self.variant_path(m, name) {
+                        Some(found) => found,
+                        None => {
+                            self.error(p.span, format!("`{}::{}` is not an enum variant", m.name, name.name));
+                            None
+                        }
+                    },
+                    None => match self.lookup_value(&name.name) {
+                        Some(ValueSym::Variant(eid, vi)) => Some((eid, vi)),
+                        _ => {
+                            self.error(name.span, format!("cannot find the variant `{}`", name.name));
+                            None
+                        }
+                    },
+                };
+                match found {
+                    Some((eid, vi)) => self.variant_pattern(eid, vi, fields, *parens, p.span, ty, names),
+                    None => {
+                        self.declare_pattern_names(p, names);
+                        Pat::Wild
+                    }
+                }
+            }
+            P::Or(alts) => {
+                let mut out = Vec::new();
+                for a in alts {
+                    let before = names.len();
+                    out.push(self.pattern(a, ty, names));
+                    if names.len() > before {
+                        self.error(a.span, "a pattern with `|` cannot bind variables yet");
+                    }
+                }
+                Pat::Or(out)
+            }
+        }
+    }
+
+    fn binding(&mut self, id: &'a ast::Ident, ty: &Ty, names: &mut Vec<String>) -> Pat {
+        if names.contains(&id.name) {
+            self.error(id.span, format!("`{}` is bound twice in this pattern", id.name));
+        }
+        names.push(id.name.clone());
+        Pat::Bind(self.declare_local(id, ty.clone(), false, false))
+    }
+
+    /// Declares the names of a pattern that could not be checked.
+    fn declare_pattern_names(&mut self, p: &'a ast::Pattern, names: &mut Vec<String>) {
+        match &p.kind {
+            ast::PatKind::Ident(id) if !matches!(self.lookup_value(&id.name), Some(ValueSym::Variant(..))) => {
+                self.binding(id, &Ty::Error, names);
+            }
+            ast::PatKind::Variant { fields, .. } => fields.iter().for_each(|f| self.declare_pattern_names(f, names)),
+            ast::PatKind::Or(alts) => alts.iter().for_each(|f| self.declare_pattern_names(f, names)),
+            _ => {}
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn variant_pattern(&mut self, eid: EnumId, vi: usize, fields: &'a [ast::Pattern], parens: bool, span: Span, ty: &Ty, names: &mut Vec<String>) -> Pat {
+        let ename = self.enums[eid.0].name.clone();
+        let (vname, payload) = self.enums[eid.0].variants.get(vi).cloned().unwrap_or_default();
+        let targs = match ty {
+            Ty::Enum(e2, targs) if *e2 == eid => targs.clone(),
+            _ => {
+                let msg = format!("this pattern is a variant of `{ename}` but the value is `{}`", self.tn(ty));
+                self.error(span, msg);
+                fields.iter().for_each(|f| self.declare_pattern_names(f, names));
+                return Pat::Wild;
+            }
+        };
+        if payload.len() != fields.len() {
+            let msg = if payload.is_empty() {
+                format!("variant `{ename}::{vname}` has no payload, so it is written without parentheses")
+            } else if !parens {
+                format!("variant `{ename}::{vname}` has a payload: write `{vname}({})`", vec!["_"; payload.len()].join(", "))
+            } else {
+                format!("variant `{ename}::{vname}` has {} value{} but the pattern has {}", payload.len(), if payload.len() == 1 { "" } else { "s" }, fields.len())
+            };
+            self.error(span, msg);
+            fields.iter().for_each(|f| self.declare_pattern_names(f, names));
+            return Pat::Wild;
+        }
+        let subs = fields.iter().zip(&payload).map(|(f, t)| self.pattern(f, &t.subst(&targs), names)).collect();
+        Pat::Variant { index: vi, fields: subs }
     }
 
     fn return_stmt(&mut self, value: Option<&'a ast::Expr>, span: Span) -> Stmt {
@@ -2254,6 +2507,17 @@ impl<'a> Checker<'a> {
         let span = e.span;
         let mk = |kind: ExprKind, ty: Ty| Expr { kind, ty, span };
         match &e.kind {
+            K::Match { scrut, arms } => {
+                let scrut = self.match_scrutinee(scrut);
+                let arms: Vec<ArmIn<'a>> = arms
+                    .iter()
+                    .map(|a| ArmIn { pat: Some(&a.pat), guard: a.guard.as_ref(), body: match &a.body {
+                        ast::ArmBody::Block(b) => ArmSrc::Block(b),
+                        ast::ArmBody::Expr(x) => ArmSrc::Expr(x),
+                    }, span: a.span })
+                    .collect();
+                self.match_arms(scrut, arms, expected, false, span)
+            }
             K::Int(n) => {
                 if !fits_i32(*n) {
                     self.error(span, "integer literal is out of range for `int` (-2147483648 to 2147483647)");

@@ -34,7 +34,7 @@ fn fib(n: int) -> int {
 
 * Whitespace separates tokens. Comments: `// to end of line`, `/* block, nests */`.
 * Identifiers: `[A-Za-z_][A-Za-z0-9_]*`. Keywords (cannot be identifiers):
-  `fn let mut if else while loop for in return break continue struct enum impl global const objective pub import true false as at positioned rotated facing align anchored`.
+  `fn let mut if else match while loop for in return break continue struct enum impl global const objective pub import true false as at positioned rotated facing align anchored`.
 * **Paths** use `::`: `util::clamp`, `game::tag::add`, `game::EntityId`. `import a::b;`, `import a::b as c;`, `import a::{x, y};` and `import a::*;` (docs/lang/modules.md).
 * Integers: decimal with `_` separators (`1_000`), or hex `0xFF`. They are `i64` in the AST and range-checked to `i32` later.
 * **Time literals**: an integer directly followed by `t` (ticks), `s` (seconds, x20) or `d` (days, x24000): `5t`, `10s`, `1d`. They are plain integers (ticks) with no separate type.
@@ -70,13 +70,21 @@ objective_decl := 'objective' IDENT '=' expr ';'        // expr: criteria string
 type        := [IDENT '::'] IDENT [ '<' type (',' type)* '>' ]   // int, bool, str, list<int>, Player, util::Point
 
 block       := '{' stmt* '}'
-stmt        := let_stmt | if_stmt | while_stmt | loop_stmt | for_stmt
+stmt        := let_stmt | if_stmt | if_let_stmt | match_expr [';'] | while_stmt | loop_stmt | for_stmt
              | 'return' [expr] ';' | 'break' ';' | 'continue' ';'
              | context_stmt | block
              | expr ( assign_op expr )? ';'
 let_stmt    := 'let' ['mut'] IDENT [':' type] '=' expr ';'
 assign_op   := '=' | '+=' | '-=' | '*=' | '/=' | '%='     // target: name, field access or index
 if_stmt     := 'if' expr block ['else' (if_stmt | block)]
+if_let_stmt := 'if' 'let' pattern '=' expr block ['else' (if_stmt | if_let_stmt | block)]
+match_expr  := 'match' expr '{' (arm (',' arm)* [','])? '}'      // also an expression: `let x = match v { .. };`
+arm         := pattern ['if' expr] '=>' ( expr | block | 'return' [expr] | 'break' | 'continue' | place assign_op expr )
+pattern     := atom_pat ('|' atom_pat)*
+atom_pat    := '_' | INT | '-' INT | STRING | 'true' | 'false' | IDENT      // a name binds, unless it is a variant (`None`)
+             | [path '::'] IDENT '(' [pattern (',' pattern)* [',']] ')'      // `Some(x)`, `Phase::Done(w)`
+             | path '::' IDENT                                               // `Phase::Waiting`
+             | '(' ')'
 while_stmt  := 'while' expr block
 loop_stmt   := 'loop' block
 for_stmt    := 'for' IDENT 'in' expr block
@@ -126,6 +134,8 @@ Precedence, loosest to tightest: range, `||`, `&&`, comparison, `+ -`, `* / %`, 
 * at most one error is reported per source position.
 
 The language server hides checker diagnostics inside the item that contains a syntax error, because they are mostly consequences of the damage.
+
+The head of `match`, `if let` and `if` is parsed like other heads: `Name {` is not a struct literal there. After a `{ block }` arm the comma is optional. A `match` at the start of a statement needs no `;`.
 
 ## Semantics, per construct (to be implemented in the semantic phase)
 
