@@ -50,3 +50,6 @@ that fails if the committed grammar is stale.
 * Unsaved edits are checked with the in-buffer text.
 * Only syntax errors show one at a time (the parser stops at its first); type errors are
   all reported together.
+## License
+
+Apache License 2.0, see `LICENSE` (the same license as slab and slab-lsp).

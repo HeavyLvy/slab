@@ -89,3 +89,10 @@ writes it from the compiler's own keyword/builtin lists, and a test fails if it 
 * `docs/lang/compiled-output.md` - what each piece of slab code turns into, command by command (checked against the compiler by a test).
 * `examples/` - `slab/` single files, `projects/hello` a small multi-file project.
 * `CLAUDE.md` - how the compiler is organised and how it is tested against a real server (`tools/verify_all.sh`).
+
+## License
+
+slab (the compiler, the standard library in `src/stdlib/`, the language server `slab-lsp` and the
+VS Code extension) is licensed under the [Apache License 2.0](LICENSE). Copyright 2026 HeavyLvy;
+see also [NOTICE](NOTICE). Programs you write in slab and the data packs the compiler produces
+from them are yours.
