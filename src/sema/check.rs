@@ -841,6 +841,7 @@ impl<'a> Checker<'a> {
             None => BRet::Unit,
             Some("bool") => BRet::Bool,
             Some("Entity") => BRet::Entity,
+            Some("Result") => BRet::CommandResult,
             Some(other) => {
                 self.error(f.ret.as_ref().map_or(f.name.span, |t| t.span), format!("an intrinsic cannot return `{other}`"));
                 return;
@@ -2751,8 +2752,17 @@ impl<'a> Checker<'a> {
         Expr { kind: ExprKind::Call { func: id, args: hargs }, ty: ret, span }
     }
 
+    /// The type an intrinsic returns; `Result<int, ()>` needs the standard library's `Result`.
+    fn intrinsic_ret(&self, b: &Intrinsic) -> Ty {
+        match (b.ret, self.prelude_types.get("Result")) {
+            (BRet::CommandResult, Some(Ty::Enum(id, _))) => Ty::Enum(*id, vec![Ty::Int, Ty::Unit]),
+            (BRet::CommandResult, _) => Ty::Error,
+            (other, _) => other.ty(),
+        }
+    }
+
     fn builtin_call(&mut self, b: &Intrinsic, args: &'a [ast::Expr], span: Span) -> Expr {
-        let ret = b.ret.ty();
+        let ret = self.intrinsic_ret(b);
         if args.len() < b.min_args || args.len() > b.params.len() {
             let takes = if b.min_args == b.params.len() {
                 format!("{} argument{}", b.params.len(), if b.params.len() == 1 { "" } else { "s" })

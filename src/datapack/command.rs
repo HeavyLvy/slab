@@ -1101,6 +1101,9 @@ pub enum Command {
     /// `teleport <targets> <x y z>`
     Teleport { targets: Selector, dest: Pos },
     Macro(MacroCommand),
+    /// A command written by the user as text (`game::run_command`): a literal, or a whole line
+    /// supplied at run time. Runs as it is.
+    Run(Arg<String>),
     /// Escape hatch for commands the AST doesn't model yet. Only checked for line safety.
     /// Add a typed variant instead of leaning on this.
     Raw(String),
@@ -1295,6 +1298,17 @@ impl Check for Command {
                 }
                 single_line("pack name", pack)
             }
+            Command::Run(Arg::Hole(_)) => Ok(()),
+            Command::Run(Arg::Lit(c)) => {
+                single_line("command", c)?;
+                if c.trim().is_empty() || c.starts_with(['/', '$', '#']) || c.starts_with(char::is_whitespace) {
+                    bail!("a command is not empty and does not start with `/`, `$`, `#` or whitespace: {c:?}");
+                }
+                if c.contains("$(") {
+                    bail!("a command cannot contain `$(` (it would be read as a macro placeholder)");
+                }
+                Ok(())
+            }
             Command::Say(Arg::Hole(_)) => Ok(()),
             Command::Say(Arg::Lit(m)) => {
                 single_line("say message", m)?;
@@ -1370,6 +1384,7 @@ impl fmt::Display for Command {
                 TagAction::List => write!(f, "tag {targets} list"),
             },
             Command::Say(m) => write!(f, "say {m}"),
+            Command::Run(c) => write!(f, "{c}"),
             Command::DatapackDisable(pack) => {
                 f.write_str("datapack disable ")?;
                 write_quoted(f, pack)
@@ -1643,6 +1658,11 @@ mod tests {
         assert_eq!(in_exec.render_line(), "$execute summon $(h0) run say x");
         assert_eq!(Command::Say(h(0)).render_line(), "$say $(h0)");
         assert!(Command::Say(h(0)).check().is_ok());
+        assert_eq!(Command::Run(h(0)).render_line(), "$$(h0)");
+        assert_eq!(Command::Run(Arg::Lit("time set day".into())).render_line(), "time set day");
+        assert!(Command::Run(Arg::Lit("/time set day".into())).check().is_err());
+        assert!(Command::Run(Arg::Lit("say $(x)".into())).check().is_err());
+        assert!(Command::Run(Arg::Lit("say a\nsay b".into())).check().is_err());
         let mut vars = vec![];
         block.macro_vars(&mut vars);
         assert_eq!(vars, ["h1"]);

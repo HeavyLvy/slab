@@ -277,7 +277,7 @@ fn collect_calls(stmts: &[Stmt], out: &mut Vec<String>) {
                 args.iter().for_each(|(_, e)| collect_calls_expr(e, out));
                 collect_calls(body, out);
             }
-            Stmt::MacroCommand { args, .. } | Stmt::ReadAt { args, .. } => args.iter().for_each(|(_, e)| collect_calls_expr(e, out)),
+            Stmt::MacroCommand { args, .. } | Stmt::StoreResult { args, .. } | Stmt::ReadAt { args, .. } => args.iter().for_each(|(_, e)| collect_calls_expr(e, out)),
             Stmt::WriteAt { value, args, .. } => {
                 collect_calls_expr(value, out);
                 args.iter().for_each(|(_, e)| collect_calls_expr(e, out));
@@ -764,7 +764,7 @@ impl<'a> Lower<'a> {
                     let cmd = Command::execute().store(StoreKind::Success, StoreTarget::Score { targets: fake(&d), objective: self.obj.clone() }).run((**command).clone());
                     self.emit(cmd);
                 } else {
-                    self.call_macro((**command).clone(), args, Some(&d))?;
+                    self.call_macro((**command).clone(), args, Some((&d, None)))?;
                 }
                 Ok(IntVal::Holder(d, true))
             }
@@ -1433,6 +1433,18 @@ impl<'a> Lower<'a> {
                 self.run_command(cmd, args)?;
             }
             Stmt::MacroCommand { command, args } => self.run_command(command.clone(), args)?,
+            Stmt::StoreResult { success, result, command, args } => {
+                let (ok, value) = (self.var_holder(success)?, self.var_holder(result)?);
+                if args.is_empty() {
+                    let cmd = Command::execute()
+                        .store(StoreKind::Success, StoreTarget::Score { targets: fake(&ok), objective: self.obj.clone() })
+                        .store(StoreKind::Result, StoreTarget::Score { targets: fake(&value), objective: self.obj.clone() })
+                        .run(command.clone());
+                    self.emit(cmd);
+                } else {
+                    self.call_macro(command.clone(), args, Some((&ok, Some(&value))))?;
+                }
+            }
             Stmt::ReadAt { dest, source, path, args } => {
                 self.expect_data_ref(source)?;
                 self.declare(dest, Kind::Data)?;
@@ -1488,7 +1500,7 @@ impl<'a> Lower<'a> {
     ///
     /// With `success`, the helper is `return run <cmd>` so that the command's own success flows out
     /// of the function call, and it is stored in that holder.
-    fn call_macro(&mut self, cmd: Command, args: &[(Hole, Expr)], success: Option<&HolderName>) -> R<()> {
+    fn call_macro(&mut self, cmd: Command, args: &[(Hole, Expr)], success: Option<(&HolderName, Option<&HolderName>)>) -> R<()> {
         enum Val {
             Int(IntVal),
             Data(DataVal),
@@ -1536,9 +1548,12 @@ impl<'a> Lower<'a> {
         let call = Command::Function { function: FunctionRef::Id(id), args: datapack::FnArgs::With(DataTarget::Storage(scratch.clone()), None) };
         match success {
             None => self.emit(call),
-            Some(d) => {
-                let wrapped = Command::execute().store(StoreKind::Success, StoreTarget::Score { targets: fake(d), objective: self.obj.clone() }).run(call);
-                self.emit(wrapped);
+            Some((d, result)) => {
+                let mut wrapped = Command::execute().store(StoreKind::Success, StoreTarget::Score { targets: fake(d), objective: self.obj.clone() });
+                if let Some(r) = result {
+                    wrapped = wrapped.store(StoreKind::Result, StoreTarget::Score { targets: fake(r), objective: self.obj.clone() });
+                }
+                self.emit(wrapped.run(call));
             }
         }
         for (hole, v) in &vals {

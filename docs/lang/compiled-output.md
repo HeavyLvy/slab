@@ -584,6 +584,39 @@ scoreboard players operation #ret demo = #used.t_0 demo
 return 1
 ```
 
+### Any command: `run_command`
+
+`run_command(text)` runs a command written as text (no leading `/`) for what slab has no function for. Its value is a `Result<int, ()>`: `Ok(n)` with the command's result when it worked, `Err(())` when it failed. Ignored, it is the bare command; used, one `execute` stores both the success and the result:
+
+```slab show=ignored,used
+fn ignored() {
+    run_command("time set day");
+}
+
+fn used() -> int {
+    let r = run_command("scoreboard players get #x demo");
+    return r.unwrap_or(0 - 1);
+}
+```
+```mcfunction
+# function demo:ignored
+time set day
+
+# function demo:used
+execute store success score #used.v_ok demo store result score #used.v_val demo run scoreboard players get #x demo
+data modify storage demo:vars used.v_res set value {t:1}
+execute unless score #used.v_ok demo matches 0 run function demo:used/b0
+data modify storage demo:vars used.v_r set from storage demo:vars used.v_res
+scoreboard players set #used.v_or demo -1
+execute store result score #used.t_0 demo run data get storage demo:vars used.v_r.t
+execute if score #used.t_0 demo matches 0 run function demo:used/b1
+scoreboard players operation #ret demo = #used.v_or demo
+function demo:used/_drop
+return 1
+```
+
+Text computed at run time (`run_command(f"...")`) becomes a macro line that is the whole command, so a value that is not a valid command only fails in game. A successful command whose result is 0 is still `Ok(0)`.
+
 ## Context blocks
 
 `as`, `at`, `positioned`, ... are `/execute` sub-commands. The body is its own function, called once per matching entity.

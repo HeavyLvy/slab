@@ -489,6 +489,26 @@
   "expect": "has 1 [e2e]"
  },
  {
+  "cmd": "scoreboard players get #g.r_cmd_value e2e",
+  "expect": "has 41 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_cmd_ok e2e",
+  "expect": "has 1 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_cmd_err e2e",
+  "expect": "has 1 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_cmd_dynamic e2e",
+  "expect": "has 7 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_cmd_zero e2e",
+  "expect": "has 1 [e2e]"
+ },
+ {
   "cmd": "scoreboard players get #g.r_impl_expect e2e",
   "expect": "has 3 [e2e]"
  },

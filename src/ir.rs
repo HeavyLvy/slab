@@ -166,6 +166,10 @@ pub enum Stmt {
     ReadAt { dest: String, source: VarRef, path: NbtPath, args: Vec<(Hole, Expr)> },
     /// `target.path = value` (a Data value) where `path` may contain index holes.
     WriteAt { target: VarRef, path: NbtPath, value: Expr, args: Vec<(Hole, Expr)> },
+    /// Runs `command` and stores whether it succeeded in the Int local `success` and its integer
+    /// result (`data get`, `scoreboard players get`, the count of `kill`, ...) in the Int local
+    /// `result`; both are 0 when it fails. `args` fill the holes, like [`Stmt::MacroCommand`].
+    StoreResult { success: String, result: String, command: Command, args: Vec<(Hole, Expr)> },
     /// A typed command from the datapack module, for builtins the IR doesn't model.
     Command(Command),
 }

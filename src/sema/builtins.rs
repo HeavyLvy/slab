@@ -32,6 +32,8 @@ pub enum BRet {
     Bool,
     /// A handle to the entity the builtin created (`summon`).
     Entity,
+    /// `Result<int, ()>`: the integer result of a command, or an error when it failed.
+    CommandResult,
 }
 
 impl BRet {
@@ -40,6 +42,8 @@ impl BRet {
             BRet::Unit => Ty::Unit,
             BRet::Bool => Ty::Bool,
             BRet::Entity => Ty::Entity,
+            // needs the `Result` enum of the standard library: see `Checker::intrinsic_ret`
+            BRet::CommandResult => Ty::Error,
         }
     }
 }
@@ -58,6 +62,7 @@ pub const IDS: &[&str] = &[
     "tp",
     "setblock",
     "summon",
+    "run_command",
 ];
 
 /// The intrinsic *methods* (`impl<T> Option<T> { #[intrinsic("option.unwrap")] fn unwrap(self) -> T; }`)

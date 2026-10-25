@@ -107,3 +107,5 @@ Results read back with `scoreboard players get` / `data get` (`--checks`), all 2
 
 * NBT path with a root filter followed by a key (`{a:1}.b`) - rendered but never sent to the game.
 * `Text` hover/click on non-chat contexts, `Content::Nbt` with `Block` source resolving at run time.
+
+**`run_command` (e2e `command_test`).** `execute store success score OK store result score V run <cmd>` for user-written text works the same for a literal command and for a macro line that is the whole command (`$return run $(h0)` called `with storage`): `scoreboard players get` of 41 gives OK=1 V=41, of 0 gives OK=1 V=0, of a holder with no score gives OK=0 V=0. `time query daytime` is rejected at load (no such timeline in 26.3), so use `list` or another stable command in the zoo.

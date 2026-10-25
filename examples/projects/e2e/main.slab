@@ -117,6 +117,11 @@ global r_impl_res_or: int = 0;
 global r_impl_res_conv: int = 0;
 global r_impl_unwrap_none: int = 9;
 global r_impl_unwrap_some: int = 0;
+global r_cmd_value: int = 0;
+global r_cmd_ok: int = 0;
+global r_cmd_err: int = 0;
+global r_cmd_dynamic: int = 0;
+global r_cmd_zero: int = 0;
 global r_impl_unwrap_reached: int = 0;
 global r_impl_expect: int = 0;
 global r_results: int = 0;
@@ -347,6 +352,7 @@ fn world_test() {
     equality_test();
     enum_test();
     impl_test();
+    command_test();
 
     // one owned entity is left alive on purpose: `_uninstall` must remove it
     summon("minecraft:marker", bx, 64, bx);
@@ -495,6 +501,26 @@ fn impl_test() {
     // a failed unwrap says so in chat and returns from the function: nothing after it runs
     r_impl_unwrap_none = unwrap_flow(none);
     r_impl_unwrap_some = unwrap_flow(some);
+}
+
+// `run_command`: a command written as text, with the outcome as a `Result<int, ()>`.
+fn command_test() {
+    run_command("scoreboard players set #cmd e2e 41");
+    let r = run_command("scoreboard players get #cmd e2e");
+    r_cmd_value = r.unwrap_or(0 - 1);
+    if r.is_ok() { r_cmd_ok = 1; }
+    // a command that fails is an Err, whatever its text
+    let bad = run_command("scoreboard players get #nobody e2e");
+    if bad.is_err() { r_cmd_err = 1; }
+    // text computed at run time
+    let n = 7;
+    run_command(f"scoreboard players set #cmd e2e {n}");
+    let dynamic = run_command(f"scoreboard players get #cmd e2e");
+    r_cmd_dynamic = dynamic.unwrap_or(0 - 1);
+    // a success with the result 0 is still Ok
+    run_command("scoreboard players set #cmd e2e 0");
+    let zero = run_command("scoreboard players get #cmd e2e");
+    if zero.is_ok() && zero.unwrap_or(5) == 0 { r_cmd_zero = 1; }
 }
 
 // `==` / `!=` on strings, lists, structs, and an entity against a selector.

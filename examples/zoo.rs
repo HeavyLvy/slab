@@ -289,6 +289,7 @@ fn holes() -> Function {
     f.push(Command::Effect(Effect::Clear { targets: Some(Selector::a()), effect: Some(s(0)) }));
     f.push(Command::execute().clause(Clause::Summon(s(0))).run(Command::say("summoned")));
     f.push(Command::Say(s(0)));
+    f.push(Command::Run(Arg::Lit("list".into())));
     f.push(Command::Data(Data::Modify {
         target: DataTarget::Storage(rl("zoo:vars")),
         path: NbtPath::new().key("joined"),

@@ -701,6 +701,23 @@ impl<'a> Gen<'a> {
                         None => ir::Expr::Int(0),
                     }
                 }
+                // `Result<int, ()>`: Ok(the command's result) when it succeeded, else Err(())
+                "run_command" => {
+                    let mut holes = Holes::default();
+                    let Some(command) = self.builtin_command(name, args, e.span, &mut holes) else { return ir::Expr::Int(0) };
+                    let (ok, value, out) = (self.fresh("ok"), self.fresh("val"), self.fresh("res"));
+                    self.pre.push(ir::Stmt::Let { name: ok.clone(), kind: ir::Kind::Int, init: None });
+                    self.pre.push(ir::Stmt::Let { name: value.clone(), kind: ir::Kind::Int, init: None });
+                    self.pre.push(ir::Stmt::StoreResult { success: ok.clone(), result: value.clone(), command, args: holes.args });
+                    // Result::Err is variant 1 (no payload for `()`), Result::Ok is variant 0
+                    self.pre.push(ir::Stmt::Let { name: out.clone(), kind: ir::Kind::Data, init: Some(ir::Expr::Data(Nbt::Compound(Compound::new().with("t", 1)))) });
+                    let then = vec![
+                        ir::Stmt::Assign { target: ir::VarRef::Local(out.clone()), value: ir::Expr::Data(Nbt::Compound(Compound::new().with("t", 0))) },
+                        ir::Stmt::SetField { target: ir::VarRef::Local(out.clone()), path: NbtPath::new().key("f0"), value: ir::Expr::ToData(Box::new(ir::Expr::var(&value))) },
+                    ];
+                    self.pre.push(ir::Stmt::If { cond: ir::Expr::bin(ir::BinOp::Ne, ir::Expr::var(&ok), ir::Expr::Int(0)), then, els: Vec::new() });
+                    ir::Expr::var(&out)
+                }
                 "print" | "say" => {
                     self.err(e.span, format!("`{}` does not produce a value", name));
                     ir::Expr::Int(0)
@@ -1268,6 +1285,7 @@ impl<'a> Gen<'a> {
             _ => None,
         };
         Some(match name {
+            "run_command" => Command::Run(self.str_arg(&args[0], holes, |s| Ok(s.to_owned()))?),
             "kill" => Command::Kill(Some(self.target(&args[0], holes)?)),
             "tag.add" | "tag.remove" => {
                 let sel = self.target(&args[0], holes)?;

@@ -581,6 +581,20 @@ mod tests {
     }
 
     #[test]
+    fn run_command_stores_the_success_and_the_result_and_builds_a_result() {
+        let c = build_main("fn f() { run_command(\"time set day\"); let r = run_command(\"scoreboard players get #a t\"); print(r.unwrap_or(0 - 1)); }");
+        let f = fn_text(&c, "t:f");
+        assert!(f.starts_with("time set day\nexecute store success score #f.v_ok t store result score #f.v_val t run scoreboard players get #a t\n"), "{f}");
+        assert!(f.contains("data modify storage t:vars f.v_res set value {t:1}\nexecute unless score #f.v_ok t matches 0 run function t:f/b0"), "{f}");
+        // computed text is a macro line holding the whole command, called with both stores
+        let c = build_main("fn f(n: int) { let r = run_command(f\"say {n}\"); print(r.is_ok()); }");
+        assert_eq!(fn_text(&c, "t:f/m1").trim_end(), "$return run $(h0)");
+        assert!(fn_text(&c, "t:f").contains("execute store success score #f.v_ok t store result score #f.v_val t run function t:f/m1 with storage t:macro"));
+        // a literal command is checked at compile time
+        assert!(build_err("fn f() { run_command(\"/say hi\"); }").contains("does not start with `/`"));
+    }
+
+    #[test]
     fn a_selector_becomes_a_handle_through_the_id_helper() {
         let c = build_main("fn f() -> Entity { let me = @p; return me; }");
         let f = fn_text(&c, "t:f");
