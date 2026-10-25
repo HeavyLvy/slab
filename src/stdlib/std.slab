@@ -8,3 +8,18 @@
 /// part by part (numbers and text keep their natural form), so `print(f"hp = {hp}")` just works.
 #[intrinsic("print")]
 pub fn print(value: any);
+
+/// A value that may be missing: `Some(x)` has one, `None` does not. `Option`, `Some` and `None`
+/// are in scope everywhere. The type argument cannot always be guessed: write
+/// `let x: Option<int> = None;`.
+pub enum Option<T> {
+    None,
+    Some(T),
+}
+
+/// The outcome of something that can fail: `Ok(x)` worked and carries a result, `Err(e)` did not
+/// and carries a reason. `Result`, `Ok` and `Err` are in scope everywhere.
+pub enum Result<T, E> {
+    Ok(T),
+    Err(E),
+}

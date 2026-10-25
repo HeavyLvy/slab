@@ -191,7 +191,7 @@ Each step is a commit that passes `cargo test`, clippy and `tools/verify_all.sh`
 1. **Dynamic selectors** (done: `docs/lang/semantics.md` "Selectors", `docs/lang/codegen.md` "Selector variables"; 12 e2e checks).
 2. **Stdlib in slab, behaviour unchanged** (done: `docs/lang/stdlib.md`; every function is still an intrinsic, bodies come with `run_command` in step 7; the dead-code pruning is not needed until then): embedded std/game modules, body-less `#[intrinsic]` fns with today's signatures (`bool` returns still), `#[lang]`, dead-code pruning, the `builtins.rs` / checker / LSP special cases removed, go-to-definition into the cache files. The existing test-suite and e2e must pass untouched apart from import names.
 3. **Equality** (done: `docs/lang/semantics.md`, `docs/lang/codegen.md` "Equality of stored values"; 14 e2e checks): `str`, lists, structs, handle vs selector.
-4. **Enums without `match`**: parsing, `Ty::Enum`, generics, `()`, prelude, constructors, `Option` / `Result` declared in `std.slab`, const enums, `==`.
+4. **Enums without `match`** (done: `docs/lang/enums.md`, `docs/lang/compiled-output.md` "Enums"; 16 e2e checks; struct-like variants wait for step 9): parsing, `Ty::Enum`, generics, `()`, prelude, constructors, `Option` / `Result` declared in `std.slab`, const enums, `==`.
 5. **`impl` blocks**: `self`, methods, associated functions, lang-type methods, generic `impl` headers for intrinsics; Option / Result methods (intrinsics).
 6. **`match` + `if let`**, statement and expression, patterns and exhaustiveness.
 7. **`run_command` and the `Result` builtins**: fused / materialised forms, migration of every `bool` use, `unwrap` failure behaviour.

@@ -284,6 +284,18 @@ impl<'a> Gen<'a> {
                 }
                 Nbt::Compound(c)
             }
+            // never stored: a `()` payload has no field
+            h::ConstVal::Unit => Nbt::Compound(Compound::new()),
+            h::ConstVal::Enum(_, index, vals) => {
+                let mut c = Compound::new();
+                c.insert("t".to_owned(), Nbt::Int(*index as i32));
+                for (i, val) in vals.iter().enumerate() {
+                    if !matches!(val, h::ConstVal::Unit) {
+                        c.insert(format!("f{i}"), self.const_nbt(val));
+                    }
+                }
+                Nbt::Compound(c)
+            }
         }
     }
 
@@ -606,7 +618,9 @@ impl<'a> Gen<'a> {
                     .collect();
                 self.concat(parts)
             }
-            h::ExprKind::List(_) | h::ExprKind::Struct { .. } => self.aggregate(e),
+            h::ExprKind::List(_) | h::ExprKind::Struct { .. } | h::ExprKind::Variant { .. } => self.aggregate(e),
+            // only ever the payload of a variant, which has no field for it
+            h::ExprKind::Unit => ir::Expr::Int(0),
             h::ExprKind::Local(id) => ir::Expr::var(&self.local_names[id.0]),
             h::ExprKind::Global(id) => ir::Expr::global(&self.global_names[id.0]),
             h::ExprKind::Selector(..) | h::ExprKind::Rel { .. } => {
@@ -783,6 +797,16 @@ impl<'a> Gen<'a> {
                 }
                 Nbt::Compound(c)
             }
+            h::ExprKind::Variant { index, args, .. } => {
+                let mut c = Compound::new();
+                c.insert("t".to_owned(), Nbt::Int(*index as i32));
+                for (i, a) in args.iter().enumerate() {
+                    if a.ty != Ty::Unit {
+                        c.insert(format!("f{i}"), self.try_const(a)?);
+                    }
+                }
+                Nbt::Compound(c)
+            }
             _ => return None,
         })
     }
@@ -793,7 +817,11 @@ impl<'a> Gen<'a> {
             return ir::Expr::Data(n);
         }
         let t = self.fresh("tmp");
-        let start = if matches!(e.kind, h::ExprKind::List(_)) { Nbt::List(vec![]) } else { Nbt::Compound(Compound::new()) };
+        let start = match &e.kind {
+            h::ExprKind::List(_) => Nbt::List(vec![]),
+            h::ExprKind::Variant { index, .. } => Nbt::Compound(Compound::new().with("t", *index as i32)),
+            _ => Nbt::Compound(Compound::new()),
+        };
         self.pre.push(ir::Stmt::Let { name: t.clone(), kind: ir::Kind::Data, init: Some(ir::Expr::Data(start)) });
         match &e.kind {
             h::ExprKind::List(items) => {
@@ -806,6 +834,15 @@ impl<'a> Gen<'a> {
                 for ((name, _), f) in self.hir.structs[id.0].fields.iter().zip(fields) {
                     let v = to_data(self.expr(f), &f.ty);
                     self.pre.push(ir::Stmt::SetField { target: ir::VarRef::Local(t.clone()), path: NbtPath::new().key(name.clone()), value: v });
+                }
+            }
+            h::ExprKind::Variant { args, .. } => {
+                for (i, a) in args.iter().enumerate() {
+                    if a.ty == Ty::Unit {
+                        continue;
+                    }
+                    let v = to_data(self.expr(a), &a.ty);
+                    self.pre.push(ir::Stmt::SetField { target: ir::VarRef::Local(t.clone()), path: NbtPath::new().key(format!("f{i}")), value: v });
                 }
             }
             _ => unreachable!(),

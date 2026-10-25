@@ -67,7 +67,7 @@ tools/verify_all.sh          # builds and checks all three packs below; prints z
 
 - `examples/zoo.rs` -> `target/zoo`: every supported command variant; passes if the server loads it without parse errors.
 - `examples/programs.rs` -> IR programs whose *results* are read back (`checks.json`-style: `[{cmd, expect | matches, wait}]`).
-- `examples/projects/e2e` + `checks.json` -> compiled from `.slab` source; 108 checks (recursion, loops, `break`/`continue`, structs, lists, strings, objectives, entities, `#[tick]`, `#[every]`, no leftover locals, `_uninstall`, variable indices/coordinates/effect values, f-strings, command results, entity values, string values, selector variables, equality of stored values). Checks may use `expect`, `matches`, `absent` or `wait`. Run with `--setup "forceload add 0 0"` so entity tests have a loaded chunk.
+- `examples/projects/e2e` + `checks.json` -> compiled from `.slab` source; 133 checks (recursion, loops, `break`/`continue`, structs, lists, strings, objectives, entities, `#[tick]`, `#[every]`, no leftover locals, `_uninstall`, variable indices/coordinates/effect values, f-strings, command results, entity values, string values, selector variables, equality of stored values, enums). Checks may use `expect`, `matches`, `absent` or `wait`. Run with `--setup "forceload add 0 0"` so entity tests have a loaded chunk.
 
 `tools/verify_pack.py` downloads the official server jar into `target/mc/` (Java 25+ needed; `--jar`/`--java` override). **Run `tools/verify_all.sh` after changing `lower.rs`, `codegen.rs` or anything in `src/datapack/`**, and record surprises in `docs/mc/05-verified-by-slab.md`. Two traps already found that way: `execute store success ... if A if B` doesn't write when `A` fails, and a console-run function executes at the (per-world) spawn point.
 
@@ -89,5 +89,5 @@ tools/verify_all.sh          # builds and checks all three packs below; prints z
 - `editors/vscode/` the VS Code extension (grammar, snippets, `vscode-languageclient`
   wrapper; `npm run vsix` packages + installs it). The server binary is found at
   `<workspace>/target/release/slab-lsp`, `slab.server.path`, or PATH.
-- `docs/mc/` Minecraft 26.3 reference. `docs/lang/` language design (`syntax`, `semantics`, `modules`, `stdlib`, `codegen`, `ir`, `memory`, `entities`), and `docs/lang/compiled-output.md`: for each kind of slab code, the commands it compiles to, generated from the real compiler by `tests/compiled_output.rs` (after a change that alters the generated commands, run `UPDATE_DOCS=1 cargo test --test compiled_output` and review the diff).
+- `docs/mc/` Minecraft 26.3 reference. `docs/lang/` language design (`syntax`, `semantics`, `modules`, `stdlib`, `enums`, `codegen`, `ir`, `memory`, `entities`), and `docs/lang/compiled-output.md`: for each kind of slab code, the commands it compiles to, generated from the real compiler by `tests/compiled_output.rs` (after a change that alters the generated commands, run `UPDATE_DOCS=1 cargo test --test compiled_output` and review the diff).
 - `examples/` and `tools/` (`verify_pack.py`, `verify_all.sh`); `tests/` integration tests (`projects.rs` drives the `slab` binary).

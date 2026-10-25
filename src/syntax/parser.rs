@@ -196,6 +196,7 @@ impl Parser {
                 ItemKind::Const(self.var_decl()?)
             }
             Tok::Kw(Kw::Struct) => ItemKind::Struct(self.struct_decl()?),
+            Tok::Kw(Kw::Enum) => ItemKind::Enum(self.enum_decl()?),
             Tok::Kw(Kw::Objective) => {
                 self.next();
                 let name = self.ident("an objective name")?;
@@ -204,7 +205,7 @@ impl Parser {
                 self.expect_semi()?;
                 ItemKind::Objective { name, criteria }
             }
-            _ => return self.unexpected("an item (`fn`, `global`, `const`, `struct`, `objective` or `import`)"),
+            _ => return self.unexpected("an item (`fn`, `global`, `const`, `struct`, `enum`, `objective` or `import`)"),
         };
         Ok(Item { attrs, public, kind, span: start.to(self.prev_span()) })
     }
@@ -290,6 +291,48 @@ impl Parser {
         Ok(VarDecl { name, ty, init })
     }
 
+    /// `enum Name<T, U> { Unit, Tuple(T, int), }`
+    fn enum_decl(&mut self) -> R<EnumDecl> {
+        self.expect(&Tok::Kw(Kw::Enum))?;
+        let name = self.ident("an enum name")?;
+        let mut generics = Vec::new();
+        if self.eat(&Tok::Lt) {
+            loop {
+                generics.push(self.ident("a type parameter name")?);
+                if !self.eat(&Tok::Comma) {
+                    break;
+                }
+            }
+            self.expect(&Tok::Gt)?;
+        }
+        self.expect(&Tok::LBrace)?;
+        let mut variants = Vec::new();
+        while !self.at(&Tok::RBrace) {
+            let name = self.ident("a variant name")?;
+            let mut fields = Vec::new();
+            if self.eat(&Tok::LParen) {
+                while !self.at(&Tok::RParen) {
+                    fields.push(self.ty()?);
+                    if !self.eat(&Tok::Comma) {
+                        break;
+                    }
+                }
+                self.expect(&Tok::RParen)?;
+            } else if self.at(&Tok::LBrace) {
+                return Err(Diagnostic::new("variants with named fields are not supported yet", self.span()).hint("use a tuple variant such as `Move(int, int)`"));
+            }
+            variants.push(VariantDecl { name, fields });
+            if !self.eat(&Tok::Comma) {
+                break;
+            }
+        }
+        self.expect(&Tok::RBrace)?;
+        if variants.is_empty() {
+            return Err(Diagnostic::new(format!("enum `{}` needs at least one variant", name.name), name.span));
+        }
+        Ok(EnumDecl { name, generics, variants })
+    }
+
     fn struct_decl(&mut self) -> R<StructDecl> {
         self.expect(&Tok::Kw(Kw::Struct))?;
         let name = self.ident("a struct name")?;
@@ -318,6 +361,12 @@ impl Parser {
     }
 
     fn ty(&mut self) -> R<Type> {
+        if self.at(&Tok::LParen) {
+            // the unit type `()`
+            let start = self.expect(&Tok::LParen)?;
+            let end = self.expect(&Tok::RParen)?;
+            return Ok(Type { module: None, name: Ident { name: "()".into(), span: start.to(end) }, args: Vec::new(), constant: false, span: start.to(end) });
+        }
         let const_span = self.span();
         let constant = self.eat(&Tok::Kw(Kw::Const));
         let first = self.ident("a type")?;
@@ -654,6 +703,10 @@ impl Parser {
             }
             Tok::LParen => {
                 self.next();
+                if self.at(&Tok::RParen) {
+                    let end = self.expect(&Tok::RParen)?;
+                    return Ok(Expr { span: span.to(end), kind: ExprKind::Unit });
+                }
                 let inner = self.expr(FREE)?;
                 let end = self.expect(&Tok::RParen)?;
                 return Ok(Expr { span: span.to(end), kind: inner.kind });
@@ -882,6 +935,7 @@ mod tests {
             ExprKind::Bool(b) => b.to_string(),
             ExprKind::Str(s) => format!("{s:?}"),
             ExprKind::Ident(n) => n.clone(),
+            ExprKind::Unit => "()".to_owned(),
             ExprKind::List(v) => format!("[{}]", v.iter().map(sx).collect::<Vec<_>>().join(" ")),
             ExprKind::Compound(f) => format!("{{{}}}", f.iter().map(|f| format!("{}:{}", f.name, sx(&f.value))).collect::<Vec<_>>().join(" ")),
             ExprKind::Format(parts) => format!(
@@ -1156,6 +1210,28 @@ mod tests {
         assert!(err("fn f() { kill(@e[tag=$]); }").message.contains("followed by a name"));
         assert!(err("fn f() { kill(@e[tag=${}]); }").message.contains("empty `${}`"));
         assert!(err("fn f() { kill(@e[tag=${x]); }").message.contains("never closed"));
+    }
+
+    #[test]
+    fn enums_and_the_unit_type() {
+        let p = ok("pub enum Option<T> { None, Some(T), } enum Shape { Dot, Line(int, int) } enum E<A, B> { X(A), Y(B,) } fn f() -> Result<(), ()> { return Ok(()); }");
+        let ItemKind::Enum(e) = &p.items[0].kind else { panic!() };
+        assert!(p.items[0].public);
+        assert_eq!(e.name.name, "Option");
+        assert_eq!(e.generics.iter().map(|g| g.name.as_str()).collect::<Vec<_>>(), ["T"]);
+        assert_eq!(e.variants.iter().map(|v| (v.name.name.as_str(), v.fields.len())).collect::<Vec<_>>(), [("None", 0), ("Some", 1)]);
+        let ItemKind::Enum(s) = &p.items[1].kind else { panic!() };
+        assert!(s.generics.is_empty());
+        assert_eq!(s.variants[1].fields.len(), 2);
+        let ItemKind::Fn(f) = &p.items[3].kind else { panic!() };
+        let ret = f.ret.as_ref().unwrap();
+        assert_eq!((ret.name.name.as_str(), ret.args.len()), ("Result", 2));
+        assert_eq!(ret.args[0].name.name, "()");
+        assert!(matches!(&f.body.stmts[0].kind, StmtKind::Return(Some(Expr { kind: ExprKind::Call { args, .. }, .. })) if matches!(args[0].kind, ExprKind::Unit)));
+        assert!(err("enum E { }").message.contains("at least one variant"));
+        assert!(err("enum E { A { x: int } }").message.contains("not supported yet"));
+        assert!(err("enum { A }").message.contains("an enum name"));
+        assert!(err("enum E<> { A }").message.contains("type parameter"));
     }
 
     #[test]

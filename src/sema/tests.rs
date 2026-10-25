@@ -202,6 +202,87 @@ fn equality_compares_stored_values_and_handles() {
     ok("const A: str = \"x\"; const SAME: bool = A == \"x\"; global g: bool = SAME;");
 }
 
+// ------------------------------------------------------------------------ enums
+
+#[test]
+fn enums_construct_and_infer() {
+    // unit and tuple variants, by path; Option/Result and their variants are in scope everywhere
+    ok("enum Shape { Dot, Line(int, int), Named(str, list<int>) } fn f() { let a = Shape::Dot; let b = Shape::Line(1, 2); let c = Shape::Named(\"x\", [1]); print(a == b); print(c); }");
+    ok("fn f() { let a = Some(5); let b: Option<int> = None; let c = Option::Some(\"s\"); let d: Option<int> = std::Option::None; print(a == Some(1)); print(b == d); print(c); }");
+    ok("fn f() -> Result<int, str> { let ok: Result<int, str> = Ok(3); if true { return Err(\"no\"); } return ok; }");
+    ok("fn f() -> Result<(), ()> { return Ok(()); } fn g() -> Result<(), str> { return Err(\"boom\"); }");
+    // the context fills in what the value alone cannot say
+    ok("fn f(o: Option<int>) -> Option<int> { return None; } fn g() { let x = f(None); print(x); let mut y = Some(1); y = None; print(y); let xs: list<Option<int>> = [None, Some(1)]; print(xs); }");
+    // nested generics and structs as payloads
+    ok("struct P { x: int } fn f() { let a = Some(Some(P { x: 1 })); let b: Option<Option<P>> = Some(None); print(a == b); }");
+    // the type of a variant value
+    let c = ok(&in_fn("let a = Some(5); print(a);"));
+    match &c.hir.fns[0].body.stmts[0] {
+        Stmt::Let { init, .. } => {
+            assert!(matches!(init.kind, ExprKind::Variant { index: 1, .. }), "Some is the second variant");
+            assert!(matches!(&init.ty, Ty::Enum(_, args) if args == &[Ty::Int]));
+        }
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn enum_mistakes() {
+    one_error(&in_fn("let a = None; print(a);"), "cannot infer the type parameter `T` of `Option` for `None`");
+    one_error(&in_fn("let a = Ok(5); print(a);"), "cannot infer the type parameter `E` of `Result` for `Ok`");
+    one_error(&in_fn("let a: Option<int> = Some(\"s\");"), "expected `int`, found `str`");
+    one_error(&in_fn("let a: Option<int> = Some(1, 2);"), "variant `Option::Some` takes 1 value but 2 were supplied");
+    one_error(&in_fn("let a: Option<int> = None(1);"), "has no payload");
+    one_error(&in_fn("let a: Option<int> = Some;"), "carries a value and is used without one");
+    one_error(&in_fn("let a: Option<int> = Some(1); let b: Option<str> = a;"), "expected `Option<str>`, found `Option<int>`");
+    one_error("fn f(a: Option) {}", "`Option` takes 1 type argument but 0 were supplied");
+    one_error("fn f(a: Option<int, int>) {}", "takes 1 type argument but 2 were supplied");
+    one_error("fn f(a: int<int>) {}", "does not take type arguments");
+    one_error(&in_fn("let a = Option::Nope; print(a);"), "enum `Option` has no variant `Nope`");
+    one_error(&in_fn("let a = Some(@s); print(a);"), "cannot be a payload");
+    one_error(&in_fn("let a: Option<int> = Some(1); let u = (); print(a);"), "no value to store");
+    one_error("enum E { A, A }", "variant `A` is declared twice in `E`");
+    one_error("enum E { A } enum E { B }", "`E` is defined twice");
+    one_error("enum E<T, T> { A(T) }", "type parameter `T` is declared twice");
+    one_error("enum E { A(Nope) }", "unknown type `Nope`");
+    one_error("enum E { A(Selector) }", "unknown type `Selector`");
+    one_error("enum E<T> { A(T) } fn f(e: E<int>) { let x: E<str> = e; }", "expected `E<str>`, found `E<int>`");
+}
+
+#[test]
+fn enums_compare_and_nest() {
+    ok(&in_fn("let a = Some(1); let b = Some(1); let c: Option<int> = None; print(a == b && a != c && c == None);"));
+    ok(&in_fn("let a: Result<int, str> = Ok(1); print(a == Ok(1) && a != Err(\"x\"));"));
+    one_error(&in_fn("let a = Some(1); let b = Some(\"s\"); print(a == b);"), "cannot apply `==` to `Option<int>` and `Option<str>`");
+    one_error(&in_fn("let a = Some(1); print(a == 1);"), "cannot apply `==` to `Option<int>` and `int`");
+}
+
+#[test]
+fn enums_are_constants_and_globals() {
+    ok("global start: Option<int> = Some(7); global none: Option<str> = None; const E: Result<(), int> = Ok(()); global r: Result<(), int> = E; enum Phase { Waiting, Running(int) } global p: Phase = Phase::Running(3);");
+    one_error("global g: Option<int> = None; global h: Option<int> = g;", "is a global, not a constant");
+    one_error("fn f() -> int { return 1; } global g: Option<int> = Some(f());", "not a constant expression");
+}
+
+#[test]
+fn the_prelude_is_the_lowest_priority_and_enums_cross_modules() {
+    // your own definitions win over the prelude
+    ok("enum Option { Mine } fn f() { let a = Option::Mine; print(a == a); }");
+    ok("struct Result { x: int } fn f() { let r = Result { x: 1 }; print(r.x); }");
+    ok("fn Some(x: int) -> int { return x; } fn f() { print(Some(1)); }");
+    // enums of another module: by path, imported, or by glob
+    let util = "pub enum Shape { Dot, Line(int) } pub fn make() -> Shape { return Shape::Line(2); }";
+    ok_project(&[("main", "import util; fn main() { let a = util::Shape::Dot; let b: util::Shape = util::make(); print(a == b); }"), ("util", util)]);
+    ok_project(&[("main", "import util::{Shape, make}; fn main() { let a = Shape::Dot; print(a == make()); }"), ("util", util)]);
+    ok_project(&[("main", "import util::*; fn main() { let a = Shape::Line(1); print(a); }"), ("util", util)]);
+    ok_project(&[("main", "import util::Shape; fn main() { let a = Shape::Dot; print(a); }"), ("util", util)]);
+    project_one_error(&[("main", "import util; fn main() { let a = util::Shape::Nope; print(a); }"), ("util", "pub enum Shape { Dot }")], "enum `Shape` has no variant `Nope`");
+    project_one_error(&[("main", "import util; fn main() { let a = util::Shape::Dot; print(a); }"), ("util", "enum Shape { Dot }")], "is private to module `util`");
+    // the standard library's variants are names of their own, user enums' variants are not
+    one_error("enum Shape { Dot } fn f() { let a = Dot; print(a); }", "cannot find `Dot`");
+    ok("import std::*; fn f() { let a: Option<int> = std::None; let b = std::Option::Some(1); print(a == b); }");
+}
+
 #[test]
 fn one_mistake_is_reported_once() {
     // `x` is unknown; every use of the poisoned value is silent

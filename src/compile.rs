@@ -459,6 +459,28 @@ mod tests {
     }
 
     #[test]
+    fn enum_values_are_compounds_with_a_variant_tag_and_numbered_fields() {
+        let c = build_main("enum Shape { Dot, Line(int, int), Named(str) } fn f(n: int) { let a: Option<int> = None; let b = Some(7); let c = Some(n + 1); let d = Shape::Line(1, n); let e = Shape::Named(\"x\"); let u: Result<(), str> = Ok(()); let r: Result<int, str> = Err(\"no\"); }");
+        let f = fn_text(&c, "t:f");
+        // constant payloads are one literal; the tag is the variant's index in declaration order
+        assert!(f.contains("f.v_a set value {t:0}\n"), "{f}");
+        assert!(f.contains("f.v_b set value {t:1,f0:7}\n"), "{f}");
+        assert!(f.contains("f.v_e set value {t:2,f0:\"x\"}\n"), "{f}");
+        // `()` stores nothing; `Ok` is variant 0 and `Err` variant 1
+        assert!(f.contains("f.v_u set value {t:0}\n"), "{f}");
+        assert!(f.contains("f.v_r set value {t:1,f0:\"no\"}\n"), "{f}");
+        // a payload that is only known at run time is set into a temporary built from `{t:N}`
+        assert!(f.contains("data modify storage t:vars f.v_tmp set value {t:1}\n"), "{f}");
+        assert!(f.contains("data modify storage t:vars f.v_tmp.f0 set from storage t:vars f.t_0"), "{f}");
+        assert!(f.contains("data modify storage t:vars f.v_tmp_2 set value {t:1,f0:1}\n") || f.contains("v_tmp_2 set value {t:1}"), "{f}");
+        // globals and constants render the same layout
+        let c = build_main("global g: Option<int> = Some(3); global h: Result<(), int> = Ok(());");
+        let init = fn_text(&c, "t:_init");
+        assert!(init.contains("storage t:globals g run data modify storage t:globals g set value {t:1,f0:3}"), "{init}");
+        assert!(init.contains("set value {t:0}"), "{init}");
+    }
+
+    #[test]
     fn selector_variables_become_macro_holes() {
         let c = build_main("fn f(t: str, r: int) { for e in @e[tag=$t, distance=..${r + 1}] { kill(e); } kill(@a[tag=$t, limit=1]); if exists(@e[type=$t]) { print(1); } }");
         let f = fn_text(&c, "t:f");

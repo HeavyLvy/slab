@@ -90,6 +90,18 @@ pub fn each_ident(program: &ast::Program, out: &mut Vec<Hit>) {
                     w.ty(&p.ty);
                 }
             }
+            ItemKind::Enum(e) => {
+                w.emit(e.name.span, &e.name.name, Role::Decl(crate::defs::DefKind::Enum));
+                for g in &e.generics {
+                    w.emit(g.span, &g.name, Role::TypeName);
+                }
+                for v in &e.variants {
+                    w.emit(v.name.span, &v.name.name, Role::StructFieldName);
+                    for t in &v.fields {
+                        w.ty(t);
+                    }
+                }
+            }
             ItemKind::Objective { name, criteria } => {
                 w.emit(name.span, &name.name, Role::Decl(crate::defs::DefKind::Objective));
                 w.expr(criteria, Role::Plain);
@@ -259,7 +271,7 @@ impl Walker<'_> {
                     }
                 }
             }
-            ExprKind::Int(_) | ExprKind::Float(_) | ExprKind::Str(_) | ExprKind::Bool(_) | ExprKind::Rel { .. } => {}
+            ExprKind::Int(_) | ExprKind::Float(_) | ExprKind::Str(_) | ExprKind::Bool(_) | ExprKind::Unit | ExprKind::Rel { .. } => {}
         }
     }
 
@@ -312,7 +324,7 @@ pub fn each_expr<'a>(program: &'a ast::Program, f: &mut impl FnMut(&'a ast::Expr
             }
             ItemKind::Global(v) | ItemKind::Const(v) => visit(&v.init, f),
             ItemKind::Objective { criteria, .. } => visit(criteria, f),
-            ItemKind::Struct(_) | ItemKind::Import(_) => {}
+            ItemKind::Struct(_) | ItemKind::Enum(_) | ItemKind::Import(_) => {}
         }
     }
 }
@@ -556,6 +568,12 @@ fn visit_hir_expr(e: &HirExpr, offset: usize, best: &mut Option<(u32, HirExpr)>)
             }
         }
         HirExprKind::ToEntity(inner) => visit_hir_expr(inner, offset, best),
+        HirExprKind::Variant { args, .. } => {
+            for a in args {
+                visit_hir_expr(a, offset, best);
+            }
+        }
+        HirExprKind::Unit => {}
         HirExprKind::Unary { expr, .. } => visit_hir_expr(expr, offset, best),
         HirExprKind::Binary { lhs, rhs, .. } => {
             visit_hir_expr(lhs, offset, best);
@@ -590,5 +608,6 @@ fn visit_hir_expr(e: &HirExpr, offset: usize, best: &mut Option<(u32, HirExpr)>)
 /// A type for display, with struct names resolved.
 pub fn ty_string(ty: &slab::sema::ty::Ty, hir: &shir::Hir) -> String {
     let names: Vec<String> = hir.structs.iter().map(|s| s.name.clone()).collect();
-    ty.display(&names).to_string()
+    let enums: Vec<String> = hir.enums.iter().map(|e| e.name.clone()).collect();
+    ty.display(&names, &enums).to_string()
 }

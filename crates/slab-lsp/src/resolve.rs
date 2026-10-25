@@ -84,6 +84,10 @@ impl ProjectState {
                 let (mi, def) = self.intrinsic_def(name)?;
                 Some(Definition { file_idx: self.modules[mi].file_idx, span: def.name_span })
             }
+            HirKind::Variant { enum_id, .. } => {
+                let e = hir.enums.get(enum_id.0)?;
+                def_of(&e.name, e.module)
+            }
             HirKind::Global(id) => {
                 let g = hir.globals.get(id.0)?;
                 def_of(&g.name, g.module)
@@ -242,7 +246,7 @@ impl ProjectState {
     /// A struct by simple name: own module first, then through this module's imports.
     pub fn struct_by_name(&self, module: usize, program: &ast::Program, name: &str) -> Option<(usize, Def)> {
         if let Some(d) = self.modules.get(module).and_then(|m| m.defs.by_name(name))
-            && d.kind == DefKind::Struct
+            && matches!(d.kind, DefKind::Struct | DefKind::Enum)
         {
             return Some((module, d.clone()));
         }
@@ -251,11 +255,18 @@ impl ProjectState {
             let segs: Vec<&str> = imp.path.iter().map(|p| p.name.as_str()).collect();
             if let Some(target) = self.modules.iter().position(|m| m.name == segs.join("::"))
                 && let Some(d) = self.modules[target].defs.by_name(name)
-                && d.kind == DefKind::Struct
+                && matches!(d.kind, DefKind::Struct | DefKind::Enum)
                 && d.public
             {
                 return Some((target, d.clone()));
             }
+        }
+        // `Option` and `Result` are in scope everywhere
+        if matches!(name, "Option" | "Result")
+            && let Some(std) = self.module_by_name("std")
+            && let Some(d) = self.modules[std].defs.by_name(name)
+        {
+            return Some((std, d.clone()));
         }
         None
     }
@@ -383,6 +394,14 @@ impl ProjectState {
                 Some(if entry.is_empty() { format!("```slab\n{sig}\n```\nin module `{mod_name}`{docs}") } else { format!("```slab\n{sig}\n```{entry}{docs}") })
             }
             HirKind::Builtin { name, .. } => self.intrinsic_hover(name),
+            HirKind::Variant { enum_id, index, .. } => {
+                let e = hir.enums.get(enum_id.0)?;
+                let v = e.variants.get(*index)?;
+                let generics = if e.generics.is_empty() { String::new() } else { format!("<{}>", e.generics.join(", ")) };
+                let payload = if v.fields.is_empty() { String::new() } else { format!("({})", v.fields.iter().map(|t| payload_string(t, e, hir)).collect::<Vec<_>>().join(", ")) };
+                let docs = named_def_docs(self, hir, e.module, &e.name).map_or_else(String::new, |d| format!("\n\n{d}"));
+                Some(format!("```slab\n{}::{}{payload}\n```\nvariant {} of `enum {}{generics}`, in module `{}`{docs}", e.name, v.name, index, e.name, hir.modules.get(e.module)?))
+            }
             HirKind::Method { kind, .. } => Some(method_text(*kind)),
             HirKind::Local(id) => {
                 let f = hir.fns.get(ctx.fn_idx)?;
@@ -485,6 +504,19 @@ fn fn_signature(f: &shir::FnDef, hir: &shir::Hir) -> String {
         .join(", ");
     let ret = if matches!(f.ret, Ty::Unit) { String::new() } else { format!(" -> {}", analysis::ty_string(&f.ret, hir)) };
     format!("fn {}({params}){ret}", f.name)
+}
+
+/// A payload type of an enum's variant, with the enum's own type parameters by name.
+fn payload_string(ty: &Ty, e: &shir::EnumDef, hir: &shir::Hir) -> String {
+    match ty {
+        Ty::Param(i) => e.generics.get(*i).cloned().unwrap_or_else(|| "?".to_owned()),
+        Ty::List(t) => format!("list<{}>", payload_string(t, e, hir)),
+        Ty::Enum(id, args) => {
+            let name = hir.enums.get(id.0).map_or("?", |x| x.name.as_str());
+            if args.is_empty() { name.to_owned() } else { format!("{name}<{}>", args.iter().map(|a| payload_string(a, e, hir)).collect::<Vec<_>>().join(", ")) }
+        }
+        other => analysis::ty_string(other, hir),
+    }
 }
 
 fn method_text(kind: MethodKind) -> String {

@@ -2,7 +2,7 @@
 //! every name is an id, constants are inlined and selectors are already typed
 //! `datapack::Selector`s. Lowering to the IR can rely on all of that having been checked.
 
-use super::ty::{StructId, Ty};
+use super::ty::{EnumId, StructId, Ty};
 use crate::datapack::Selector;
 use crate::diag::Span;
 use crate::syntax::ast::{AssignOp, BinOp, UnOp};
@@ -24,9 +24,27 @@ pub struct Hir {
     /// `files[m]` is the source-file index (for diagnostics) of module `m`.
     pub files: Vec<usize>,
     pub structs: Vec<StructDef>,
+    pub enums: Vec<EnumDef>,
     pub globals: Vec<GlobalDef>,
     pub objectives: Vec<ObjectiveDef>,
     pub fns: Vec<FnDef>,
+}
+
+/// An enum declaration. A value is stored as `{t: <variant index>, f0: .., f1: ..}`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct EnumDef {
+    pub name: String,
+    pub module: usize,
+    /// The names of the type parameters (`T`, `E`).
+    pub generics: Vec<String>,
+    pub variants: Vec<VariantDef>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct VariantDef {
+    pub name: String,
+    /// Payload types, which may mention the enum's `Ty::Param`s.
+    pub fields: Vec<Ty>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -45,6 +63,10 @@ pub enum ConstVal {
     List(Vec<ConstVal>),
     /// Field values in declaration order.
     Struct(StructId, Vec<ConstVal>),
+    /// `()`, the payload of `Ok(())`.
+    Unit,
+    /// A variant of an enum (its index in declaration order) with its payload values.
+    Enum(EnumId, usize, Vec<ConstVal>),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -157,6 +179,10 @@ pub enum ExprKind {
     List(Vec<Expr>),
     /// Field values in declaration order.
     Struct { id: StructId, fields: Vec<Expr> },
+    /// `Some(x)`, `None`, `Option::Some(x)`: variant number `index` of the enum with its payload.
+    Variant { enum_id: EnumId, index: usize, args: Vec<Expr> },
+    /// `()`.
+    Unit,
     Local(LocalId),
     Global(GlobalId),
     /// A selector literal. The expressions fill the run-time parts of its options (`$name`,

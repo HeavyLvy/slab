@@ -37,6 +37,7 @@ pub enum ItemKind {
     Global(VarDecl),
     Const(VarDecl),
     Struct(StructDecl),
+    Enum(EnumDecl),
     /// `objective kills = "playerKillCount";`
     Objective { name: Ident, criteria: Expr },
     Import(ImportDecl),
@@ -84,6 +85,22 @@ pub struct VarDecl {
 pub struct StructDecl {
     pub name: Ident,
     pub fields: Vec<Param>,
+}
+
+/// `enum Name<T> { Unit, Tuple(T, int) }`
+#[derive(Clone, Debug, PartialEq)]
+pub struct EnumDecl {
+    pub name: Ident,
+    /// The type parameters: `T` and `E` in `enum Result<T, E>`.
+    pub generics: Vec<Ident>,
+    pub variants: Vec<VariantDecl>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct VariantDecl {
+    pub name: Ident,
+    /// The payload types of `Variant(A, B)`; empty for a unit variant.
+    pub fields: Vec<Type>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -243,6 +260,8 @@ pub enum ExprKind {
     StructLit { module: Option<Ident>, name: Ident, fields: Vec<FieldInit> },
     /// `module::name`; the module of `a::b::name` is the identifier `a::b`.
     Path { module: Ident, name: Ident },
+    /// `()`: the only value of the type `()`.
+    Unit,
     Selector(SelectorLit),
     /// `~`, `~1`, `^-2`
     Rel { kind: RelKind, offset: Option<String> },

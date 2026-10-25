@@ -11,6 +11,7 @@ pub enum DefKind {
     Global,
     Const,
     Struct,
+    Enum,
     Objective,
     Import,
 }
@@ -92,6 +93,18 @@ impl DefIndex {
                     );
                     def.fields = s.fields.iter().map(|p| (p.name.name.clone(), type_string(&p.ty))).collect();
                     def.field_spans = s.fields.iter().map(|p| p.name.span).collect();
+                }
+                ItemKind::Enum(e) => {
+                    def.kind = DefKind::Enum;
+                    def.name = e.name.name.clone();
+                    def.name_span = e.name.span;
+                    let generics = if e.generics.is_empty() { String::new() } else { format!("<{}>", e.generics.iter().map(|g| g.name.as_str()).collect::<Vec<_>>().join(", ")) };
+                    let variants: Vec<String> = e
+                        .variants
+                        .iter()
+                        .map(|v| if v.fields.is_empty() { v.name.name.clone() } else { format!("{}({})", v.name.name, v.fields.iter().map(type_string).collect::<Vec<_>>().join(", ")) })
+                        .collect();
+                    def.detail = format!("enum {}{generics} {{ {} }}", e.name.name, variants.join(", "));
                 }
                 ItemKind::Objective { name, criteria } => {
                     def.kind = DefKind::Objective;

@@ -32,6 +32,7 @@ pub fn document_symbols(state: &ProjectState, module: usize, enc: Enc) -> Vec<Sy
             DefKind::Global => 13,
             DefKind::Const => 14,
             DefKind::Struct => 23,
+            DefKind::Enum => 10,
             DefKind::Objective => 7,
             DefKind::Import => 2,
         };

@@ -115,6 +115,32 @@ fn goto_definition_across_modules() {
 }
 
 #[test]
+fn enums_have_symbols_hover_and_definitions() {
+    let text = "/// A shape.\nenum Shape { Dot, Line(int, int) }\n\nfn make() -> Shape {\n    let x: Option<int> = Some(1);\n    print(x);\n    return Shape::Line(1, 2);\n}\n";
+    let main = format!("import std::print;\n{text}");
+    let d = Dir::new("enums", &[("main.slab", &main)]);
+    let mut ws = Workspace::default();
+    let uri = file_uri(&d.0.join("main.slab"));
+    let publishes = ws.open(&uri, &main, 1);
+    assert!(publishes[0].diagnostics.is_empty(), "{:?}", publishes[0].diagnostics.iter().map(|x| x.message.clone()).collect::<Vec<_>>());
+    let (state, _doc, module) = ws.locate(&uri).unwrap();
+    let module = module.unwrap();
+    // the outline lists the enum (SymbolKind 10)
+    let symbols = symbols::document_symbols(state, module, Enc::Utf16);
+    assert!(symbols.iter().any(|s| s.name == "Shape" && s.kind == 10), "{:?}", symbols.iter().map(|s| (&s.name, s.kind)).collect::<Vec<_>>());
+    // hover on a variant, and on a variant of the prelude's Option
+    let at = main.find("Shape::Line").unwrap() + "Shape::".len();
+    let hover = state.hover(module, at).expect("hover");
+    assert!(hover.contains("Shape::Line(int, int)") && hover.contains("variant 1"), "{hover}");
+    let at = main.find("Some(1)").unwrap() + 1;
+    let hover = state.hover(module, at).expect("hover");
+    assert!(hover.contains("Option::Some(T)") && hover.contains("enum Option<T>"), "{hover}");
+    // go to definition of a variant lands on its enum
+    let def = state.goto_definition(module, main.find("Shape::Line").unwrap() + "Shape::".len()).expect("resolves");
+    assert_eq!(state.sources.files[def.file_idx].text[def.span.start as usize..def.span.end as usize].to_owned(), "Shape");
+}
+
+#[test]
 fn go_to_definition_opens_the_standard_library_source() {
     let d = Dir::new("stddef", &[("main.slab", MAIN), ("util.slab", UTIL)]);
     let mut ws = Workspace::default();

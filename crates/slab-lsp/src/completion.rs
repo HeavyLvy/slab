@@ -75,7 +75,7 @@ fn type_items(state: &ProjectState, module: usize) -> Option<Vec<Item>> {
         Item { label: "game::Entity".into(), kind: 22, detail: Some("a reference to one entity".into()), docs: None, insert: None },
     ];
     for m in &state.modules {
-        for def in m.defs.by_kind(DefKind::Struct) {
+        for def in m.defs.defs().iter().filter(|d| matches!(d.kind, DefKind::Struct | DefKind::Enum)) {
             if m.name != state.modules[module].name && !def.public {
                 continue;
             }
@@ -155,7 +155,8 @@ fn member_items(ws: &Workspace, uri: &str, module: usize, offset: usize) -> Opti
         _ => &ctx.expr.ty,
     };
     let names: Vec<String> = hir.structs.iter().map(|s| s.name.clone()).collect();
-    let display = |t: &Ty| t.display(&names).to_string();
+    let enums: Vec<String> = hir.enums.iter().map(|e| e.name.clone()).collect();
+    let display = |t: &Ty| t.display(&names, &enums).to_string();
     let mut out = Vec::new();
     match ty {
         Ty::Struct(id) => {
@@ -211,6 +212,7 @@ fn item_kind(def: &Def) -> u8 {
         DefKind::Global => 6,
         DefKind::Const => 21,
         DefKind::Struct => 22,
+        DefKind::Enum => 13,
         DefKind::Objective => 10,
         DefKind::Import => 9,
     }

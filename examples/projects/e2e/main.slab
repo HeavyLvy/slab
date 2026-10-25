@@ -89,6 +89,22 @@ global r_eq_lit_field: int = 0;
 global r_eq_lit_global: int = 0;
 global r_eq_lit_special: int = 0;
 global r_eq_lit_elem: int = 0;
+global enum_start: Option<int> = Some(7);
+global enum_slot: Option<int> = None;
+global r_enum_none: int = 0;
+global r_enum_some: int = 0;
+global r_enum_ne: int = 0;
+global r_enum_ret_some: int = 0;
+global r_enum_ret_none: int = 0;
+global r_enum_ok_unit: int = 0;
+global r_enum_err: int = 0;
+global r_enum_global_init: int = 0;
+global r_enum_global_set: int = 0;
+global r_enum_list: int = 0;
+global r_enum_field: int = 0;
+global r_enum_user: int = 0;
+global r_enum_payload: int = 0;
+global r_enum_nested: int = 0;
 global r_results: int = 0;
 global r_gone: int = 0;
 global r_entities: int = 0;
@@ -315,6 +331,7 @@ fn world_test() {
     string_test();
     selector_test();
     equality_test();
+    enum_test();
 
     // one owned entity is left alive on purpose: `_uninstall` must remove it
     summon("minecraft:marker", bx, 64, bx);
@@ -329,8 +346,8 @@ fn world_test() {
     let ok4 = tag::add(@e[tag=e2e.owned, limit=1], "mark");       // first time
     let ok5 = tag::add(@e[tag=e2e.owned, limit=1], "mark");       // already has it
     let ok6 = kill(@e[tag=nobody]);                              // nothing to kill
-    let ok7 = setblock(bx, 80, bx, "minecraft:stone");           // changes the block
-    let ok8 = setblock(bx, 80, bx, "minecraft:stone");           // already stone
+    let ok7 = setblock(bx, 80, bx, "minecraft:sea_lantern");           // changes the block (a block the terrain never has: the world seed is random)
+    let ok8 = setblock(bx, 80, bx, "minecraft:sea_lantern");           // already that block
     let mut res = 0;
     if ok1 { res += 1; }
     if ok2 { res += 2; }
@@ -366,6 +383,52 @@ fn spawn_at(x: int) -> Entity {
 struct Pair2 { a: int, name: str, tags: list<str> }
 
 fn eq_str(a: str, b: str) -> bool { return a == b; }
+
+enum Shape { Dot, Line(int, int), Named(str, list<int>) }
+
+struct Holder { name: str, maybe: Option<int> }
+
+fn pick(flag: bool, n: int) -> Option<int> {
+    if flag { return Some(n + 1); }
+    return None;
+}
+
+fn outcome(ok: bool) -> Result<(), str> {
+    if ok { return Ok(()); }
+    return Err("boom");
+}
+
+// Enums: building values, passing and returning them, storing them in globals, lists and structs.
+fn enum_test() {
+    let a: Option<int> = None;
+    if a == None { r_enum_none = 1; }
+    let n = 4;
+    let b = Some(n + 1);
+    if b == Some(5) { r_enum_some = 1; }
+    if Some(1) != Some(2) && b != a && Some(1) != None { r_enum_ne = 1; }
+    if pick(true, 1) == Some(2) { r_enum_ret_some = 1; }
+    if pick(false, 1) == None { r_enum_ret_none = 1; }
+    if outcome(true) == Ok(()) { r_enum_ok_unit = 1; }
+    let bad = outcome(false);
+    if bad == Err("boom") && bad != Err("other") && bad != Ok(()) { r_enum_err = 1; }
+
+    if enum_start == Some(7) { r_enum_global_init = 1; }
+    enum_slot = Some(n + 1);
+    if enum_slot == Some(5) && enum_slot != None { r_enum_global_set = 1; }
+
+    let xs = [Some(1), None, Some(3)];
+    if xs == [Some(1), None, Some(3)] && xs != [Some(1), None, Some(4)] { r_enum_list = 1; }
+    let h = Holder { name: "h", maybe: Some(n) };
+    let h2 = Holder { name: "h", maybe: None };
+    if h.maybe == Some(4) && h != h2 { r_enum_field = 1; }
+
+    let s = Shape::Line(1, n);
+    if s == Shape::Line(1, 4) && s != Shape::Dot && s != Shape::Line(1, 5) && Shape::Dot == Shape::Dot { r_enum_user = 1; }
+    let named = Shape::Named("x", [n, 2]);
+    if named == Shape::Named("x", [4, 2]) && named != Shape::Named("x", [4]) { r_enum_payload = 1; }
+    let nested: Option<Option<int>> = Some(Some(n));
+    if nested == Some(Some(4)) && nested != Some(None) { r_enum_nested = 1; }
+}
 
 // `==` / `!=` on strings, lists, structs, and an entity against a selector.
 fn equality_test() {

@@ -13,7 +13,8 @@ slab is statically typed with local inference: every expression has a type known
 | `str` | text; `+`/`+=` join, f-strings build one | command storage |
 | `list<T>` | list of any storable `T` | command storage |
 | `Name` | a `struct`, a compound of storable fields | command storage |
-| `()` | no value (statements, functions without `->`) | - |
+| `Name<A, B>` | an `enum` with its type arguments, `Option<int>`, `Result<(), str>` (`docs/lang/enums.md`) | command storage |
+| `()` | no value (statements, functions without `->`); also the payload of `Ok(())` | - |
 | `game::Entity` | a reference to one entity (`docs/lang/entities.md`); a built-in type | scoreboard (an int id) |
 | selector | `@a[...]` literal | **not storable** (expression only) |
 | coordinate | `~`, `~1`, `^2` | **not storable** (expression only) |

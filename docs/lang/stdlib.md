@@ -35,6 +35,10 @@ The result is `bool` (did the command work), an `Entity` (`summon`), or nothing.
 that the sources and `IDS` list the same intrinsics. `#[intrinsic]` and `#[lang]` are only
 accepted in these embedded modules.
 
+## Option and Result
+
+`std.slab` also declares `Option<T>` and `Result<T, E>` as ordinary enums (`docs/lang/enums.md`). The checker makes `Option`, `Result`, `Some`, `None`, `Ok` and `Err` visible in every module (the prelude); the variants of enums declared in the standard library are names of their own.
+
 ## Compiler types
 
 `#[lang("entity")] pub struct Entity {}` in `game.slab` binds the name `Entity` to the type the

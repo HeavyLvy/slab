@@ -6,7 +6,7 @@ use std::collections::{HashMap, HashSet};
 use super::builtins::{self, BParam, BRet, Intrinsic};
 use super::hir::*;
 use super::selector;
-use super::ty::{StructId, Ty};
+use super::ty::{EnumId, StructId, Ty};
 use crate::datapack::{HolderName, ResourceLocation, Word};
 use crate::diag::{Diagnostic, Span};
 use crate::syntax::ast::{self, AssignOp, BinOp, UnOp};
@@ -88,6 +88,10 @@ enum ValueSym {
     Objective(ObjectiveId),
     /// A function the compiler implements: an index into `Checker::intrinsics`.
     Builtin(usize),
+    /// A variant of an enum, usable as a value or a constructor (`None`, `Some(x)`): only the
+    /// variants of enums in the standard library are names of their own; the others are written
+    /// `Enum::Variant`.
+    Variant(EnumId, usize),
 }
 
 /// What a module can see: its own items, module aliases and imported items.
@@ -115,6 +119,15 @@ struct StructInfo<'a> {
     module: usize,
     decl: &'a ast::StructDecl,
     fields: Vec<(String, Ty)>,
+}
+
+struct EnumInfo<'a> {
+    name: String,
+    module: usize,
+    decl: &'a ast::EnumDecl,
+    generics: Vec<String>,
+    /// Variant names and payload types (which may mention `Ty::Param`), in declaration order.
+    variants: Vec<(String, Vec<Ty>)>,
 }
 
 struct FnSig<'a> {
@@ -160,6 +173,13 @@ struct Checker<'a> {
     warnings: Vec<Diagnostic>,
     structs: Vec<StructInfo<'a>>,
     struct_names: Vec<String>,
+    enums: Vec<EnumInfo<'a>>,
+    enum_names: Vec<String>,
+    /// The type parameters in scope while the declaration of a generic enum is resolved.
+    generic_scope: Vec<String>,
+    /// Names every module sees without importing them (`Option`, `Some`, ...), from `std`.
+    prelude_values: HashMap<String, ValueSym>,
+    prelude_types: HashMap<String, Ty>,
     consts: Vec<ConstInfo<'a>>,
     globals: Vec<GlobalDef>,
     global_decls: Vec<(&'a ast::VarDecl, usize)>,
@@ -212,6 +232,11 @@ impl<'a> Checker<'a> {
             warnings: Vec::new(),
             structs: Vec::new(),
             struct_names: Vec::new(),
+            enums: Vec::new(),
+            enum_names: Vec::new(),
+            generic_scope: Vec::new(),
+            prelude_values: HashMap::new(),
+            prelude_types: HashMap::new(),
             consts: Vec::new(),
             globals: Vec::new(),
             global_decls: Vec::new(),
@@ -243,7 +268,7 @@ impl<'a> Checker<'a> {
     }
 
     fn tn(&self, t: &Ty) -> String {
-        t.display(&self.struct_names).to_string()
+        t.display(&self.struct_names, &self.enum_names).to_string()
     }
 
     fn mismatch(&mut self, span: Span, expected: &Ty, found: &Ty) {
@@ -269,6 +294,11 @@ impl<'a> Checker<'a> {
             modules: self.mods.iter().map(|m| m.name.clone()).collect(),
             files: self.mods.iter().map(|m| m.file).collect(),
             structs: self.structs.iter().map(|s| StructDef { name: s.name.clone(), module: s.module, fields: s.fields.clone() }).collect(),
+            enums: self
+                .enums
+                .iter()
+                .map(|e| EnumDef { name: e.name.clone(), module: e.module, generics: e.generics.clone(), variants: e.variants.iter().map(|(n, f)| VariantDef { name: n.clone(), fields: f.clone() }).collect() })
+                .collect(),
             globals: self.globals.clone(),
             objectives: self.objectives.clone(),
             fns: self.hir_fns.clone(),
@@ -279,7 +309,7 @@ impl<'a> Checker<'a> {
 
     fn lookup_value(&self, name: &str) -> Option<ValueSym> {
         let m = &self.mods[self.cur];
-        m.values.get(name).map(|v| v.0).or_else(|| m.imported_values.get(name).copied())
+        m.values.get(name).map(|v| v.0).or_else(|| m.imported_values.get(name).copied()).or_else(|| self.prelude_values.get(name).copied())
     }
 
     fn lookup_struct(&self, name: &str) -> Option<StructId> {
@@ -405,7 +435,9 @@ impl<'a> Checker<'a> {
             self.cur = mi;
             self.register_items(mi);
         }
+        self.build_prelude();
         self.resolve_imports();
+        self.resolve_enums();
         self.resolve_struct_fields();
         self.resolve_signatures();
         self.eval_globals();
@@ -434,6 +466,22 @@ impl<'a> Checker<'a> {
                     self.mods[mi].types.insert(s.name.name.clone(), (id, item.public));
                     self.struct_names.push(s.name.name.clone());
                     self.structs.push(StructInfo { name: s.name.name.clone(), module: mi, decl: s, fields: Vec::new() });
+                }
+                ast::ItemKind::Enum(d) => {
+                    if self.mods[mi].types.contains_key(&d.name.name) || self.mods[mi].lang_types.contains_key(&d.name.name) {
+                        self.error(d.name.span, format!("`{}` is defined twice", d.name.name));
+                        continue;
+                    }
+                    let id = EnumId(self.enums.len());
+                    self.mods[mi].lang_types.insert(d.name.name.clone(), (Ty::Enum(id, Vec::new()), item.public));
+                    self.enum_names.push(d.name.name.clone());
+                    self.enums.push(EnumInfo { name: d.name.name.clone(), module: mi, decl: d, generics: d.generics.iter().map(|g| g.name.clone()).collect(), variants: Vec::new() });
+                    if self.mods[mi].std {
+                        // the standard library's variants (`Some`, `Ok`, ...) are names of their own
+                        for (vi, v) in d.variants.iter().enumerate() {
+                            self.declare_value(&v.name, ValueSym::Variant(id, vi), item.public);
+                        }
+                    }
                 }
                 ast::ItemKind::Fn(f) => {
                     if let Some(attr) = item.attrs.iter().find(|a| a.name.name == "intrinsic") {
@@ -773,6 +821,236 @@ impl<'a> Checker<'a> {
         self.mods[mi].lang_types.insert(s.name.name.clone(), (ty, public));
     }
 
+    /// `Option`, `Result` and their variants are visible in every module (docs/lang/enums.md).
+    fn build_prelude(&mut self) {
+        let Some(&std) = self.by_name.get("std") else { return };
+        for name in ["Option", "Result"] {
+            if let Some((ty, true)) = self.mods[std].lang_types.get(name).cloned() {
+                self.prelude_types.insert(name.to_owned(), ty);
+            }
+        }
+        for name in ["Some", "None", "Ok", "Err"] {
+            if let Some((sym, true)) = self.mods[std].values.get(name).copied() {
+                self.prelude_values.insert(name.to_owned(), sym);
+            }
+        }
+    }
+
+    /// The payload types of every enum's variants, once all names are known.
+    fn resolve_enums(&mut self) {
+        for i in 0..self.enums.len() {
+            self.cur = self.enums[i].module;
+            let decl = self.enums[i].decl;
+            self.generic_scope = self.enums[i].generics.clone();
+            let mut seen = HashSet::new();
+            for g in &decl.generics {
+                if !seen.insert(g.name.clone()) {
+                    self.error(g.span, format!("type parameter `{}` is declared twice", g.name));
+                }
+            }
+            let mut seen = HashSet::new();
+            let mut variants = Vec::new();
+            for v in &decl.variants {
+                if !seen.insert(v.name.name.clone()) {
+                    self.error(v.name.span, format!("variant `{}` is declared twice in `{}`", v.name.name, decl.name.name));
+                }
+                let mut fields = Vec::new();
+                for t in &v.fields {
+                    let ty = self.resolve_ty(t);
+                    if !(ty.is_storable() || ty == Ty::Unit) {
+                        self.error(t.span, format!("a variant cannot hold `{}`", self.tn(&ty)));
+                    }
+                    fields.push(ty);
+                }
+                variants.push((v.name.name.clone(), fields));
+            }
+            self.generic_scope.clear();
+            self.enums[i].variants = variants;
+        }
+    }
+
+    /// A type found by name, with its type arguments applied: an enum takes exactly as many as it
+    /// declares, anything else none.
+    fn finish_type(&mut self, base: Ty, t: &ast::Type) -> Ty {
+        match base {
+            Ty::Enum(id, _) => {
+                let n = self.enums[id.0].generics.len();
+                if t.args.len() != n {
+                    let plural = if n == 1 { "" } else { "s" };
+                    let msg = format!("`{}` takes {n} type argument{plural} but {} {} supplied", self.enums[id.0].name, t.args.len(), if t.args.len() == 1 { "was" } else { "were" });
+                    self.error(t.span, msg);
+                    return Ty::Error;
+                }
+                let mut args = Vec::new();
+                for a in &t.args {
+                    let ty = self.resolve_ty(a);
+                    if !(ty.is_storable() || ty == Ty::Unit || ty.is_error()) {
+                        self.error(a.span, format!("`{}` cannot be a type argument", self.tn(&ty)));
+                    }
+                    args.push(ty);
+                }
+                Ty::Enum(id, args)
+            }
+            other => {
+                if !t.args.is_empty() {
+                    self.error(t.span, format!("type `{}` does not take type arguments", t.name.name));
+                }
+                other
+            }
+        }
+    }
+
+    /// A path like `Option::Some` or `util::Shape::Line`. `None`: the prefix does not name an
+    /// enum, resolve it as a module path. `Some(None)`: it names one but the variant is missing
+    /// or private (reported). `Some(Some(..))`: the enum and the variant's index.
+    fn variant_path(&mut self, module: &ast::Ident, name: &ast::Ident) -> Option<Option<(EnumId, usize)>> {
+        let (prefix, enum_name) = match module.name.rsplit_once("::") {
+            Some((p, e)) => (Some(p), e),
+            None => (None, module.name.as_str()),
+        };
+        let ty = match prefix {
+            None => {
+                let m = &self.mods[self.cur];
+                m.lang_types.get(enum_name).map(|(t, _)| t.clone()).or_else(|| m.imported_lang_types.get(enum_name).cloned()).or_else(|| self.prelude_types.get(enum_name).cloned())?
+            }
+            Some(p) => {
+                let mi = self.find_module(p)?;
+                let (t, public) = self.mods[mi].lang_types.get(enum_name).cloned()?;
+                if !public && mi != self.cur {
+                    if matches!(t, Ty::Enum(..)) {
+                        self.private_item(&ast::Ident { name: enum_name.to_owned(), span: module.span }, mi);
+                        return Some(None);
+                    }
+                    return None;
+                }
+                t
+            }
+        };
+        let Ty::Enum(id, _) = ty else { return None };
+        match self.enums[id.0].decl.variants.iter().position(|v| v.name.name == name.name) {
+            Some(vi) => Some(Some((id, vi))),
+            None => {
+                let msg = format!("enum `{}` has no variant `{}`", self.enums[id.0].name, name.name);
+                self.error(name.span, msg);
+                Some(None)
+            }
+        }
+    }
+
+    /// Binds the type parameters in `pattern` (a payload type of an enum) by matching it against
+    /// the type of the value given for it. False when they cannot agree.
+    fn unify(pattern: &Ty, actual: &Ty, binds: &mut [Option<Ty>]) -> bool {
+        match (pattern, actual) {
+            (_, Ty::Error) => true,
+            (Ty::Param(i), a) => match &binds[*i] {
+                Some(b) => b.compatible(a),
+                None => {
+                    binds[*i] = Some(a.clone());
+                    true
+                }
+            },
+            (Ty::List(p), Ty::List(a)) => Self::unify(p, a, binds),
+            (Ty::Enum(pe, ps), Ty::Enum(ae, xs)) => pe == ae && ps.len() == xs.len() && ps.iter().zip(xs).all(|(p, a)| Self::unify(p, a, binds)),
+            (p, a) => p.compatible(a),
+        }
+    }
+
+    /// `Some(x)`, `None`, `Option::Some(x)`: builds the enum value. The type arguments come from
+    /// the type the context expects (`let x: Option<int> = None;`) or from the payload values.
+    fn construct(&mut self, eid: EnumId, vi: usize, args: &'a [ast::Expr], expected: Option<&Ty>, span: Span) -> Expr {
+        let ename = self.enums[eid.0].name.clone();
+        let (vname, fields) = self.enums[eid.0].variants.get(vi).cloned().unwrap_or_default();
+        let n = self.enums[eid.0].generics.len();
+        if args.len() != fields.len() {
+            let msg = if fields.is_empty() {
+                format!("variant `{ename}::{vname}` has no payload, so it is written without parentheses")
+            } else {
+                format!("variant `{ename}::{vname}` takes {} value{} but {} {} supplied", fields.len(), if fields.len() == 1 { "" } else { "s" }, args.len(), if args.len() == 1 { "was" } else { "were" })
+            };
+            self.error(span, msg);
+            self.args_for_errors(args);
+            return Expr::error(span);
+        }
+        let mut binds: Vec<Option<Ty>> = vec![None; n];
+        if let Some(Ty::Enum(e2, targs)) = expected
+            && *e2 == eid
+            && targs.len() == n
+        {
+            binds = targs.iter().cloned().map(Some).collect();
+        }
+        let mut hargs = Vec::new();
+        let mut poisoned = false;
+        for (a, fty) in args.iter().zip(&fields) {
+            // the payload type, when all its parameters are known, is the context for the value
+            let known: Option<Ty> = {
+                let all: Option<Vec<Ty>> = binds.iter().cloned().collect();
+                all.map(|all| fty.subst(&all)).or_else(|| if matches!(fty, Ty::Param(_)) { None } else { Some(fty.clone()).filter(|t| !contains_param(t)) })
+            };
+            let h = self.expr(a, known.as_ref());
+            if h.ty.is_error() {
+                poisoned = true;
+            } else if !(h.ty.is_storable() || h.ty == Ty::Unit) {
+                self.error(h.span, format!("a value of type `{}` cannot be a payload", self.tn(&h.ty)));
+                poisoned = true;
+            } else if !Self::unify(fty, &h.ty, &mut binds) {
+                let want = {
+                    let partial: Vec<Ty> = binds.iter().map(|b| b.clone().unwrap_or(Ty::Error)).collect();
+                    fty.subst(&partial)
+                };
+                self.mismatch(h.span, &want, &h.ty);
+                poisoned = true;
+            }
+            hargs.push(h);
+        }
+        if poisoned {
+            return Expr::error(span);
+        }
+        let Some(targs) = binds.iter().cloned().collect::<Option<Vec<Ty>>>() else {
+            let missing = binds.iter().position(Option::is_none).map_or("?", |i| self.enums[eid.0].generics[i].as_str()).to_owned();
+            let hint = match ename.as_str() {
+                "Option" => "annotate it: `let x: Option<int> = None;`".to_owned(),
+                _ => format!("annotate the type, as in `let x: {ename}<...> = ...;`"),
+            };
+            self.error_hint(span, format!("cannot infer the type parameter `{missing}` of `{ename}` for `{vname}`"), hint);
+            return Expr::error(span);
+        };
+        Expr { kind: ExprKind::Variant { enum_id: eid, index: vi, args: hargs }, ty: Ty::Enum(eid, targs), span }
+    }
+
+    /// [`Self::construct`] for constants: `const X: Option<int> = Some(3);`.
+    fn const_variant(&mut self, eid: EnumId, vi: usize, args: &'a [ast::Expr], expected: Option<&Ty>, span: Span) -> Option<(ConstVal, Ty)> {
+        let ename = self.enums[eid.0].name.clone();
+        let (vname, fields) = self.enums[eid.0].variants.get(vi).cloned().unwrap_or_default();
+        let n = self.enums[eid.0].generics.len();
+        if args.len() != fields.len() {
+            self.error(span, format!("variant `{ename}::{vname}` takes {} value(s) but {} were supplied", fields.len(), args.len()));
+            return None;
+        }
+        let mut binds: Vec<Option<Ty>> = vec![None; n];
+        if let Some(Ty::Enum(e2, targs)) = expected
+            && *e2 == eid
+            && targs.len() == n
+        {
+            binds = targs.iter().cloned().map(Some).collect();
+        }
+        let mut vals = Vec::new();
+        for (a, fty) in args.iter().zip(&fields) {
+            let known: Option<Ty> = binds.iter().cloned().collect::<Option<Vec<Ty>>>().map(|all| fty.subst(&all));
+            let (v, t) = self.const_expr(a, known.as_ref())?;
+            if !Self::unify(fty, &t, &mut binds) {
+                let partial: Vec<Ty> = binds.iter().map(|b| b.clone().unwrap_or(Ty::Error)).collect();
+                self.mismatch(a.span, &fty.subst(&partial), &t);
+                return None;
+            }
+            vals.push(v);
+        }
+        let Some(targs) = binds.into_iter().collect::<Option<Vec<Ty>>>() else {
+            self.error_hint(span, format!("cannot infer the type arguments of `{ename}` for `{vname}`"), "give the constant a type: `const X: Option<int> = None;`");
+            return None;
+        };
+        Some((ConstVal::Enum(eid, vi, vals), Ty::Enum(eid, targs)))
+    }
+
     fn resolve_ty(&mut self, t: &ast::Type) -> Ty {
         let name = t.name.name.as_str();
         let no_args = |this: &mut Self, ty: Ty| {
@@ -783,12 +1061,18 @@ impl<'a> Checker<'a> {
         };
         if let Some(m) = &t.module {
             return match self.qualified_type(m, &t.name) {
-                Some(ty) => no_args(self, ty),
+                Some(ty) => self.finish_type(ty, t),
                 None => Ty::Error,
             };
         }
+        if name == "()" {
+            return Ty::Unit;
+        }
+        if let Some(i) = self.generic_scope.iter().position(|g| g == name) {
+            return no_args(self, Ty::Param(i));
+        }
         if let Some(ty) = self.mods[self.cur].imported_lang_types.get(name).cloned().or_else(|| self.mods[self.cur].lang_types.get(name).map(|(t, _)| t.clone())) {
-            return no_args(self, ty);
+            return self.finish_type(ty, t);
         }
         match name {
             "int" => no_args(self, Ty::Int),
@@ -808,10 +1092,13 @@ impl<'a> Checker<'a> {
             }
             _ => match self.lookup_struct(name) {
                 Some(id) => no_args(self, Ty::Struct(id)),
-                None => {
-                    self.error_hint(t.span, format!("unknown type `{name}`"), "types are int, bool, str, list<T>, game::Entity and your structs");
-                    Ty::Error
-                }
+                None => match self.prelude_types.get(name).cloned() {
+                    Some(ty) => self.finish_type(ty, t),
+                    None => {
+                        self.error_hint(t.span, format!("unknown type `{name}`"), "types are int, bool, str, list<T>, Option<T>, Result<T, E>, game::Entity, and your structs and enums");
+                        Ty::Error
+                    }
+                },
             },
         }
     }
@@ -1011,13 +1298,39 @@ impl<'a> Checker<'a> {
                 self.error(e.span, "floating point numbers are not supported yet");
                 None
             }
+            K::Unit => Some((ConstVal::Unit, Ty::Unit)),
             K::Ident(name) => {
                 let sym = self.lookup_value(name);
+                if let Some(ValueSym::Variant(eid, vi)) = sym {
+                    return self.const_variant(eid, vi, &[], expected, e.span);
+                }
                 self.const_of_sym(sym, name, e.span)
             }
             K::Path { module, name } => {
+                if let Some(found) = self.variant_path(module, name) {
+                    let (eid, vi) = found?;
+                    return self.const_variant(eid, vi, &[], expected, e.span);
+                }
                 let sym = self.qualified_value(module, name)?;
                 self.const_of_sym(Some(sym), &name.name, e.span)
+            }
+            K::Call { callee, args } => {
+                let variant = match &callee.kind {
+                    K::Ident(name) => match self.lookup_value(name) {
+                        Some(ValueSym::Variant(eid, vi)) => Some((eid, vi)),
+                        _ => None,
+                    },
+                    K::Path { module, name } => self.variant_path(module, name).map(|v| v.unwrap_or((EnumId(usize::MAX), 0))),
+                    _ => None,
+                };
+                match variant {
+                    Some((EnumId(usize::MAX), _)) => None,
+                    Some((eid, vi)) => self.const_variant(eid, vi, args, expected, e.span),
+                    None => {
+                        self.error(e.span, "a function call is not a constant expression");
+                        None
+                    }
+                }
             }
             K::Unary { op: UnOp::Neg, expr } => {
                 // `-2147483648` is a valid literal even though 2147483648 alone is not
@@ -1197,6 +1510,15 @@ impl<'a> Checker<'a> {
             ConstVal::Struct(id, vs) => {
                 let tys: Vec<Ty> = self.structs[id.0].fields.iter().map(|(_, t)| t.clone()).collect();
                 ExprKind::Struct { id: *id, fields: vs.iter().zip(&tys).map(|(v, t)| self.const_to_expr(v, t, span)).collect() }
+            }
+            ConstVal::Unit => ExprKind::Unit,
+            ConstVal::Enum(id, vi, vs) => {
+                let targs = match ty {
+                    Ty::Enum(_, a) => a.clone(),
+                    _ => Vec::new(),
+                };
+                let tys: Vec<Ty> = self.enums[id.0].variants.get(*vi).map(|(_, f)| f.iter().map(|t| t.subst(&targs)).collect()).unwrap_or_default();
+                ExprKind::Variant { enum_id: *id, index: *vi, args: vs.iter().zip(&tys).map(|(v, t)| self.const_to_expr(v, t, span)).collect() }
             }
         };
         Expr { kind, ty: ty.clone(), span }
@@ -1620,7 +1942,8 @@ impl<'a> Checker<'a> {
                 }
                 mk(ExprKind::Format(out), Ty::Str)
             }
-            K::Ident(name) => self.ident(name, span),
+            K::Unit => mk(ExprKind::Unit, Ty::Unit),
+            K::Ident(name) => self.ident(name, span, expected),
             K::List(items) => self.list_lit(items, expected, span),
             K::Compound(fields) => match expected {
                 Some(Ty::Struct(id)) => self.struct_lit(*id, fields, span),
@@ -1636,9 +1959,14 @@ impl<'a> Checker<'a> {
                     Expr::error(span)
                 }
             },
-            K::Path { module, name } => match self.qualified_value(module, name) {
-                Some(sym) => self.sym_expr(Some(sym), &name.name, span),
-                None => Expr::error(span),
+            K::Path { module, name } => match self.variant_path(module, name) {
+                Some(Some((eid, vi))) => self.variant_value(eid, vi, expected, span),
+                Some(None) => Expr::error(span),
+                None => match self.qualified_value(module, name) {
+                    Some(ValueSym::Variant(eid, vi)) => self.variant_value(eid, vi, expected, span),
+                    Some(sym) => self.sym_expr(Some(sym), &name.name, span),
+                    None => Expr::error(span),
+                },
             },
             K::Selector(lit) => match selector::convert(lit) {
                 Ok(c) => {
@@ -1669,19 +1997,32 @@ impl<'a> Checker<'a> {
                 self.error_hint(span, "a range is only allowed as the subject of a `for` loop", "write `for i in 0..n { ... }`");
                 Expr::error(span)
             }
-            K::Call { callee, args } => self.call(callee, args, span),
+            K::Call { callee, args } => self.call(callee, args, expected, span),
             K::Field { base, name } => self.field(base, name, span),
             K::Index { base, index } => self.index(base, index, span),
         }
     }
 
-    fn ident(&mut self, name: &str, span: Span) -> Expr {
+    fn ident(&mut self, name: &str, span: Span, expected: Option<&Ty>) -> Expr {
         if let Some(id) = self.lookup_local(name) {
             let ty = self.fctx().locals[id.0].ty.clone();
             return Expr { kind: ExprKind::Local(id), ty, span };
         }
         let sym = self.lookup_value(name);
+        if let Some(ValueSym::Variant(eid, vi)) = sym {
+            return self.variant_value(eid, vi, expected, span);
+        }
         self.sym_expr(sym, name, span)
+    }
+
+    /// A variant written without arguments: `None`. One with a payload needs them.
+    fn variant_value(&mut self, eid: EnumId, vi: usize, expected: Option<&Ty>, span: Span) -> Expr {
+        let (vname, fields) = self.enums[eid.0].variants.get(vi).cloned().unwrap_or_default();
+        if !fields.is_empty() {
+            self.error_hint(span, format!("variant `{vname}` carries a value and is used without one"), format!("write `{vname}(...)`"));
+            return Expr::error(span);
+        }
+        self.construct(eid, vi, &[], expected, span)
     }
 
     /// The entity the body of a `for e in @a { }` runs as, as a handle: an `entity`-typed
@@ -1702,6 +2043,7 @@ impl<'a> Checker<'a> {
                 self.error_hint(span, format!("function `{name}` is used as a value"), format!("call it: `{name}(...)`"));
                 Expr::error(span)
             }
+            Some(ValueSym::Variant(..)) => unreachable!("variants are handled before sym_expr"),
             Some(ValueSym::Objective(_)) => {
                 self.error_hint(span, format!("objective `{name}` needs an index"), format!("read or write a score with `{name}[@s]`"));
                 Expr::error(span)
@@ -1946,16 +2288,17 @@ impl<'a> Checker<'a> {
 
     // ------------------------------------------------------------------ calls
 
-    fn call(&mut self, callee: &'a ast::Expr, args: &'a [ast::Expr], span: Span) -> Expr {
+    fn call(&mut self, callee: &'a ast::Expr, args: &'a [ast::Expr], expected: Option<&Ty>, span: Span) -> Expr {
         match &callee.kind {
             ast::ExprKind::Ident(name) => {
-                if self.lookup_value_or_local(name).is_some() && !matches!(self.lookup_value(name), Some(ValueSym::Fn(_) | ValueSym::Builtin(_))) {
+                if self.lookup_value_or_local(name).is_some() && !matches!(self.lookup_value(name), Some(ValueSym::Fn(_) | ValueSym::Builtin(_) | ValueSym::Variant(..))) {
                     self.error(callee.span, format!("`{name}` is not a function"));
                     self.args_for_errors(args);
                     return Expr::error(span);
                 }
                 match self.lookup_value(name) {
                     Some(ValueSym::Fn(id)) => self.user_call(id, args, span),
+                    Some(ValueSym::Variant(eid, vi)) => self.construct(eid, vi, args, expected, span),
                     Some(ValueSym::Builtin(i)) => {
                         let b = self.intrinsics[i].clone();
                         self.builtin_call(&b, args, span)
@@ -1970,22 +2313,31 @@ impl<'a> Checker<'a> {
                     }
                 }
             }
-            ast::ExprKind::Path { module, name } => match self.qualified_value(module, name) {
-                Some(ValueSym::Fn(id)) => self.user_call(id, args, span),
-                Some(ValueSym::Builtin(i)) => {
-                    let b = self.intrinsics[i].clone();
-                    self.builtin_call(&b, args, span)
+            ast::ExprKind::Path { module, name } => {
+                // `Option::Some(x)` builds an enum value; anything else names a module's function
+                let sym = match self.variant_path(module, name) {
+                    Some(Some((eid, vi))) => Some(ValueSym::Variant(eid, vi)),
+                    Some(None) => None,
+                    None => self.qualified_value(module, name),
+                };
+                match sym {
+                    Some(ValueSym::Fn(id)) => self.user_call(id, args, span),
+                    Some(ValueSym::Variant(eid, vi)) => self.construct(eid, vi, args, expected, span),
+                    Some(ValueSym::Builtin(i)) => {
+                        let b = self.intrinsics[i].clone();
+                        self.builtin_call(&b, args, span)
+                    }
+                    Some(_) => {
+                        self.error(callee.span, format!("`{}::{}` is not a function", module.name, name.name));
+                        self.args_for_errors(args);
+                        Expr::error(span)
+                    }
+                    None => {
+                        self.args_for_errors(args);
+                        Expr::error(span)
+                    }
                 }
-                Some(_) => {
-                    self.error(callee.span, format!("`{}::{}` is not a function", module.name, name.name));
-                    self.args_for_errors(args);
-                    Expr::error(span)
-                }
-                None => {
-                    self.args_for_errors(args);
-                    Expr::error(span)
-                }
-            },
+            }
             ast::ExprKind::Field { base, name } => {
                 if let Some(m) = self.module_dot_misuse(base) {
                     self.error_hint(callee.span, format!("`{m}` is a module: its functions are called with `::`"), format!("write `{m}::{}(...)`", name.name));
@@ -2216,5 +2568,15 @@ fn assign_str(op: AssignOp) -> &'static str {
         AssignOp::Mul => "*=",
         AssignOp::Div => "/=",
         AssignOp::Rem => "%=",
+    }
+}
+
+/// Whether a type mentions an enum's type parameter.
+fn contains_param(t: &Ty) -> bool {
+    match t {
+        Ty::Param(_) => true,
+        Ty::List(i) => contains_param(i),
+        Ty::Enum(_, args) => args.iter().any(contains_param),
+        _ => false,
     }
 }
