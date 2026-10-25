@@ -450,7 +450,8 @@ mod tests {
         assert!(!f.contains("f.t_0"), "{f}");
         // two literals are compared by the compiler
         let c = build_main("fn f(a: str) -> bool { return a != \"b\" && \"a\" == \"a\"; }");
-        assert_eq!(fn_text(&c, "t:f").matches("data modify storage t:vars f.t_0 set").count(), 2, "one comparison, not two: {}", fn_text(&c, "t:f"));
+        let f = fn_text(&c, "t:f");
+        assert!(f.contains("unless data storage t:vars {f:{v_a:\"b\"}}") && !f.contains("data modify") && f.matches("execute").count() == 1, "the literal comparison folds away: {f}");
         // an entity and a one-entity selector are compared as handles
         let c = build_main("fn f(e: Entity) -> bool { return e == @s; }");
         let f = fn_text(&c, "t:f");
