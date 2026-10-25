@@ -11,4 +11,5 @@ pub mod ir;
 pub mod lower;
 pub mod project;
 pub mod sema;
+pub mod stdlib;
 pub mod syntax;

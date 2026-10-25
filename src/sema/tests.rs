@@ -382,7 +382,7 @@ fn selector_options_can_use_variables() {
 fn builtins() {
     ok(&in_fn("print(1); print(\"s\"); print(true); say(\"hi\"); tag::add(@s, \"x\"); tag::remove(@s, \"x\"); let b = tag::has(@s, \"x\"); print(b); print(exists(@a)); effect::give(@s, \"speed\", 10s); effect::give(@s, \"speed\", 10s, 2); effect::clear(@s); tp(@s, ~, ~1, ~-1); tp(@s, 1, 2, 3); setblock(~, ~-1, ~, \"minecraft:stone\"); summon(\"minecraft:pig\"); summon(\"minecraft:pig\", ~, ~, ~);"));
     one_error(&in_fn("say();"), "`game::say` takes 1 argument but 0 were supplied");
-    one_error(&in_fn("effect::give(@s);"), "takes 2 to 4 arguments but 1 was supplied");
+    one_error(&in_fn("effect::give(@s);"), "takes 3 to 4 arguments but 1 was supplied");
     one_error(&in_fn("tag::add(@s, \"a b\");"), "invalid tag name");
     one_error(&in_fn("summon(\"Bad Id\");"), "invalid id");
     one_error(&in_fn("effect::give(@s, \"speed\", 0);"), "between 1 and 20000000 ticks");
@@ -433,13 +433,13 @@ fn builtin_modules_use_double_colon_paths() {
     ok("import game::tag; import game::effect as fx; import game::summon as spawn; import game::Entity as Mob; fn f() { tag::add(@s, \"t\"); fx::clear(@s); let m: Mob = spawn(\"minecraft:cow\"); kill(m); }");
     ok("import game::tag::{add, has}; fn f() { add(@s, \"t\"); print(has(@s, \"t\")); }");
     // mistakes
-    one_error(&in_fn("game::nope();"), "module `game` has no function `nope`");
-    one_error(&in_fn("game::tag::nope(@s);"), "module `game::tag` has no function `nope`");
+    one_error(&in_fn("game::nope();"), "module `game` has no item `nope`");
+    one_error(&in_fn("game::tag::nope(@s);"), "module `game::tag` has no item `nope`");
     one_error(&in_fn("let e: game::Nope = 1;"), "module `game` has no type `Nope`");
     one_error(&in_fn("nope::say(\"x\");"), "cannot find module `nope`");
     one_error(&in_fn("game.say(\"x\");"), "`game` is a module");
     one_error(&in_fn("let e = game::Entity { };"), "cannot be built with a struct literal");
-    one_error("import game::nope;", "cannot find module `game::nope`");
+    one_error("import game::nope;", "module `game` has no item `nope`");
     one_error("import game::{nope};", "has no item `nope`");
     one_error("import game::say::*;", "is not a module");
     one_error(&in_fn("let x = game;"), "is a module, not a value");
@@ -447,7 +447,7 @@ fn builtin_modules_use_double_colon_paths() {
 
 #[test]
 fn unknown_builtin_members() {
-    one_error(&in_fn("tag::nope(@s);"), "module `game::tag` has no function `nope`");
+    one_error(&in_fn("tag::nope(@s);"), "module `game::tag` has no item `nope`");
     one_error(&in_fn("let x = tag::add;"), "is used as a value");
     one_error(&in_fn("effect.give(@s, \"speed\", 10);"), "`effect` is a module: its functions are called with `::`");
 }
@@ -694,7 +694,8 @@ fn project(files: &[(&str, &str)]) -> Result<Checked, Vec<(usize, String)>> {
             parse(&src).unwrap_or_else(|e| panic!("parse error: {}\n{src}", e.message))
         })
         .collect();
-    let inputs: Vec<ModuleInput> = files.iter().zip(&programs).enumerate().map(|(i, ((name, _), program))| ModuleInput { name, file: i, program }).collect();
+    let mut inputs: Vec<ModuleInput> = files.iter().zip(&programs).enumerate().map(|(i, ((name, _), program))| ModuleInput { name, file: i, program, std: false }).collect();
+    inputs.extend(super::std_inputs(super::STD_FILE_BASE));
     check_modules(&inputs).map_err(|r| r.errors.into_iter().map(|d| (d.file, d.message)).collect())
 }
 
@@ -729,7 +730,7 @@ fn qualified_access_to_pub_items() {
         ("util", UTIL),
     ])
     .unwrap_or_else(|e| panic!("{e:?}"));
-    assert_eq!(c.hir.modules, ["main", "util"]);
+    assert_eq!(c.hir.modules[..2], ["main", "util"]);
     let main = c.hir.fns.iter().find(|f| f.name == "main").unwrap();
     let clamp = c.hir.fns.iter().find(|f| f.name == "clamp").unwrap();
     assert_eq!(main.module, 0);
@@ -772,7 +773,7 @@ fn private_items_are_not_visible_across_modules() {
     one("let h = util::Hidden { a: 1 }; print(h.a);", "`Hidden` is private to module `util`");
     one("print(util::PRIVATE);", "`PRIVATE` is private to module `util`");
     one("print(util::nope());", "module `util` has no item `nope`");
-    one("let x: util::Nope = 1;", "module `util` has no struct `Nope`");
+    one("let x: util::Nope = 1;", "module `util` has no type `Nope`");
     // the error is attributed to the importing file
     let src = main_file("print(util::secret());");
     assert_eq!(project_one_error(&[("main", src.as_str()), ("util", UTIL)], "private"), 0);

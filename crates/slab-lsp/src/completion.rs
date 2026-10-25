@@ -4,7 +4,6 @@
 
 use std::path::Path;
 
-use slab::sema::builtins;
 use slab::sema::hir::ExprKind as HirKind;
 use slab::sema::ty::Ty;
 use slab::syntax::token::Tok;
@@ -23,13 +22,8 @@ pub fn completions(ws: &Workspace, uri: &str, offset: usize) -> Option<Vec<Item>
     }
     let before = &doc.text[..offset.min(doc.text.len())];
     if before.ends_with("::") {
-        let chain = chain_before(before, before.len() - 2);
-        let mut items = module_items(state, module, &chain).unwrap_or_default();
-        if let Some(path) = builtin_path(&doc.text, &chain) {
-            items.extend(builtin_module_items(&path));
-        }
-        dedupe(&mut items);
-        return Some(items);
+        let chain = resolve_aliases(state, &doc.text, chain_before(before, before.len() - 2));
+        return module_items(state, module, &chain);
     }
     if before.ends_with('.') {
         // `a..b` is a range, not a member access
@@ -115,62 +109,40 @@ fn plain_items(state: &ProjectState, module: usize) -> Option<Vec<Item>> {
     Some(out)
 }
 
-/// The built-in module a `::` chain names: a full path (`game::tag`) or one starting with an
-/// alias this file imported (`import game::tag;` -> `tag`). Reads the import lines from the
+/// Expands a module alias at the start of a `::` chain: after `import game::tag;` the chain
+/// `tag` stands for `game::tag`, and after `import game::*;` too. Reads the import lines from the
 /// text, because the file being typed in rarely parses.
-fn builtin_path(text: &str, chain: &[String]) -> Option<String> {
-    let joined = chain.join("::");
-    if builtins::is_module(&joined) {
-        return Some(joined);
+fn resolve_aliases(state: &ProjectState, text: &str, chain: Vec<String>) -> Vec<String> {
+    let Some(head) = chain.first() else { return chain };
+    if module_index(state, &chain.join("::")).is_some() {
+        return chain;
     }
-    let (head, rest) = (chain.first()?, &chain[1..]);
     for line in text.lines() {
         let Some(import) = line.trim().strip_prefix("import ") else { continue };
         let import = import.trim().trim_end_matches(';').trim();
+        if import.contains('{') {
+            continue;
+        }
         let (path, alias) = match import.split_once(" as ") {
             Some((p, a)) => (p.trim(), Some(a.trim())),
             None => (import, None),
         };
-        let (key, glob) = match path.strip_suffix("::*") {
-            Some(k) => (k, true),
-            None => (path, false),
-        };
-        if !builtins::is_module(key) || key.contains('{') {
-            continue;
-        }
-        let base = if glob {
-            builtins::module_items(key).iter().any(|(n, k)| n == head && *k == builtins::ItemKind::Module).then(|| format!("{key}::{head}"))
-        } else {
-            let alias = alias.or_else(|| key.rsplit("::").next());
-            (alias == Some(head.as_str())).then(|| key.to_owned())
+        let base = match path.strip_suffix("::*") {
+            Some(parent) => {
+                let sub = format!("{parent}::{head}");
+                module_index(state, &sub).map(|_| sub)
+            }
+            None => (alias.or_else(|| path.rsplit("::").next()) == Some(head.as_str())).then(|| path.to_owned()),
         };
         if let Some(base) = base {
-            let full = rest.iter().fold(base, |acc, r| format!("{acc}::{r}"));
-            if builtins::is_module(&full) {
-                return Some(full);
+            let mut full: Vec<String> = base.split("::").map(str::to_owned).collect();
+            full.extend(chain[1..].iter().cloned());
+            if module_index(state, &full.join("::")).is_some() {
+                return full;
             }
         }
     }
-    None
-}
-
-/// What a built-in module offers after `::`: functions, types and submodules.
-fn builtin_module_items(path: &str) -> Vec<Item> {
-    builtins::module_items(path)
-        .into_iter()
-        .map(|(name, kind)| match kind {
-            builtins::ItemKind::Fn(i) => {
-                let mut item = builtin_item(&builtins::BUILTINS[i], false);
-                item.label = name.to_owned();
-                item
-            }
-            builtins::ItemKind::Type => {
-                let docs = builtins::TYPES.iter().find(|(m, n, _)| *m == path && *n == name).map(|(_, _, d)| (*d).to_owned());
-                Item { label: name.to_owned(), kind: 22, detail: Some(format!("{path}::{name}")), docs, insert: None }
-            }
-            builtins::ItemKind::Module => Item { label: name.to_owned(), kind: 9, detail: Some(format!("module `{path}::{name}`")), docs: None, insert: None },
-        })
-        .collect()
+    chain
 }
 
 /// Fields and methods after `a.`: resolved through a repaired HIR when possible.
@@ -215,29 +187,6 @@ fn any_fields(state: &ProjectState) -> Option<Vec<Item>> {
         }
     }
     (!out.is_empty()).then_some(out)
-}
-
-fn builtin_item(b: &builtins::Builtin, qualified: bool) -> Item {
-    let mut placeholders = Vec::new();
-    for (i, p) in b.params.iter().enumerate() {
-        if i < b.min_args {
-            placeholders.push(format!("${{{}:{}}}", i + 1, p.label()));
-        }
-    }
-    let args = placeholders.join(", ");
-    let ret = match b.ret {
-        builtins::BRet::Unit => "",
-        builtins::BRet::Bool => " -> bool",
-        builtins::BRet::Entity => " -> game::Entity",
-    };
-    let name = if qualified { b.path() } else { b.name.to_owned() };
-    Item {
-        label: name.clone(),
-        kind: 3,
-        detail: Some(format!("{}({args}){ret}", b.path())),
-        docs: Some(b.docs.to_owned()),
-        insert: Some(format!("{name}({args})")),
-    }
 }
 
 fn method(name: &str, ret: &str, args: &[&str]) -> Item {

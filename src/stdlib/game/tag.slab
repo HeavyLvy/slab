@@ -1,0 +1,19 @@
+//! Entity tags (`/tag`).
+//!
+//! This file is part of the compiler: `slab` loads it like any other module (see
+//! `docs/lang/stdlib.md`).
+
+/// Add a tag to the matching entities. `true` when anything was tagged (an entity that
+/// already has the tag does not count). Tags added with a name known at compile time are
+/// removed again by `_uninstall`.
+#[intrinsic("tag.add")]
+pub fn add(target: Target, name: str) -> bool;
+
+/// Remove a tag from the matching entities. `true` when anything was untagged.
+#[intrinsic("tag.remove")]
+pub fn remove(target: Target, name: str) -> bool;
+
+/// Whether every matching entity carries the tag. The tag must be known at compile time,
+/// because it becomes part of a selector.
+#[intrinsic("tag.has")]
+pub fn has(target: Target, name: const str) -> bool;

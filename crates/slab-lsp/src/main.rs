@@ -15,7 +15,11 @@ const USAGE: &str = "usage:
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
-        None | Some("server") => crate::server::run(),
+        None | Some("server") => {
+            // the standard library's sources, so go-to-definition has files to open
+            let _ = slab::stdlib::write_cache();
+            crate::server::run()
+        }
         Some("grammar") => grammar(args.get(1).map(String::as_str)),
         Some("-h" | "--help" | "help") => {
             println!("{USAGE}");

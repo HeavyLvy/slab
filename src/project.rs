@@ -15,6 +15,8 @@ pub const ROOT_FILE: &str = "main.slab";
 pub struct Module {
     /// `"main"` for the root, otherwise the import path: `"maps::arena"`.
     pub name: String,
+    /// Part of the embedded standard library (`std`, `game`, ...), not a file of the project.
+    pub std: bool,
     /// Index into [`Project::sources`].
     pub file: usize,
     pub program: ast::Program,
@@ -113,7 +115,7 @@ fn load_inner(root_file: &Path, overlay: &Overlay, tolerant: bool) -> Result<(Pr
             Err(d) => {
                 diagnostics.push(d.in_file(file));
                 // keep module indices stable even though this one has no usable tree
-                modules.push(Module { name, file, program: ast::Program { items: Vec::new() } });
+                modules.push(Module { name, std: false, file, program: ast::Program { items: Vec::new() } });
                 continue;
             }
         };
@@ -126,7 +128,7 @@ fn load_inner(root_file: &Path, overlay: &Overlay, tolerant: bool) -> Result<(Pr
                 diagnostics.push(Diagnostic::new("the root module `main` cannot be imported", span).in_file(file));
                 continue;
             }
-            if loaded.contains_key(&key) || crate::sema::builtins::is_import_path(&key) {
+            if loaded.contains_key(&key) || crate::stdlib::is_import_path(&key) {
                 continue;
             }
             let target = module_file(&root, &segs);
@@ -139,7 +141,12 @@ fn load_inner(root_file: &Path, overlay: &Overlay, tolerant: bool) -> Result<(Pr
             loaded.insert(key.clone(), loaded.len());
             queue.push_back((key, target));
         }
-        modules.push(Module { name, file, program });
+        modules.push(Module { name, std: false, file, program });
+    }
+    // the standard library is part of every project
+    for (m, program) in crate::stdlib::parsed() {
+        let file = sources.add(SourceFile::new(crate::stdlib::file_path(m).display().to_string(), m.source.to_owned()));
+        modules.push(Module { name: m.name.to_owned(), std: true, file, program: program.clone() });
     }
 
     if tolerant || diagnostics.is_empty() {
@@ -177,7 +184,7 @@ mod tests {
     }
 
     fn names(p: &Project) -> Vec<&str> {
-        p.modules.iter().map(|m| m.name.as_str()).collect()
+        p.modules.iter().filter(|m| !m.std).map(|m| m.name.as_str()).collect()
     }
 
     #[test]
@@ -192,7 +199,7 @@ mod tests {
         );
         let p = load(&d.0.join("main.slab")).ok().expect("loads");
         assert_eq!(names(&p), ["main", "util", "maps::arena"]);
-        assert_eq!(p.sources.files.len(), 3);
+        assert_eq!(p.sources.files.len(), 3 + crate::stdlib::MODULES.len(), "three project files, then the standard library");
         assert!(p.sources.files[2].name.ends_with("arena.slab"));
     }
 

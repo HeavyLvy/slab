@@ -3,7 +3,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use super::builtins::{self, BParam, Builtin};
+use super::builtins::{self, BParam, BRet, Intrinsic};
 use super::hir::*;
 use super::selector;
 use super::ty::{StructId, Ty};
@@ -28,11 +28,25 @@ pub struct ModuleInput<'a> {
     /// Index into the project's `SourceMap`, stamped on every diagnostic from this module.
     pub file: usize,
     pub program: &'a ast::Program,
+    /// A module of the embedded standard library (`src/stdlib`): the only place `#[intrinsic]`
+    /// and `#[lang]` are allowed.
+    pub std: bool,
 }
 
-/// Checks a single-file program (module `main`).
+/// File indices of the embedded standard library when it is added by [`check`] or
+/// [`std_inputs`] (a real project gets real indices from its source map).
+pub const STD_FILE_BASE: usize = 1_000_000;
+
+/// The embedded standard library as checker inputs, numbering the files from `first_file`.
+pub fn std_inputs(first_file: usize) -> Vec<ModuleInput<'static>> {
+    crate::stdlib::parsed().iter().enumerate().map(|(i, (m, program))| ModuleInput { name: m.name, file: first_file + i, program, std: true }).collect()
+}
+
+/// Checks a single-file program (module `main`) together with the standard library.
 pub fn check(program: &ast::Program) -> Result<Checked, Report> {
-    check_modules(&[ModuleInput { name: "main", file: 0, program }])
+    let mut inputs = vec![ModuleInput { name: "main", file: 0, program, std: false }];
+    inputs.extend(std_inputs(STD_FILE_BASE));
+    check_modules(&inputs)
 }
 
 /// Checks a whole project. Module 0 must be the root (`main.slab`). All errors found are
@@ -72,14 +86,8 @@ enum ValueSym {
     Global(GlobalId),
     Const(usize),
     Objective(ObjectiveId),
-    /// A built-in function: an index into `builtins::BUILTINS`.
+    /// A function the compiler implements: an index into `Checker::intrinsics`.
     Builtin(usize),
-}
-
-/// A module named in a path: a project file, or a built-in module (`std`, `game`, ...).
-enum ModRef {
-    User(usize),
-    Builtin(String),
 }
 
 /// What a module can see: its own items, module aliases and imported items.
@@ -95,10 +103,11 @@ struct ModScope<'a> {
     /// `import a::{x};` -> `x` usable unqualified
     imported_values: HashMap<String, ValueSym>,
     imported_types: HashMap<String, StructId>,
-    /// `import game::tag;` -> alias `tag` -> built-in module path `game::tag`
-    builtin_modules: HashMap<String, String>,
-    /// `import game::Entity;` -> `Entity` usable unqualified
-    imported_builtin_types: HashMap<String, Ty>,
+    /// Types the compiler provides (`#[lang("entity")]`): own ones, and imported ones
+    lang_types: HashMap<String, (Ty, bool)>,
+    imported_lang_types: HashMap<String, Ty>,
+    /// Part of the embedded standard library.
+    std: bool,
 }
 
 struct StructInfo<'a> {
@@ -157,6 +166,8 @@ struct Checker<'a> {
     objectives: Vec<ObjectiveDef>,
     fns: Vec<FnSig<'a>>,
     hir_fns: Vec<FnDef>,
+    /// The functions the compiler implements (`#[intrinsic]` declarations of the std modules).
+    intrinsics: Vec<Intrinsic>,
     f: Option<FnCtx>,
 }
 
@@ -187,8 +198,9 @@ impl<'a> Checker<'a> {
                 modules: HashMap::new(),
                 imported_values: HashMap::new(),
                 imported_types: HashMap::new(),
-                builtin_modules: HashMap::new(),
-                imported_builtin_types: HashMap::new(),
+                lang_types: HashMap::new(),
+                imported_lang_types: HashMap::new(),
+                std: m.std,
             })
             .collect();
         let by_name = mods.iter().enumerate().map(|(i, m)| (m.name.clone(), i)).collect();
@@ -206,6 +218,7 @@ impl<'a> Checker<'a> {
             objectives: Vec::new(),
             fns: Vec::new(),
             hir_fns: Vec::new(),
+            intrinsics: Vec::new(),
             f: None,
         }
     }
@@ -274,59 +287,45 @@ impl<'a> Checker<'a> {
         m.types.get(name).map(|v| v.0).or_else(|| m.imported_types.get(name).copied())
     }
 
-    /// The module a path names: an imported project module, an imported alias of (or a full path
-    /// to) a built-in one. Reports a missing module.
-    fn module_ref(&mut self, alias: &ast::Ident) -> Option<ModRef> {
-        let name = alias.name.as_str();
-        let (first, rest) = match name.split_once("::") {
-            Some((f, r)) => (f, Some(r)),
-            None => (name, None),
-        };
+    /// The module a path names: an imported module (or alias), a path whose first segment is
+    /// one, or the full path of a standard-library module (`game::tag`).
+    fn find_module(&self, name: &str) -> Option<usize> {
         let m = &self.mods[self.cur];
         if let Some(&u) = m.modules.get(name) {
-            return Some(ModRef::User(u));
+            return Some(u);
         }
-        if let Some(base) = m.builtin_modules.get(first) {
-            let full = match rest {
-                Some(r) => format!("{base}::{r}"),
-                None => base.clone(),
-            };
-            if builtins::is_module(&full) {
-                return Some(ModRef::Builtin(full));
-            }
+        if let Some((first, rest)) = name.split_once("::")
+            && let Some(&base) = m.modules.get(first)
+            && let Some(&i) = self.by_name.get(&format!("{}::{rest}", self.mods[base].name))
+        {
+            return Some(i);
         }
-        if builtins::is_module(name) {
-            return Some(ModRef::Builtin(name.to_owned()));
-        }
-        self.error_hint(alias.span, format!("cannot find module `{name}`"), format!("import it first: `import {name};`"));
-        None
+        self.by_name.get(name).copied().filter(|&i| self.mods[i].std)
     }
 
-    fn module_alias(&mut self, alias: &ast::Ident) -> Option<usize> {
-        match self.module_ref(alias)? {
-            ModRef::User(m) => Some(m),
-            ModRef::Builtin(path) => {
-                self.error(alias.span, format!("`{path}` is a built-in module here, not a project module"));
-                None
-            }
+    /// [`Self::find_module`], reporting a missing module.
+    fn module_ref(&mut self, alias: &ast::Ident) -> Option<usize> {
+        let found = self.find_module(&alias.name);
+        if found.is_none() {
+            self.error_hint(alias.span, format!("cannot find module `{}`", alias.name), format!("import it first: `import {};`", alias.name));
         }
+        found
     }
 
-    /// A hint for a bare name that is a builtin which has not been imported.
+    /// A hint for a bare name that is a standard-library function which has not been imported.
     fn builtin_hint(&self, name: &str) -> Option<String> {
-        let b = builtins::BUILTINS.iter().find(|b| b.name == name)?;
+        let b = self.intrinsics.iter().find(|b| b.name == name)?;
         Some(format!("call it as `{}(...)`, or import it: `import {}::{};`", b.path(), b.module, b.name))
     }
 
-    /// `base` names a built-in module and is not shadowed by a variable or item (`game.say(..)`
-    /// is a mistake: module paths use `::`).
+    /// `base` names a module and is not shadowed by a variable or item (`game.say(..)` is a
+    /// mistake: module paths use `::`).
     fn module_dot_misuse(&mut self, base: &ast::Expr) -> Option<String> {
         let ast::ExprKind::Ident(m) = &base.kind else { return None };
         if self.lookup_value_or_local(m).is_some() {
             return None;
         }
-        let known = self.mods[self.cur].builtin_modules.get(m.as_str()).cloned().or_else(|| builtins::is_module(m).then(|| m.clone()));
-        known.map(|_| m.clone())
+        self.find_module(m).map(|_| m.clone())
     }
 
     fn private_item(&mut self, name: &ast::Ident, module: usize) {
@@ -336,18 +335,7 @@ impl<'a> Checker<'a> {
 
     /// `module::name` as a value.
     fn qualified_value(&mut self, module: &ast::Ident, name: &ast::Ident) -> Option<ValueSym> {
-        let m = match self.module_ref(module)? {
-            ModRef::User(m) => m,
-            ModRef::Builtin(path) => {
-                return match builtins::member(&path, &name.name) {
-                    Some(i) => Some(ValueSym::Builtin(i)),
-                    None => {
-                        self.error(name.span, format!("module `{path}` has no function `{}`", name.name));
-                        None
-                    }
-                };
-            }
-        };
+        let m = self.module_ref(module)?;
         match self.mods[m].values.get(&name.name).copied() {
             Some((_, false)) if m != self.cur => {
                 self.private_item(name, m);
@@ -362,33 +350,36 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// The built-in module path `m` names, if it is one and not a project module imported
-    /// under that name. Reports nothing.
-    fn builtin_path(&self, m: &ast::Ident) -> Option<String> {
-        let name = m.name.as_str();
-        if self.mods[self.cur].modules.contains_key(name) {
-            return None;
+    /// `module::Name` as a type: a struct, or a type the compiler provides.
+    fn qualified_type(&mut self, module: &ast::Ident, name: &ast::Ident) -> Option<Ty> {
+        let m = self.module_ref(module)?;
+        if let Some((ty, public)) = self.mods[m].lang_types.get(&name.name).cloned() {
+            if !public && m != self.cur {
+                self.private_item(name, m);
+                return None;
+            }
+            return Some(ty);
         }
-        let (first, rest) = name.split_once("::").map_or((name, None), |(f, r)| (f, Some(r)));
-        let full = match self.mods[self.cur].builtin_modules.get(first) {
-            Some(base) => rest.map_or_else(|| base.clone(), |r| format!("{base}::{r}")),
-            None => name.to_owned(),
-        };
-        builtins::is_module(&full).then_some(full)
-    }
-
-    /// `module::Name` as a struct type.
-    fn qualified_struct(&mut self, module: &ast::Ident, name: &ast::Ident) -> Option<StructId> {
-        let m = self.module_alias(module)?;
         match self.mods[m].types.get(&name.name).copied() {
             Some((_, false)) if m != self.cur => {
                 self.private_item(name, m);
                 None
             }
-            Some((id, _)) => Some(id),
+            Some((id, _)) => Some(Ty::Struct(id)),
             None => {
-                let msg = format!("module `{}` has no struct `{}`", self.mods[m].name, name.name);
+                let msg = format!("module `{}` has no type `{}`", self.mods[m].name, name.name);
                 self.error(name.span, msg);
+                None
+            }
+        }
+    }
+
+    /// `module::Name` as a struct type.
+    fn qualified_struct(&mut self, module: &ast::Ident, name: &ast::Ident) -> Option<StructId> {
+        match self.qualified_type(module, name)? {
+            Ty::Struct(id) => Some(id),
+            _ => {
+                self.error(name.span, format!("`{}::{}` cannot be built with a struct literal", module.name, name.name));
                 None
             }
         }
@@ -396,13 +387,7 @@ impl<'a> Checker<'a> {
 
     fn find_struct(&mut self, module: Option<&ast::Ident>, name: &ast::Ident) -> Option<StructId> {
         match module {
-            Some(m) => {
-                if let Some(path) = self.builtin_path(m) {
-                    self.error(name.span, format!("`{path}::{}` cannot be built with a struct literal", name.name));
-                    return None;
-                }
-                self.qualified_struct(m, name)
-            }
+            Some(m) => self.qualified_struct(m, name),
             None => match self.lookup_struct(&name.name) {
                 Some(id) => Some(id),
                 None => {
@@ -437,6 +422,10 @@ impl<'a> Checker<'a> {
             self.reject_attrs_on_non_fn(item);
             match &item.kind {
                 ast::ItemKind::Struct(s) => {
+                    if let Some(attr) = item.attrs.iter().find(|a| a.name.name == "lang") {
+                        self.register_lang_type(mi, s, attr, item.public);
+                        continue;
+                    }
                     if self.mods[mi].types.contains_key(&s.name.name) {
                         self.error(s.name.span, format!("struct `{}` is defined twice", s.name.name));
                         continue;
@@ -447,6 +436,13 @@ impl<'a> Checker<'a> {
                     self.structs.push(StructInfo { name: s.name.name.clone(), module: mi, decl: s, fields: Vec::new() });
                 }
                 ast::ItemKind::Fn(f) => {
+                    if let Some(attr) = item.attrs.iter().find(|a| a.name.name == "intrinsic") {
+                        self.register_intrinsic(mi, f, attr, item.public);
+                        continue;
+                    }
+                    if !f.has_body {
+                        self.error_hint(f.name.span, format!("function `{}` has no body", f.name.name), "write `{ ... }` after the signature");
+                    }
                     let id = FuncId(self.fns.len());
                     // Registered even when the name is a duplicate so bodies still get checked.
                     self.declare_value(&f.name, ValueSym::Fn(id), item.public);
@@ -502,8 +498,8 @@ impl<'a> Checker<'a> {
             || m.modules.contains_key(name)
             || m.imported_values.contains_key(name)
             || m.imported_types.contains_key(name)
-            || m.builtin_modules.contains_key(name)
-            || m.imported_builtin_types.contains_key(name)
+            || m.lang_types.contains_key(name)
+            || m.imported_lang_types.contains_key(name)
     }
 
     fn resolve_imports(&mut self) {
@@ -524,25 +520,23 @@ impl<'a> Checker<'a> {
                 }
                 let key = imp.path.iter().map(|i| i.name.as_str()).collect::<Vec<_>>().join("::");
                 let path_span = imp.path[0].span.to(imp.path[imp.path.len() - 1].span);
-                if builtins::is_module(&key) {
-                    self.import_builtin(mi, imp, &key);
-                    continue;
-                }
-                if builtins::is_import_path(&key) {
-                    // `import std::print;` brings one item in, under its own name or an alias
-                    let (parent, last) = key.rsplit_once("::").expect("an item path");
-                    let (name, kind) = builtins::module_items(parent).into_iter().find(|(n, _)| *n == last).expect("an item");
-                    let bound = imp.alias.as_ref().unwrap_or(&imp.path[imp.path.len() - 1]);
-                    if imp.glob || imp.items.is_some() {
-                        self.error(path_span, format!("`{key}` is not a module, so it has no items to import"));
-                    } else if self.name_taken(mi, &bound.name) {
-                        self.error(bound.span, format!("the name `{}` is already used in this module", bound.name));
-                    } else {
-                        self.bind_builtin_as(mi, parent, name, kind, &bound.name);
-                    }
-                    continue;
-                }
                 let Some(&target) = self.by_name.get(&key) else {
+                    // `import std::print;`: one item of a module, under its own name or an alias
+                    if let Some((parent, last)) = key.rsplit_once("::")
+                        && let Some(&pm) = self.by_name.get(parent)
+                    {
+                        let name = &imp.path[imp.path.len() - 1];
+                        if imp.glob || imp.items.is_some() {
+                            self.error(path_span, format!("`{key}` is not a module, so it has no items to import"));
+                        } else if pm == mi {
+                            self.error(path_span, "a module cannot import from itself");
+                        } else {
+                            let bound = imp.alias.as_ref().unwrap_or(name);
+                            let _ = last;
+                            self.import_item(mi, pm, name, &bound.name, bound.span);
+                        }
+                        continue;
+                    }
                     self.error_hint(path_span, format!("cannot find module `{key}`"), format!("it would be the file `{}.slab` in the project", imp.path.iter().map(|i| i.name.as_str()).collect::<Vec<_>>().join("/")));
                     continue;
                 };
@@ -551,19 +545,7 @@ impl<'a> Checker<'a> {
                     continue;
                 }
                 if imp.glob {
-                    // `import util::*;` brings every public item in, unless the name is already taken
-                    let values: Vec<(String, ValueSym)> = self.mods[target].values.iter().filter(|(_, (_, public))| *public).map(|(n, (s, _))| (n.clone(), *s)).collect();
-                    let types: Vec<(String, StructId)> = self.mods[target].types.iter().filter(|(_, (_, public))| *public).map(|(n, (s, _))| (n.clone(), *s)).collect();
-                    for (n, sym) in values {
-                        if !self.name_taken(mi, &n) {
-                            self.mods[mi].imported_values.insert(n, sym);
-                        }
-                    }
-                    for (n, id) in types {
-                        if !self.name_taken(mi, &n) {
-                            self.mods[mi].imported_types.insert(n, id);
-                        }
-                    }
+                    self.import_all(mi, target);
                     continue;
                 }
                 match &imp.items {
@@ -577,30 +559,7 @@ impl<'a> Checker<'a> {
                     }
                     Some(names) => {
                         for n in names {
-                            let value = self.mods[target].values.get(&n.name).copied();
-                            let ty = self.mods[target].types.get(&n.name).copied();
-                            if value.is_none() && ty.is_none() {
-                                self.error(n.span, format!("module `{key}` has no item `{}`", n.name));
-                                continue;
-                            }
-                            if self.name_taken(mi, &n.name) {
-                                self.error(n.span, format!("the name `{}` is already used in this module", n.name));
-                                continue;
-                            }
-                            let mut any = false;
-                            if let Some((sym, public)) = value
-                                && public {
-                                    self.mods[mi].imported_values.insert(n.name.clone(), sym);
-                                    any = true;
-                                }
-                            if let Some((id, public)) = ty
-                                && public {
-                                    self.mods[mi].imported_types.insert(n.name.clone(), id);
-                                    any = true;
-                                }
-                            if !any {
-                                self.private_item(n, target);
-                            }
+                            self.import_item(mi, target, n, &n.name, n.span);
                         }
                     }
                 }
@@ -608,61 +567,76 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// `import std::*;`, `import game::{summon, Entity};`, `import game::tag;`
-    fn import_builtin(&mut self, mi: usize, imp: &'a ast::ImportDecl, key: &str) {
-        let items = builtins::module_items(key);
-        if imp.glob {
-            for (name, kind) in items {
-                if self.name_taken(mi, name) {
-                    continue;
-                }
-                self.bind_builtin(mi, key, name, kind);
+    /// `import util::*;`: every public item and submodule of `target`, unless the name is
+    /// already taken (an explicit import or a definition wins).
+    fn import_all(&mut self, mi: usize, target: usize) {
+        let values: Vec<(String, ValueSym)> = self.mods[target].values.iter().filter(|(_, (_, public))| *public).map(|(n, (s, _))| (n.clone(), *s)).collect();
+        let types: Vec<(String, StructId)> = self.mods[target].types.iter().filter(|(_, (_, public))| *public).map(|(n, (s, _))| (n.clone(), *s)).collect();
+        let lang: Vec<(String, Ty)> = self.mods[target].lang_types.iter().filter(|(_, (_, public))| *public).map(|(n, (t, _))| (n.clone(), t.clone())).collect();
+        let prefix = format!("{}::", self.mods[target].name);
+        let subs: Vec<(String, usize)> = self.by_name.iter().filter_map(|(n, &i)| n.strip_prefix(&prefix).filter(|r| !r.contains("::")).map(|r| (r.to_owned(), i))).collect();
+        for (n, sym) in values {
+            if !self.name_taken(mi, &n) {
+                self.mods[mi].imported_values.insert(n, sym);
             }
+        }
+        for (n, id) in types {
+            if !self.name_taken(mi, &n) {
+                self.mods[mi].imported_types.insert(n, id);
+            }
+        }
+        for (n, ty) in lang {
+            if !self.name_taken(mi, &n) {
+                self.mods[mi].imported_lang_types.insert(n, ty);
+            }
+        }
+        for (n, i) in subs {
+            if !self.name_taken(mi, &n) {
+                self.mods[mi].modules.insert(n, i);
+            }
+        }
+    }
+
+    /// Brings the item `name` of module `target` into module `mi` as `bound`: a function,
+    /// constant, global, objective, struct, compiler type, or a submodule.
+    fn import_item(&mut self, mi: usize, target: usize, name: &ast::Ident, bound: &str, bound_span: Span) {
+        let value = self.mods[target].values.get(&name.name).copied();
+        let ty = self.mods[target].types.get(&name.name).copied();
+        let lang = self.mods[target].lang_types.get(&name.name).cloned();
+        let sub = self.by_name.get(&format!("{}::{}", self.mods[target].name, name.name)).copied();
+        if value.is_none() && ty.is_none() && lang.is_none() && sub.is_none() {
+            let msg = format!("module `{}` has no item `{}`", self.mods[target].name, name.name);
+            self.error(name.span, msg);
             return;
         }
-        match &imp.items {
-            None => {
-                let alias = imp.alias.as_ref().unwrap_or(&imp.path[imp.path.len() - 1]);
-                if self.name_taken(mi, &alias.name) {
-                    self.error(alias.span, format!("the name `{}` is already used in this module", alias.name));
-                } else {
-                    self.mods[mi].builtin_modules.insert(alias.name.clone(), key.to_owned());
-                }
-            }
-            Some(names) => {
-                for n in names {
-                    let Some((name, kind)) = items.iter().find(|(i, _)| *i == n.name).copied() else {
-                        self.error(n.span, format!("module `{key}` has no item `{}`", n.name));
-                        continue;
-                    };
-                    if self.name_taken(mi, &n.name) {
-                        self.error(n.span, format!("the name `{}` is already used in this module", n.name));
-                        continue;
-                    }
-                    self.bind_builtin(mi, key, name, kind);
-                }
-            }
+        if self.name_taken(mi, bound) {
+            self.error(bound_span, format!("the name `{bound}` is already used in this module"));
+            return;
         }
-    }
-
-    fn bind_builtin(&mut self, mi: usize, module: &str, name: &'static str, kind: builtins::ItemKind) {
-        self.bind_builtin_as(mi, module, name, kind, name);
-    }
-
-    /// Makes the built-in item `module::name` usable as `bound`.
-    fn bind_builtin_as(&mut self, mi: usize, module: &str, name: &str, kind: builtins::ItemKind, bound: &str) {
-        match kind {
-            builtins::ItemKind::Fn(i) => {
-                self.mods[mi].imported_values.insert(bound.to_owned(), ValueSym::Builtin(i));
-            }
-            builtins::ItemKind::Type => {
-                if let Some(ty) = builtins::builtin_type(module, name) {
-                    self.mods[mi].imported_builtin_types.insert(bound.to_owned(), ty);
-                }
-            }
-            builtins::ItemKind::Module => {
-                self.mods[mi].builtin_modules.insert(bound.to_owned(), format!("{module}::{name}"));
-            }
+        let mut any = sub.is_some();
+        if let Some((sym, public)) = value
+            && public
+        {
+            self.mods[mi].imported_values.insert(bound.to_owned(), sym);
+            any = true;
+        }
+        if let Some((id, public)) = ty
+            && public
+        {
+            self.mods[mi].imported_types.insert(bound.to_owned(), id);
+            any = true;
+        }
+        if let Some((t, public)) = lang
+            && public
+        {
+            self.mods[mi].imported_lang_types.insert(bound.to_owned(), t);
+            any = true;
+        }
+        if let Some(i) = sub {
+            self.mods[mi].modules.insert(bound.to_owned(), i);
+        }
+        if !any {
+            self.private_item(name, target);
         }
     }
 
@@ -717,11 +691,86 @@ impl<'a> Checker<'a> {
     }
 
     fn reject_attrs_on_non_fn(&mut self, item: &ast::Item) {
-        if !matches!(item.kind, ast::ItemKind::Fn(_))
-            && let Some(a) = item.attrs.first()
-        {
+        let lang_struct = matches!(item.kind, ast::ItemKind::Struct(_));
+        for a in &item.attrs {
+            if matches!(item.kind, ast::ItemKind::Fn(_)) || (lang_struct && a.name.name == "lang") {
+                continue;
+            }
             self.error(a.span, "attributes can only be applied to functions");
+            return;
         }
+    }
+
+    /// `#[intrinsic("id", min_args)] fn f(..) -> T;` in the standard library: a function the
+    /// compiler implements. The declaration is its signature.
+    fn register_intrinsic(&mut self, mi: usize, f: &'a ast::FnDecl, attr: &'a ast::Attr, public: bool) {
+        if !self.mods[mi].std {
+            self.error(attr.span, "`#[intrinsic]` is only for the standard library");
+            return;
+        }
+        if f.has_body {
+            self.error(f.name.span, "an intrinsic has no body");
+            return;
+        }
+        let id = match attr.args.first().map(|a| &a.kind) {
+            Some(ast::ExprKind::Str(s)) => builtins::intrinsic_id(s),
+            _ => None,
+        };
+        let Some(id) = id else {
+            self.error_hint(attr.span, "`#[intrinsic]` needs the name of an intrinsic the compiler implements", "for example `#[intrinsic(\"tp\")]`");
+            return;
+        };
+        let mut params = Vec::new();
+        for p in &f.params {
+            match BParam::from_type(&p.ty.name.name, p.ty.constant).filter(|_| p.ty.module.is_none() && p.ty.args.is_empty()) {
+                Some(k) => params.push(k),
+                None => {
+                    self.error_hint(p.ty.span, format!("`{}` is not a type an intrinsic can take", p.ty.name.name), "use Target, Coord, any, str, int, const str or const int");
+                    return;
+                }
+            }
+        }
+        let ret = match f.ret.as_ref().map(|t| t.name.name.as_str()) {
+            None => BRet::Unit,
+            Some("bool") => BRet::Bool,
+            Some("Entity") => BRet::Entity,
+            Some(other) => {
+                self.error(f.ret.as_ref().map_or(f.name.span, |t| t.span), format!("an intrinsic cannot return `{other}`"));
+                return;
+            }
+        };
+        let min_args = match attr.args.get(1).map(|a| &a.kind) {
+            Some(ast::ExprKind::Int(n)) if (0..=params.len() as i64).contains(n) => *n as usize,
+            None => params.len(),
+            _ => {
+                self.error(attr.span, "the second argument of `#[intrinsic]` is the number of required parameters");
+                return;
+            }
+        };
+        let idx = self.intrinsics.len();
+        self.intrinsics.push(Intrinsic { id, name: f.name.name.clone(), module: self.mods[mi].name.clone(), params, min_args, ret });
+        self.declare_value(&f.name, ValueSym::Builtin(idx), public);
+    }
+
+    /// `#[lang("entity")] pub struct Entity {}` in the standard library: the name stands for a
+    /// type the compiler provides.
+    fn register_lang_type(&mut self, mi: usize, s: &'a ast::StructDecl, attr: &'a ast::Attr, public: bool) {
+        if !self.mods[mi].std {
+            self.error(attr.span, "`#[lang]` is only for the standard library");
+            return;
+        }
+        let ty = match attr.args.first().map(|a| &a.kind) {
+            Some(ast::ExprKind::Str(n)) if n == "entity" => Ty::Entity,
+            _ => {
+                self.error(attr.span, "`#[lang]` needs the name of a type the compiler provides (\"entity\")");
+                return;
+            }
+        };
+        if self.mods[mi].types.contains_key(&s.name.name) || self.mods[mi].lang_types.contains_key(&s.name.name) {
+            self.error(s.name.span, format!("struct `{}` is defined twice", s.name.name));
+            return;
+        }
+        self.mods[mi].lang_types.insert(s.name.name.clone(), (ty, public));
     }
 
     fn resolve_ty(&mut self, t: &ast::Type) -> Ty {
@@ -733,21 +782,12 @@ impl<'a> Checker<'a> {
             ty
         };
         if let Some(m) = &t.module {
-            if let Some(path) = self.builtin_path(m) {
-                return match builtins::builtin_type(&path, name) {
-                    Some(ty) => no_args(self, ty),
-                    None => {
-                        self.error(t.name.span, format!("module `{path}` has no type `{name}`"));
-                        Ty::Error
-                    }
-                };
-            }
-            return match self.qualified_struct(m, &t.name) {
-                Some(id) => no_args(self, Ty::Struct(id)),
+            return match self.qualified_type(m, &t.name) {
+                Some(ty) => no_args(self, ty),
                 None => Ty::Error,
             };
         }
-        if let Some(ty) = self.mods[self.cur].imported_builtin_types.get(name).cloned() {
+        if let Some(ty) = self.mods[self.cur].imported_lang_types.get(name).cloned().or_else(|| self.mods[self.cur].lang_types.get(name).map(|(t, _)| t.clone())) {
             return no_args(self, ty);
         }
         match name {
@@ -1665,7 +1705,7 @@ impl<'a> Checker<'a> {
                 Expr::error(span)
             }
             None => {
-                if builtins::is_module(name) || self.mods[self.cur].builtin_modules.contains_key(name) {
+                if self.find_module(name).is_some() {
                     self.error_hint(span, format!("`{name}` is a module, not a value"), format!("use one of its items: `{name}::item`"));
                 } else if let Some(hint) = self.builtin_hint(name) {
                     self.error_hint(span, format!("cannot find `{name}` in this scope"), hint);
@@ -1906,7 +1946,10 @@ impl<'a> Checker<'a> {
                 }
                 match self.lookup_value(name) {
                     Some(ValueSym::Fn(id)) => self.user_call(id, args, span),
-                    Some(ValueSym::Builtin(i)) => self.builtin_call(&builtins::BUILTINS[i], args, span),
+                    Some(ValueSym::Builtin(i)) => {
+                        let b = self.intrinsics[i].clone();
+                        self.builtin_call(&b, args, span)
+                    }
                     _ => {
                         match self.builtin_hint(name) {
                             Some(hint) => self.error_hint(callee.span, format!("cannot find function `{name}`"), hint),
@@ -1919,7 +1962,10 @@ impl<'a> Checker<'a> {
             }
             ast::ExprKind::Path { module, name } => match self.qualified_value(module, name) {
                 Some(ValueSym::Fn(id)) => self.user_call(id, args, span),
-                Some(ValueSym::Builtin(i)) => self.builtin_call(&builtins::BUILTINS[i], args, span),
+                Some(ValueSym::Builtin(i)) => {
+                    let b = self.intrinsics[i].clone();
+                    self.builtin_call(&b, args, span)
+                }
                 Some(_) => {
                     self.error(callee.span, format!("`{}::{}` is not a function", module.name, name.name));
                     self.args_for_errors(args);
@@ -1983,7 +2029,7 @@ impl<'a> Checker<'a> {
         Expr { kind: ExprKind::Call { func: id, args: hargs }, ty: ret, span }
     }
 
-    fn builtin_call(&mut self, b: &'static Builtin, args: &'a [ast::Expr], span: Span) -> Expr {
+    fn builtin_call(&mut self, b: &Intrinsic, args: &'a [ast::Expr], span: Span) -> Expr {
         let ret = b.ret.ty();
         if args.len() < b.min_args || args.len() > b.params.len() {
             let takes = if b.min_args == b.params.len() {
@@ -1997,7 +2043,7 @@ impl<'a> Checker<'a> {
         }
         let mut hargs = Vec::new();
         let mut ok = true;
-        for (a, p) in args.iter().zip(b.params) {
+        for (a, p) in args.iter().zip(&b.params) {
             let h = match p {
                 BParam::Printable => {
                     let h = self.expr(a, None);

@@ -1,0 +1,14 @@
+//! Status effects (`/effect`).
+//!
+//! This file is part of the compiler: `slab` loads it like any other module (see
+//! `docs/lang/stdlib.md`).
+
+/// Give an effect to the matching entities. `ticks` is the duration in ticks (`10s` is ten
+/// seconds; the game takes whole seconds, so it is rounded up) and `amplifier` (0 to 255) the
+/// level minus one. Both may be variables. `true` when anything got the effect.
+#[intrinsic("effect.give", 3)]
+pub fn give(target: Target, effect: str, ticks: int, amplifier: int) -> bool;
+
+/// Clear all effects from the matching entities. `true` when anything was cleared.
+#[intrinsic("effect.clear")]
+pub fn clear(target: Target) -> bool;

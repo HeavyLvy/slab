@@ -14,6 +14,11 @@ pub fn doc_before(text: &str, at: usize) -> Option<String> {
         let prev_start = text[..boundary - 1].rfind('\n').map_or(0, |i| i + 1);
         let line = &text[prev_start..boundary - 1];
         let trimmed = line.trim();
+        // attributes between the docs and the item (`#[load]`, `#[intrinsic("tp")]`) don't count
+        if lines.is_empty() && trimmed.starts_with("#[") && trimmed.ends_with(']') {
+            boundary = prev_start;
+            continue;
+        }
         let Some(content) = trimmed.strip_prefix("///") else { break };
         lines.push(content.trim_start());
         boundary = prev_start;
@@ -58,6 +63,13 @@ mod tests {
         // a doc directly above the anchor's line attaches, mid-line or not
         let text2 = "/// note\nlet y: int = 2;\n";
         assert_eq!(doc_before(text2, text2.find("y:").unwrap()).as_deref(), Some("note"));
+    }
+
+    #[test]
+    fn attributes_between_the_docs_and_the_item_are_skipped() {
+        let text = "/// Runs at load.\n#[load]\nfn boot() {}\n\n#[tick]\nfn plain() {}\n";
+        assert_eq!(doc_before(text, text.find("fn boot").unwrap()).as_deref(), Some("Runs at load."));
+        assert_eq!(doc_before(text, text.find("fn plain").unwrap()), None);
     }
 
     #[test]

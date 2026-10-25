@@ -86,7 +86,7 @@ fn load_and_check(entry: &Path) -> Result<(project::Project, sema::Checked), Com
         Err(LoadError::Io(m)) => return Err(CompileError::Io(m)),
         Err(LoadError::Invalid { sources, diagnostics }) => return Err(CompileError::Source { sources, errors: diagnostics, warnings: Vec::new() }),
     };
-    let inputs: Vec<ModuleInput> = project.modules.iter().map(|m| ModuleInput { name: &m.name, file: m.file, program: &m.program }).collect();
+    let inputs: Vec<ModuleInput> = project.modules.iter().map(|m| ModuleInput { name: &m.name, file: m.file, program: &m.program, std: m.std }).collect();
     match sema::check_modules(&inputs) {
         Ok(checked) => Ok((project, checked)),
         Err(report) => Err(CompileError::Source { sources: project.sources, errors: report.errors, warnings: report.warnings }),
@@ -96,7 +96,7 @@ fn load_and_check(entry: &Path) -> Result<(project::Project, sema::Checked), Com
 /// Parses and type-checks a project.
 pub fn check(entry: &Path) -> Result<Checked, CompileError> {
     let (project, checked) = load_and_check(entry)?;
-    Ok(Checked { functions: checked.hir.fns.len(), modules: project.modules.len(), warnings: checked.warnings, sources: project.sources })
+    Ok(Checked { functions: checked.hir.fns.len(), modules: project.modules.iter().filter(|m| !m.std).count(), warnings: checked.warnings, sources: project.sources })
 }
 
 /// Compiles a project to a data pack.

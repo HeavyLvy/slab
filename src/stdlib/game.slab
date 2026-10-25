@@ -1,0 +1,41 @@
+//! Everything that touches the Minecraft world: chat, entities, blocks.
+//!
+//! This file is part of the compiler: `slab` loads it like any other module. A function
+//! without a body and marked `#[intrinsic("name")]` is implemented by the compiler itself,
+//! which turns the call into the Minecraft commands it needs (see `docs/lang/stdlib.md`).
+//! `Target` is a selector such as `@a[tag=x]` or an `Entity`; `Coord` is an `int` expression
+//! or a relative coordinate such as `~` or `^2`.
+
+/// A reference to one entity. It may have died since: every action on a dead entity does
+/// nothing and reports `false`. Create one with `summon`, or from a selector that matches one
+/// entity (`let me = @p;`).
+#[lang("entity")]
+pub struct Entity {}
+
+/// Show a raw chat message as if typed by the server (`/say`). The text may be computed at
+/// run time.
+#[intrinsic("say")]
+pub fn say(message: str);
+
+/// Kill the entities matching the target. `true` when anything was killed.
+#[intrinsic("kill")]
+pub fn kill(target: Target) -> bool;
+
+/// Whether the target matches at least one entity right now.
+#[intrinsic("exists")]
+pub fn exists(target: Target) -> bool;
+
+/// Teleport the matching entities to the coordinates. `true` when it happened.
+#[intrinsic("tp")]
+pub fn tp(target: Target, x: Coord, y: Coord, z: Coord) -> bool;
+
+/// Place a block at the coordinates (`block` is an id such as `"minecraft:stone"`, computed
+/// or not). `true` when the block was set.
+#[intrinsic("setblock")]
+pub fn setblock(x: Coord, y: Coord, z: Coord, block: str) -> bool;
+
+/// Summon an entity of type `kind` (an id such as `"minecraft:cow"`) at the coordinates, or
+/// where the command runs when they are left out, and give back a handle to it. The entity
+/// is tagged as ours, so `_uninstall` removes it again.
+#[intrinsic("summon", 1)]
+pub fn summon(kind: str, x: Coord, y: Coord, z: Coord) -> Entity;

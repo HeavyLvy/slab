@@ -115,6 +115,26 @@ fn goto_definition_across_modules() {
 }
 
 #[test]
+fn go_to_definition_opens_the_standard_library_source() {
+    let d = Dir::new("stddef", &[("main.slab", MAIN), ("util.slab", UTIL)]);
+    let mut ws = Workspace::default();
+    let uri = file_uri(&d.0.join("main.slab"));
+    ws.open(&uri, MAIN, 1);
+    let (state, _doc, module) = ws.locate(&uri).unwrap();
+    let module = module.unwrap();
+    // `print(` is declared in the embedded std.slab, whose file is the cache copy
+    let at = MAIN.find("print(").unwrap();
+    let def = state.goto_definition(module, at + 1).expect("resolves");
+    let path = &state.sources.files[def.file_idx].name;
+    assert!(path.ends_with("std.slab"), "{path}");
+    let text = &state.sources.files[def.file_idx].text;
+    assert_eq!(&text[def.span.start as usize..def.span.end as usize], "print");
+    // the server writes the embedded sources where that path points
+    slab::stdlib::write_cache().expect("cache dir");
+    assert!(std::fs::read_to_string(path).is_ok_and(|t| &t == text), "{path}");
+}
+
+#[test]
 fn hover_shows_signatures_and_builtins() {
     let d = Dir::new("hover", &[("main.slab", MAIN), ("util.slab", UTIL)]);
     let mut ws = Workspace::default();
@@ -123,10 +143,10 @@ fn hover_shows_signatures_and_builtins() {
     let (state, _doc, module) = ws.locate(&uri).unwrap();
     let module = module.unwrap();
 
-    // the builtin
+    // a standard-library function: its declaration and docs, written in slab
     let at = MAIN.find("print(").unwrap();
     let hover = state.hover(module, at + 1).expect("hover");
-    assert!(hover.contains("builtin"), "{hover}");
+    assert!(hover.contains("fn print(value: any)") && hover.contains("in `std`") && hover.contains("tellraw"), "{hover}");
 
     // a user function
     let at = MAIN.find("util::clamp").unwrap() + "util::".len();
@@ -207,12 +227,12 @@ fn completion_modes() {
     let items = completion::completions(&ws, &uri, at).unwrap();
     assert!(items.iter().any(|i| i.label == "clamp" && i.kind == 3), "{items:?}");
 
-    // built-in modules: a full path, and an imported alias
+    // the standard library is made of modules: a full path, and an imported alias
     let src = "import game::effect;\nfn f() {\n    game::\n    effect::\n    std::\n}\n";
     ws.change(&uri, src, 4);
     let at = src.find("game::").unwrap() + "game::".len();
     let items = completion::completions(&ws, &uri, at).unwrap();
-    assert!(items.iter().any(|i| i.label == "summon" && i.kind == 3 && i.insert.as_deref().is_some_and(|s| s.starts_with("summon("))), "{items:?}");
+    assert!(items.iter().any(|i| i.label == "summon" && i.kind == 3 && i.detail.as_deref().is_some_and(|d| d.starts_with("fn summon(kind: str"))), "{items:?}");
     assert!(items.iter().any(|i| i.label == "Entity" && i.kind == 22) && items.iter().any(|i| i.label == "tag" && i.kind == 9), "{items:?}");
     let at = src.find("effect::\n").unwrap() + "effect::".len();
     let items = completion::completions(&ws, &uri, at).unwrap();
@@ -234,7 +254,7 @@ fn tolerant_analysis_keeps_working_under_errors() {
     let (_, doc, module) = ws.locate(&uri).unwrap();
     let at = broken.find("print(").unwrap() + 1;
     let hover = ws.project(&crate::state::root_for(&doc.path).0).and_then(|s| s.hover(module.unwrap(), at)).expect("hover still works");
-    assert!(hover.contains("builtin"), "{hover}");
+    assert!(hover.contains("fn print(value: any)"), "{hover}");
 }
 
 #[test]

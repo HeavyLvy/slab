@@ -152,6 +152,7 @@ fn entry_attr_name(attr: &ast::Attr) -> Option<String> {
 pub fn type_string(t: &ast::Type) -> String {
     let name = t.name.name.as_str();
     let name = t.module.as_ref().map_or_else(|| name.to_owned(), |m| format!("{}::{name}", m.name));
+    let name = if t.constant { format!("const {name}") } else { name };
     if t.args.is_empty() {
         name
     } else {

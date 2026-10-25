@@ -4,7 +4,6 @@
 //! between keystrokes.
 
 use slab::diag::Span;
-use slab::sema::builtins::{self, BRet};
 use slab::sema::hir::{self as shir, ExprKind as HirKind, MethodKind};
 use slab::sema::ty::Ty;
 use slab::syntax::ast;
@@ -80,6 +79,10 @@ impl ProjectState {
             HirKind::Call { func, .. } => {
                 let f = hir.fns.get(func.0)?;
                 def_of(&f.name, f.module)
+            }
+            HirKind::Builtin { name, .. } => {
+                let (mi, def) = self.intrinsic_def(name)?;
+                Some(Definition { file_idx: self.modules[mi].file_idx, span: def.name_span })
             }
             HirKind::Global(id) => {
                 let g = hir.globals.get(id.0)?;
@@ -163,20 +166,48 @@ impl ProjectState {
             })
     }
 
-    /// An import whose alias (or last path segment) is `hit.name`; None for builtin modules.
+    /// The module a name in this file stands for: an import whose alias (or last path segment)
+    /// is `hit.name`, a submodule brought in by a glob (`import game::*;` -> `tag`), or a full
+    /// path such as `game::tag` (the standard library needs no import).
     fn import_target(&self, program: &ast::Program, hit: &Hit) -> Option<usize> {
-        if builtin_module_for(program, &hit.name).is_some() {
-            return None;
-        }
         for item in &program.items {
             let ast::ItemKind::Import(imp) = &item.kind else { continue };
-            let alias = imp.alias.as_ref().map(|a| a.name.as_str()).or_else(|| imp.path.last().map(|p| p.name.as_str()));
+            let segs: Vec<&str> = imp.path.iter().map(|p| p.name.as_str()).collect();
+            if imp.glob {
+                if let Some(i) = self.module_by_name(&format!("{}::{}", segs.join("::"), hit.name)) {
+                    return Some(i);
+                }
+                continue;
+            }
+            if imp.items.is_some() {
+                continue;
+            }
+            let alias = imp.alias.as_ref().map(|a| a.name.as_str()).or_else(|| segs.last().copied());
             if alias == Some(hit.name.as_str()) {
-                let segs: Vec<&str> = imp.path.iter().map(|p| p.name.as_str()).collect();
-                return self.modules.iter().position(|m| m.name == segs.join("::"));
+                return self.module_by_name(&segs.join("::"));
+            }
+        }
+        self.module_by_name(&hit.name).filter(|&i| slab::stdlib::is_std_module(&self.modules[i].name))
+    }
+
+    /// The module and declaration of the standard-library function the compiler implements
+    /// under this intrinsic id (`#[intrinsic("tag.add")]`).
+    fn intrinsic_def(&self, id: &str) -> Option<(usize, Def)> {
+        for (mi, m) in self.modules.iter().enumerate() {
+            for item in &m.program.items {
+                let ast::ItemKind::Fn(f) = &item.kind else { continue };
+                let is_it = item.attrs.iter().any(|a| a.name.name == "intrinsic" && matches!(a.args.first().map(|e| &e.kind), Some(ast::ExprKind::Str(s)) if s == id));
+                if is_it && let Some(def) = m.defs.by_name(&f.name.name) {
+                    return Some((mi, def.clone()));
+                }
             }
         }
         None
+    }
+
+    fn intrinsic_hover(&self, id: &str) -> Option<String> {
+        let (mi, def) = self.intrinsic_def(id)?;
+        Some(def_hover(&def, &self.modules[mi].name, DefKind::Fn))
     }
 
     /// `util` (of `import util;`) -> the module's file.
@@ -287,7 +318,7 @@ impl ProjectState {
                 let ctx = hir_ctx_at(hir, module, offset)?;
                 match &ctx.expr.kind {
                     HirKind::Method { kind, .. } => Some(method_text(*kind)),
-                    HirKind::Builtin { name, .. } => builtins::lookup(name).map(builtin_hover),
+                    HirKind::Builtin { name, .. } => self.intrinsic_hover(name),
                     _ => None,
                 }
             }
@@ -309,9 +340,6 @@ impl ProjectState {
                 Some(def_hover(&def, &self.modules[mi].name, DefKind::Struct))
             }
             Role::ModuleName | Role::ImportModule => {
-                if let Some(path) = builtin_module_for(program, &hit.name) {
-                    return Some(format!("```slab\n{path}\n```\na built-in module; reach its items with `::`, like `{path}::item`"));
-                }
                 let target = self.import_target(program, &hit)?;
                 let text = self.module_text(self.modules[target].file_idx);
                 Some(module_hover(&self.modules[target], text))
@@ -354,7 +382,7 @@ impl ProjectState {
                 let docs = named_def_docs(self, hir, f.module, &f.name).map_or_else(String::new, |d| format!("\n\n{d}"));
                 Some(if entry.is_empty() { format!("```slab\n{sig}\n```\nin module `{mod_name}`{docs}") } else { format!("```slab\n{sig}\n```{entry}{docs}") })
             }
-            HirKind::Builtin { name, .. } => Some(builtin_hover(builtins::lookup(name)?)),
+            HirKind::Builtin { name, .. } => self.intrinsic_hover(name),
             HirKind::Method { kind, .. } => Some(method_text(*kind)),
             HirKind::Local(id) => {
                 let f = hir.fns.get(ctx.fn_idx)?;
@@ -457,51 +485,6 @@ fn fn_signature(f: &shir::FnDef, hir: &shir::Hir) -> String {
         .join(", ");
     let ret = if matches!(f.ret, Ty::Unit) { String::new() } else { format!(" -> {}", analysis::ty_string(&f.ret, hir)) };
     format!("fn {}({params}){ret}", f.name)
-}
-
-/// The built-in module a name stands for in this file: a full path (`game::tag`) or an alias
-/// brought in by an `import` (`import game::tag;`, or `game::*`).
-fn builtin_module_for(program: &ast::Program, name: &str) -> Option<String> {
-    if builtins::is_module(name) {
-        return Some(name.to_owned());
-    }
-    for item in &program.items {
-        let ast::ItemKind::Import(imp) = &item.kind else { continue };
-        let key = imp.path.iter().map(|p| p.name.as_str()).collect::<Vec<_>>().join("::");
-        if !builtins::is_module(&key) {
-            continue;
-        }
-        if imp.glob {
-            if builtins::module_items(&key).iter().any(|(n, k)| *n == name && *k == builtins::ItemKind::Module) {
-                return Some(format!("{key}::{name}"));
-            }
-        } else if imp.items.is_none() {
-            let alias = imp.alias.as_ref().map_or_else(|| imp.path.last().map(|p| p.name.as_str()), |a| Some(a.name.as_str()));
-            if alias == Some(name) {
-                return Some(key);
-            }
-        }
-    }
-    None
-}
-
-fn builtin_hover(b: &builtins::Builtin) -> String {
-    let (required, optional) = b.params.split_at(b.min_args.min(b.params.len()));
-    let params = required.iter().map(|p| p.label()).collect::<Vec<_>>().join(", ");
-    let opt = optional.iter().map(|p| format!("[{}]", p.label())).collect::<Vec<_>>().join(", ");
-    let all = if opt.is_empty() {
-        params
-    } else if params.is_empty() {
-        opt
-    } else {
-        format!("{params}, {opt}")
-    };
-    let ret = match b.ret {
-        BRet::Unit => String::new(),
-        BRet::Bool => " -> bool".to_owned(),
-        BRet::Entity => " -> game::Entity".to_owned(),
-    };
-    format!("```slab\n{}({all}){ret}\n```\nbuiltin — {}", b.path(), b.docs)
 }
 
 fn method_text(kind: MethodKind) -> String {

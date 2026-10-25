@@ -5,7 +5,6 @@
 use std::collections::HashSet;
 
 use slab::diag::Span;
-use slab::sema::builtins;
 use slab::syntax::token::Tok;
 
 use crate::analysis::{self, Hit, Role};
@@ -211,6 +210,12 @@ fn role_of(idents: &[Hit], span: Span) -> Option<&Hit> {
         .min_by_key(|h| h.span.end - h.span.start)
 }
 
+/// Whether the standard library has a function of this name (marked "default library").
+fn is_std_function(name: &str) -> bool {
+    static NAMES: std::sync::OnceLock<std::collections::HashSet<String>> = std::sync::OnceLock::new();
+    NAMES.get_or_init(|| slab::stdlib::function_names().into_iter().map(|(_, n)| n).collect()).contains(name)
+}
+
 /// (token type, modifiers) for an identifier occurrence; broken files degrade to variables.
 pub fn ident_token(hit: Option<&Hit>, name: &str) -> (ST, u32) {
     let Some(hit) = hit else { return (ST::Var, 0) };
@@ -219,7 +224,7 @@ pub fn ident_token(hit: Option<&Hit>, name: &str) -> (ST, u32) {
         Role::StructFieldName | Role::FieldInitName => (ST::Prop, if hit.role == Role::FieldInitName { 0 } else { M_DECLARATION }),
         Role::Param => (ST::Param, M_DECLARATION),
         Role::LetName => (ST::Var, M_DECLARATION),
-        Role::Callee => (ST::Function, if builtins::BUILTINS.iter().any(|b| b.name == name) { M_DEFAULT_LIBRARY } else { 0 }),
+        Role::Callee => (ST::Function, if is_std_function(name) { M_DEFAULT_LIBRARY } else { 0 }),
         Role::MethodName => (ST::Method, 0),
         Role::FieldName => (ST::Prop, 0),
         Role::TypeName => (ST::Type, 0),

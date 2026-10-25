@@ -1,0 +1,10 @@
+//! The standard library that has nothing to do with Minecraft.
+//!
+//! This file is part of the compiler: `slab` loads it like any other module. A function
+//! without a body and marked `#[intrinsic("name")]` is implemented by the compiler itself,
+//! which turns the call into the Minecraft commands it needs (see `docs/lang/stdlib.md`).
+
+/// Show a message to every player with `tellraw`. It accepts any value; an f-string is shown
+/// part by part (numbers and text keep their natural form), so `print(f"hp = {hp}")` just works.
+#[intrinsic("print")]
+pub fn print(value: any);

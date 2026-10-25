@@ -256,8 +256,13 @@ impl Parser {
         let params = self.params(&Tok::RParen)?;
         self.expect(&Tok::RParen)?;
         let ret = if self.eat(&Tok::Arrow) { Some(self.ty()?) } else { None };
+        if self.at(&Tok::Semi) {
+            // `fn f(..) -> T;`: implemented by the compiler (`#[intrinsic]`)
+            let semi = self.expect_semi()?;
+            return Ok(FnDecl { name, params, ret, body: Block { stmts: Vec::new(), span: semi }, has_body: false });
+        }
         let body = self.block()?;
-        Ok(FnDecl { name, params, ret, body })
+        Ok(FnDecl { name, params, ret, body, has_body: true })
     }
 
     /// `name: type, ...` up to (not including) `end`.
@@ -313,6 +318,8 @@ impl Parser {
     }
 
     fn ty(&mut self) -> R<Type> {
+        let const_span = self.span();
+        let constant = self.eat(&Tok::Kw(Kw::Const));
         let first = self.ident("a type")?;
         let (module, name) = self.path_tail(first, "a type name")?;
         let mut args = Vec::new();
@@ -326,8 +333,8 @@ impl Parser {
             }
             end = self.expect(&Tok::Gt)?;
         }
-        let start = module.as_ref().map_or(name.span, |m| m.span);
-        Ok(Type { span: start.to(end), module, name, args })
+        let start = if constant { const_span } else { module.as_ref().map_or(name.span, |m| m.span) };
+        Ok(Type { span: start.to(end), module, name, args, constant })
     }
 
     // ---- statements

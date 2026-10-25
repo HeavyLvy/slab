@@ -61,6 +61,9 @@ pub struct FnDecl {
     pub params: Vec<Param>,
     pub ret: Option<Type>,
     pub body: Block,
+    /// False for `fn f(..) -> T;`, a declaration whose implementation is provided by the
+    /// compiler (`#[intrinsic]`, only in the standard library); `body` is then empty.
+    pub has_body: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -91,6 +94,8 @@ pub struct Type {
     pub name: Ident,
     /// `list<int>` has `args == [int]`.
     pub args: Vec<Type>,
+    /// `const str`: the argument must be known at compile time (only in intrinsic declarations).
+    pub constant: bool,
     pub span: Span,
 }
 

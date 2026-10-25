@@ -6,7 +6,6 @@
 //! argument brackets, attributes, escapes) are hand-written here.
 
 use serde_json::{Map, Value, json};
-use slab::sema::builtins;
 use slab::syntax::lexer::{SELECTOR_VARS, TIME_SUFFIXES};
 use slab::syntax::token::{Kw, KwClass};
 
@@ -318,8 +317,9 @@ fn builtin_call_pattern() -> String {
         names.sort_by_key(|a| std::cmp::Reverse(a.len()));
         names.join("|")
     };
-    let qualified = sorted(builtins::BUILTINS.iter().map(|b| b.name).collect());
-    let bare = sorted(builtins::BUILTINS.iter().filter(|b| matches!(b.module, "std" | "game")).map(|b| b.name).collect());
+    let fns = slab::stdlib::function_names();
+    let qualified = sorted(fns.iter().map(|(_, n)| n.as_str()).collect());
+    let bare = sorted(fns.iter().filter(|(m, _)| matches!(*m, "std" | "game")).map(|(_, n)| n.as_str()).collect());
     format!(r"(?:(?<=::)\s*(?:{qualified})|\b(?:{bare}))\b(?=\s*\()")
 }
 

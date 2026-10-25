@@ -32,7 +32,7 @@ main.slab + modules --project.rs--> parsed modules --syntax--> --sema--> HIR --c
 
 | Phase | Code | Design doc |
 |---|---|---|
-| load files, follow `import` | `src/project.rs` | `docs/lang/modules.md` |
+| load files, follow `import`; add the embedded standard library | `src/project.rs`, `src/stdlib.rs`, `src/stdlib/*.slab` | `docs/lang/modules.md`, `docs/lang/stdlib.md` |
 | lex + parse (first error only) | `src/syntax/`, `src/diag.rs` | `docs/lang/syntax.md` |
 | name resolution, types, flow checks -> HIR | `src/sema/` | `docs/lang/semantics.md`, `modules.md` |
 | HIR -> IR (break/continue, loops, structs, builtins, modules -> flat names) | `src/codegen.rs` | `docs/lang/codegen.md` |

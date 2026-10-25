@@ -132,7 +132,7 @@ impl Workspace {
         }
         let (project, _) = proj::load_tolerant(&root_file, &overlay).ok()?;
         let inputs: Vec<ModuleInput> =
-            project.modules.iter().map(|m| ModuleInput { name: &m.name, file: m.file, program: &m.program }).collect();
+            project.modules.iter().map(|m| ModuleInput { name: &m.name, file: m.file, program: &m.program, std: m.std }).collect();
         sema::check_modules_tolerant(&inputs).hir
     }
 
@@ -207,7 +207,7 @@ fn build_project(key: PathBuf, root_file: &Path, standalone: bool, docs: &HashMa
     match proj::load_tolerant(&root_file, &overlay) {
         Ok((project, load_diags)) => {
             let inputs: Vec<ModuleInput> =
-                project.modules.iter().map(|m| ModuleInput { name: &m.name, file: m.file, program: &m.program }).collect();
+                project.modules.iter().map(|m| ModuleInput { name: &m.name, file: m.file, program: &m.program, std: m.std }).collect();
             let t = sema::check_modules_tolerant(&inputs);
             let modules = project
                 .modules

@@ -109,7 +109,7 @@
     },
     "builtins": {
       "comment": "builtin functions in call position, longest names first",
-      "match": "(?:(?<=::)\\s*(?:setblock|exists|remove|summon|print|clear|kill|give|say|add|has|tp)|\\b(?:setblock|exists|summon|print|kill|say|tp))\\b(?=\\s*\\()",
+      "match": "(?:(?<=::)\\s*(?:setblock|exists|summon|remove|print|clear|kill|give|say|add|has|tp)|\\b(?:setblock|exists|summon|print|kill|say|tp))\\b(?=\\s*\\()",
       "name": "support.function.slab"
     },
     "call": {

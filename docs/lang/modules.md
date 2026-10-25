@@ -42,7 +42,7 @@ Items are private to their file unless declared `pub`: `pub fn`, `pub struct`, `
 
 ## Built-in modules
 
-Two modules are part of the language and need no file: **`std`** (`print`) and **`game`** (everything that touches Minecraft). `game` has the submodules `game::tag` and `game::effect` and the type `game::Entity`. They follow the same rules as any module, with two differences: a full path always works without an import (`game::say("hi")`, `game::tag::add(e, "x")`, `let e: game::Entity = game::summon("minecraft:cow");`), and a path may have more than two segments.
+Two modules are part of the language and need no file of your own (their source is embedded in the compiler): **`std`** (`print`) and **`game`** (everything that touches Minecraft). `game` has the submodules `game::tag` and `game::effect` and the type `game::Entity`. They follow the same rules as any module, with two differences: a full path always works without an import (`game::say("hi")`, `game::tag::add(e, "x")`, `let e: game::Entity = game::summon("minecraft:cow");`), and a path may have more than two segments. `import a::b::c;` also imports one item (`c`) when `a::b` is a module and `c` is in it, for the standard library and for your own modules.
 
 ```slab
 import std::print;            // one item, usable as print(..)
@@ -55,7 +55,7 @@ import game::tag::{add, has}; // items of a submodule
 * Nothing is in scope without an import (there is no prelude): a bare `print(..)` is an error whose hint names the path. Calls use `::`, never `.`; `game.say(..)` is an error that says so. `.` is for fields and methods of values.
 * The names of built-in modules and their items are ordinary names: a project can define its own `print`, and a glob import never overrides a definition or an explicit import.
 * Project modules called `std` or `game` (the files `std.slab`, `game.slab`, `std/…`, `game/…`) are never loaded for such imports; pick another name (the examples use `maps::arena`).
-* Where they live: the table of functions in `src/sema/builtins.rs`, resolution in `src/sema/check.rs` (`import_builtin`, `module_ref`), the commands they produce in `src/codegen.rs`.
+* Where they live: they are `.slab` files embedded in the compiler (`src/stdlib/`, `docs/lang/stdlib.md`); functions without a body marked `#[intrinsic]` are implemented in `src/codegen.rs`.
 
 ## What the pack looks like
 
