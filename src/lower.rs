@@ -5,7 +5,7 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fmt;
 
 use crate::datapack::{
-    self, BuildError, Clause, Command, Condition, Data, DataPack, DataTarget, Execute, FunctionRef, HolderName, Hole,
+    self, BuildError, Clause, Command, Compound, Condition, Data, DataPack, DataTarget, Execute, FunctionRef, HolderName, Hole,
     IntRange, ModifyOp, ModifySource, Nbt, NbtPath, NumType, Objective, PathNode, ResourceLocation, ScoreHolder, ScoreOp, Word,
     ScoreTest, Scoreboard, Selector, StoreKind, StoreTarget, TemplatePart, Text,
 };
@@ -195,6 +195,25 @@ fn check_ident(what: &str, name: &str) -> R<()> {
 }
 
 // ---------------------------------------------------------------- purity / flow
+
+/// `{a:{b:"text"}}` for the path `a.b`; None when the path has anything but plain keys.
+fn string_pattern(path: &NbtPath, text: &str) -> Option<Compound> {
+    let mut keys = Vec::new();
+    for node in path.nodes() {
+        match node {
+            PathNode::Key(k) => keys.push(k.clone()),
+            _ => return None,
+        }
+    }
+    let mut value = Nbt::String(text.to_owned());
+    for k in keys.iter().rev() {
+        value = Nbt::Compound(Compound::new().with(k.clone(), value));
+    }
+    match value {
+        Nbt::Compound(c) => Some(c),
+        _ => None,
+    }
+}
 
 fn has_call(e: &Expr) -> bool {
     match e {
@@ -1000,6 +1019,16 @@ impl<'a> Lower<'a> {
         let bv = self.eval_data(b)?;
         if let (DataVal::Const(x), DataVal::Const(y)) = (&av, &bv) {
             return Ok(Cond::constant((x != y) == differ));
+        }
+        // a stored string against a literal is one `if data storage <s> {path:"text"}` test: a
+        // string in a compound pattern must match exactly (lists would match as a subset, so only
+        // strings take this shortcut). The test reads the variable where the condition runs, so
+        // an owned temporary (which is removed right away) cannot be used.
+        if let (DataVal::Loc(loc, false), DataVal::Const(Nbt::String(text))) | (DataVal::Const(Nbt::String(text)), DataVal::Loc(loc, false)) = (&av, &bv)
+            && let Some(pattern) = string_pattern(&loc.path, text)
+        {
+            let test = Test { negate: differ, cond: Condition::Data(loc.target(), NbtPath::new().root_filter(pattern)) };
+            return Ok(Cond { kind: CondKind::Tests(vec![test]), temps: Vec::new() });
         }
         // the scratch copy of `a` (an owned temporary can be used up as it is)
         let scratch = match av {

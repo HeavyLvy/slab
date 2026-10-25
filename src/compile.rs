@@ -442,6 +442,12 @@ mod tests {
         let c = build_main("fn f(a: list<int>) -> bool { return a != [1, 2]; }");
         let f = fn_text(&c, "t:f");
         assert!(f.contains("run data modify storage t:vars f.t_0 set value [1,2]\ndata remove storage t:vars f.t_0\nexecute store success score #ret t if score #f.t_0 t matches 1\n"), "{f}");
+        // a variable against a text literal is a single `if data` test, no scratch copy
+        let c = build_main("fn f(a: str) -> bool { if a == \"hi\" { return true; } return a != \"yo\"; }");
+        let f = fn_text(&c, "t:f");
+        assert!(f.contains("execute if data storage t:vars {f:{v_a:\"hi\"}} if function t:f/b0"), "{f}");
+        assert!(f.contains("execute store success score #ret t unless data storage t:vars {f:{v_a:\"yo\"}}"), "{f}");
+        assert!(!f.contains("f.t_0"), "{f}");
         // two literals are compared by the compiler
         let c = build_main("fn f(a: str) -> bool { return a != \"b\" && \"a\" == \"a\"; }");
         assert_eq!(fn_text(&c, "t:f").matches("data modify storage t:vars f.t_0 set").count(), 2, "one comparison, not two: {}", fn_text(&c, "t:f"));

@@ -349,6 +349,30 @@
   "expect": "has 1 [e2e]"
  },
  {
+  "cmd": "scoreboard players get #g.r_eq_lit_eq e2e",
+  "expect": "has 1 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_eq_lit_ne e2e",
+  "expect": "has 1 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_eq_lit_field e2e",
+  "expect": "has 1 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_eq_lit_global e2e",
+  "expect": "has 1 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_eq_lit_special e2e",
+  "expect": "has 1 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_eq_lit_elem e2e",
+  "expect": "has 1 [e2e]"
+ },
+ {
   "cmd": "scoreboard players get #g.r_ent_stale_tp e2e",
   "expect": "has 1 [e2e]"
  },

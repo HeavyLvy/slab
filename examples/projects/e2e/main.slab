@@ -82,6 +82,13 @@ global r_eq_entity: int = 0;
 global r_eq_entity_other: int = 0;
 global r_eq_selector: int = 0;
 global r_eq_nested: int = 0;
+global eq_text: str = "glob";
+global r_eq_lit_eq: int = 0;
+global r_eq_lit_ne: int = 0;
+global r_eq_lit_field: int = 0;
+global r_eq_lit_global: int = 0;
+global r_eq_lit_special: int = 0;
+global r_eq_lit_elem: int = 0;
 global r_results: int = 0;
 global r_gone: int = 0;
 global r_entities: int = 0;
@@ -378,6 +385,17 @@ fn equality_test() {
     if p == q { r_eq_struct_eq = 1; }
     q.tags.push("z");
     if p != q { r_eq_struct_ne = 1; }
+
+    // a stored string against a literal is one `if data` test
+    let hello = "hello";
+    if hello == "hello" { r_eq_lit_eq = 1; }
+    if hello != "world" && !(hello == "world") && "hello" == hello { r_eq_lit_ne = 1; }
+    if p.name == "n" && p.name != "m" { r_eq_lit_field = 1; }
+    if eq_text == "glob" && eq_text != "other" { r_eq_lit_global = 1; }
+    let tricky = "q\"\\$(x)'s";
+    if tricky == "q\"\\$(x)'s" && tricky != "q\"\\$(y)'s" { r_eq_lit_special = 1; }
+    let names = ["a", "b"];
+    if names[1] == "b" && names[0] != "b" { r_eq_lit_elem = 1; }
 
     // ||, && and a loop condition re-evaluate the comparison each time
     let s = "x";
