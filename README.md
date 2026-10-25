@@ -55,11 +55,23 @@ Copy the folder (or zip) into `<world>/datapacks/` and `/reload`. To remove ever
 
 Limits worth knowing: no floats, no string concatenation (f-strings can only be printed), and a loop can run about 21,000 iterations per tick (Minecraft's command limit).
 
-## Editor support
+## Install
 
 ```
-cargo install --path crates/slab-lsp   # the language server, globally (also `--path .` for the compiler)
-code --install-extension editors/vscode/slab-vscode-0.1.0.vsix   # after `npm run vsix` once (editors/vscode)
+./install.sh    # `slab` and `slab-lsp` with cargo install, and the VS Code extension
+```
+
+`--skip-cli` / `--skip-extension` do half of it, `--dry-run` prints the commands, `--uninstall` removes both.
+It needs cargo, and node + npm + the `code` command (or `codium`, or `CODE=<path>`) for the extension.
+
+## Editor support
+
+By hand, the same steps:
+
+```
+cargo install --path . --locked                # the compiler
+cargo install --path crates/slab-lsp --locked  # the language server
+cd editors/vscode && npm install && npm run package && code --install-extension slab-vscode-0.1.0.vsix
 ```
 
 Alternatively build locally with `cargo build --release`; the extension looks for the server
