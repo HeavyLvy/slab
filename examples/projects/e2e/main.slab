@@ -728,7 +728,7 @@ fn entity_test() {
     // entity. The chunk 0 0 is the only one loaded; the entity is moved to a fractional position
     // below ground with a command written as text, and the y is rounded down (-20.25 -> -21).
     let m = summon("minecraft:marker", 7, 80, 9);
-    let moved = run_command(f"tp {m.selector()} 5.5 -20.25 9.5");
+    let _moved = run_command(f"tp {m.selector()} 5.5 -20.25 9.5");
     let place = m.position();
     if place.is_ok() {
         let v = place.unwrap();
