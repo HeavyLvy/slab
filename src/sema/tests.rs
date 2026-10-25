@@ -533,7 +533,7 @@ fn entity_values() {
 
 #[test]
 fn for_over_a_selector_binds_the_entity() {
-    // the loop variable is the entity the body runs as: an `entity` value
+    // the loop variable is a fresh immutable `entity` local, bound to the current entity
     let c = ok("objective pts = \"dummy\"; fn f() { for z in @e[type=zombie] { tp(z, 0, 70, 0); pts[z] += 1; } for _ in @a { print(\"one round\"); } }");
     let f = &c.hir.fns[0];
     let mut saw_ctx = false;
@@ -543,15 +543,17 @@ fn for_over_a_selector_binds_the_entity() {
             saw_ctx = true;
             assert_eq!(clauses.len(), 1);
             assert!(matches!(clauses[0], CtxClause::As(_)));
-            // the body uses the bound name: `tp(z, ..)` and the `pts[z]` holder, each a handle
+            // one handle read (the binding at the top) and one score write
             let mut counts = [0, 0];
             find_context_entity(body, &mut counts);
             total[0] += counts[0];
             total[1] += counts[1];
         }
     }
-    assert_eq!(total, [2, 1]);
+    assert_eq!(total, [1, 1]);
     assert!(saw_ctx, "the desugar is a context block");
+    // the loop variable is an ordinary local otherwise
+    assert_eq!(f.locals.iter().find(|l| l.name == "z").unwrap().ty, Ty::Entity);
 }
 
 /// Counts ToEntity expressions and score reads in a statement tree.
@@ -597,6 +599,7 @@ fn find_context_entity(b: &Block, counts: &mut [usize; 2]) {
                 expr(target, counts);
                 expr(value, counts);
             }
+            Stmt::Let { init, .. } => expr(init, counts),
             Stmt::If { cond, then, els } => {
                 expr(cond, counts);
                 find_context_entity(then, counts);
@@ -621,7 +624,9 @@ fn find_context_entity(b: &Block, counts: &mut [usize; 2]) {
 #[test]
 fn for_over_a_selector_rejects_loop_jumps_and_assignment() {
     one_error(&in_fn("for z in @a { break; }"), "cannot leave a context block");
-    one_error(&in_fn("for z in @a { z = @s; }"), "cannot assign to this expression");
+    one_error(&in_fn("for z in @a { z = @s; }"), "not mutable");
+    // but reading it into other variables works, inside and outside the body
+    ok(&in_fn("for z in @a { let saved = z; tp(saved, 0, 70, 0); }"));
 }
 
 #[test]

@@ -136,20 +136,10 @@ struct ConstInfo<'a> {
 struct FnCtx {
     locals: Vec<LocalInfo>,
     used: Vec<bool>,
-    /// What a bound name can be within the current scopes: a local variable, or (in a
-    /// `for e in @a { }` body) the entity the body is running as.
-    scopes: Vec<HashMap<String, Sym>>,
+    scopes: Vec<HashMap<String, LocalId>>,
     ret: Ty,
     loop_depth: usize,
     ctx_depth: usize,
-}
-
-/// A scope binding: an owned local, or the loop's current entity.
-#[derive(Clone, Copy)]
-enum Sym {
-    Local(LocalId),
-    /// `for e in @a { ... }` binds `e` to the current context entity (a handle of `@s`).
-    CurrentEntity,
 }
 
 struct Checker<'a> {
@@ -1215,20 +1205,15 @@ impl<'a> Checker<'a> {
         let id = LocalId(ctx.locals.len());
         ctx.locals.push(LocalInfo { name: name.name.clone(), ty, mutable, span: name.span });
         ctx.used.push(is_param);
-        ctx.scopes.last_mut().expect("scope").insert(name.name.clone(), Sym::Local(id));
+        ctx.scopes.last_mut().expect("scope").insert(name.name.clone(), id);
         id
     }
 
-    fn lookup_local(&mut self, name: &str) -> Option<Sym> {
-        let found = self.fctx().scopes.iter().rev().find_map(|s| s.get(name).copied());
-        match found {
-            Some(Sym::Local(id)) => {
-                self.fctx().used[id.0] = true;
-                Some(Sym::Local(id))
-            }
-            Some(Sym::CurrentEntity) => Some(Sym::CurrentEntity),
-            None => None,
-        }
+    fn lookup_local(&mut self, name: &str) -> Option<LocalId> {
+        let ctx = self.fctx();
+        let id = ctx.scopes.iter().rev().find_map(|s| s.get(name).copied())?;
+        ctx.used[id.0] = true;
+        Some(id)
     }
 
     fn block(&mut self, b: &'a ast::Block) -> Block {
@@ -1376,14 +1361,19 @@ impl<'a> Checker<'a> {
 
     fn for_stmt(&mut self, var: &'a ast::Ident, iter: &'a ast::Expr, body: &'a ast::Block) -> Stmt {
         // `for e in @a { ... }` iterates a selector: the body runs once per match (like
-        // `as @a { ... }`), with `e` bound to the entity the body is running as.
+        // `as @a { ... }`), with `e` a fresh immutable `entity` local bound to the current
+        // entity at the top of each run.
         if let ast::ExprKind::Selector(_) = &iter.kind {
             let sel = self.expr(iter, Some(&Ty::Selector));
             self.fctx().scopes.push(HashMap::new());
-            self.fctx().scopes.last_mut().expect("scope").insert(var.name.clone(), Sym::CurrentEntity);
+            let id = self.declare_local(var, Ty::Entity, false, false);
             self.fctx().ctx_depth += 1;
-            let body = self.block(body);
+            let mut body = self.block(body);
             self.fctx().ctx_depth -= 1;
+            // declared (and bound) at the top of every run; unused names (`for _ in ..`) get no binding at all
+            if !var.name.starts_with('_') {
+                body.stmts.insert(0, Stmt::Let { local: id, init: self.current_entity(var.span) });
+            }
             self.fctx().scopes.pop();
             return Stmt::Context { clauses: vec![CtxClause::As(sel)], body };
         }
@@ -1636,13 +1626,9 @@ impl<'a> Checker<'a> {
     }
 
     fn ident(&mut self, name: &str, span: Span) -> Expr {
-        match self.lookup_local(name) {
-            Some(Sym::CurrentEntity) => return self.current_entity(span),
-            Some(Sym::Local(id)) => {
-                let ty = self.fctx().locals[id.0].ty.clone();
-                return Expr { kind: ExprKind::Local(id), ty, span };
-            }
-            None => {}
+        if let Some(id) = self.lookup_local(name) {
+            let ty = self.fctx().locals[id.0].ty.clone();
+            return Expr { kind: ExprKind::Local(id), ty, span };
         }
         let sym = self.lookup_value(name);
         self.sym_expr(sym, name, span)
