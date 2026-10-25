@@ -86,5 +86,6 @@ writes it from the compiler's own keyword/builtin lists, and a test fails if it 
 ## Learn more
 
 * `docs/lang/` - the language: syntax, semantics, modules, how it compiles.
+* `docs/lang/compiled-output.md` - what each piece of slab code turns into, command by command (checked against the compiler by a test).
 * `examples/` - `slab/` single files, `projects/hello` a small multi-file project.
 * `CLAUDE.md` - how the compiler is organised and how it is tested against a real server (`tools/verify_all.sh`).

@@ -89,5 +89,5 @@ tools/verify_all.sh          # builds and checks all three packs below; prints z
 - `editors/vscode/` the VS Code extension (grammar, snippets, `vscode-languageclient`
   wrapper; `npm run vsix` packages + installs it). The server binary is found at
   `<workspace>/target/release/slab-lsp`, `slab.server.path`, or PATH.
-- `docs/mc/` Minecraft 26.3 reference. `docs/lang/` language design (`syntax`, `semantics`, `modules`, `codegen`, `ir`, `memory`, `entities`).
+- `docs/mc/` Minecraft 26.3 reference. `docs/lang/` language design (`syntax`, `semantics`, `modules`, `stdlib`, `codegen`, `ir`, `memory`, `entities`), and `docs/lang/compiled-output.md`: for each kind of slab code, the commands it compiles to, generated from the real compiler by `tests/compiled_output.rs` (after a change that alters the generated commands, run `UPDATE_DOCS=1 cargo test --test compiled_output` and review the diff).
 - `examples/` and `tools/` (`verify_pack.py`, `verify_all.sh`); `tests/` integration tests (`projects.rs` drives the `slab` binary).
