@@ -48,6 +48,10 @@ compiler provides for entity handles (an `int` id on the scoreboard, `docs/lang/
 Selector conversion (`let me = @p;`), `for e in @e`, context blocks and every target argument
 keep working; the declaration is where `game::EntityId`, `import game::EntityId;` and hover come from.
 
+## Library code written in slab
+
+Not everything in `game.slab` is an intrinsic. `Entity`, `Vec3i` and the methods of `EntityId` (`position`, `fetch`, `is_alive`) are plain slab, built on `run_command(text) -> Result<int, ()>`, which runs any command written as text (`docs/lang/compiled-output.md`, "Any command"). This is the rule for new library features: add an intrinsic only when the compiler has to (here `EntityId::selector`, which needs the pack's namespace) and write the rest in slab, so ctrl+click shows what it does.
+
 ## How it is wired
 
 - The loader adds the embedded modules after the project's own, so module 0 is still `main` and

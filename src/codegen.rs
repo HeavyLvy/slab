@@ -41,7 +41,19 @@ pub fn generate(hir: &h::Hir, namespace: &str, description: &str, opts: &GenOpti
     program.description = description.to_owned();
     program.objectives = g.objectives();
     program.globals = g.globals();
-    for i in 0..hir.fns.len() {
+    // functions of the standard library are only generated when something reaches them
+    let mut reached: Vec<bool> = hir.fns.iter().map(|f| !f.std).collect();
+    let mut work: Vec<usize> = (0..hir.fns.len()).filter(|&i| reached[i]).collect();
+    while let Some(i) = work.pop() {
+        let mut calls = Vec::new();
+        hir.fns[i].body.calls(&mut calls);
+        for c in calls {
+            if !std::mem::replace(&mut reached[c.0], true) {
+                work.push(c.0);
+            }
+        }
+    }
+    for i in (0..hir.fns.len()).filter(|&i| reached[i]) {
         g.function(i, &mut program.functions);
     }
     program.functions.append(&mut g.extra_fns);
@@ -989,6 +1001,12 @@ impl<'a> Gen<'a> {
 
     /// The methods of `Option` and `Result` that the standard library declares as intrinsics.
     fn method_intrinsic(&mut self, id: &str, recv: &h::Expr, args: &[h::Expr], span: Span) -> ir::Expr {
+        if id == "entity.selector" {
+            // the text of the selector that finds this handle: `@e[scores={<ns>_id=N},limit=1]`
+            let n = self.expr(recv);
+            let objective = self.id_objective();
+            return self.concat(vec![ir::Expr::Data(Nbt::str(format!("@e[scores={{{objective}="))), n, ir::Expr::Data(Nbt::str("},limit=1]"))]);
+        }
         let Ty::Enum(_, targs) = &recv.ty else {
             self.err(span, "an Option or Result method needs an Option or a Result");
             return ir::Expr::Int(0);

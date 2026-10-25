@@ -109,3 +109,5 @@ Results read back with `scoreboard players get` / `data get` (`--checks`), all 2
 * `Text` hover/click on non-chat contexts, `Content::Nbt` with `Block` source resolving at run time.
 
 **`run_command` (e2e `command_test`).** `execute store success score OK store result score V run <cmd>` for user-written text works the same for a literal command and for a macro line that is the whole command (`$return run $(h0)` called `with storage`): `scoreboard players get` of 41 gives OK=1 V=41, of 0 gives OK=1 V=0, of a holder with no score gives OK=0 V=0. `time query daytime` is rejected at load (no such timeline in 26.3), so use `list` or another stable command in the zoo.
+
+**`data get entity ... Pos[i]` floors.** Through `run_command` (`EntityId::position`, e2e `r_pos_*`): a marker moved to `5.5 -20.25 9.5` gives `Pos[0]` **5**, `Pos[1]` **-21** (floor, not truncation toward zero), `Pos[2]` 9. Keep such tests inside the force-loaded chunk 0 0: an entity in a neighbouring chunk (x=-7) is not selectable and the test fails randomly.

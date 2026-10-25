@@ -100,7 +100,7 @@ fn load_and_check(entry: &Path) -> Result<(project::Project, sema::Checked), Com
 /// Parses and type-checks a project.
 pub fn check(entry: &Path) -> Result<Checked, CompileError> {
     let (project, checked) = load_and_check(entry)?;
-    Ok(Checked { functions: checked.hir.fns.len(), modules: project.modules.iter().filter(|m| !m.std).count(), warnings: checked.warnings, sources: project.sources })
+    Ok(Checked { functions: checked.hir.fns.iter().filter(|f| !f.std).count(), modules: project.modules.iter().filter(|m| !m.std).count(), warnings: checked.warnings, sources: project.sources })
 }
 
 /// Compiles a project to a data pack.
@@ -610,6 +610,18 @@ mod tests {
         assert!(init.contains("scoreboard objectives add t_id dummy"), "{init}");
         assert!(init.contains("execute unless score #next_id t matches -2147483648..2147483647 run scoreboard players set #next_id t 0"), "{init}");
         assert!(fn_text(&c, "t:_uninstall").contains("scoreboard objectives remove t_id"));
+    }
+
+    #[test]
+    fn library_functions_written_in_slab_are_only_generated_when_used() {
+        let c = build_main("fn f() { kill(@s); }");
+        assert!(c.pack.function(&ResourceLocation::parse("t:game__entityid__position").unwrap()).is_none());
+        let c = build_main("fn f(e: EntityId) { let p = e.position(); print(p.is_ok()); }");
+        assert!(c.pack.function(&ResourceLocation::parse("t:game__entityid__position").unwrap()).is_some());
+        // it is built on run_command with the handle's selector as text
+        let f = fn_text(&c, "t:game__entityid__position/m0");
+        assert!(f.contains("@e[scores={t_id=$(h0)},limit=1]"), "{f}");
+        assert!(c.pack.function(&ResourceLocation::parse("t:game__entityid__fetch").unwrap()).is_none());
     }
 
     #[test]

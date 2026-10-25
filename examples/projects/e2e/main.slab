@@ -117,6 +117,13 @@ global r_impl_res_or: int = 0;
 global r_impl_res_conv: int = 0;
 global r_impl_unwrap_none: int = 9;
 global r_impl_unwrap_some: int = 0;
+global r_pos_x: int = 0;
+global r_pos_y: int = 0;
+global r_pos_z: int = 0;
+global r_pos_fetch: int = 0;
+global r_pos_alive: int = 0;
+global r_pos_gone: int = 0;
+global r_pos_sel: int = 0;
 global r_cmd_value: int = 0;
 global r_cmd_ok: int = 0;
 global r_cmd_err: int = 0;
@@ -716,6 +723,32 @@ fn entity_test() {
     kill(b);
     if !exists(b) { r_ent_after_kill = 1; }
     if !tp(b, 0, 70, 0) { r_ent_stale_tp = 1; }
+
+    // `EntityId` methods are written in slab (game.slab) over `run_command`: the position of an
+    // entity. The chunk 0 0 is the only one loaded; the entity is moved to a fractional position
+    // below ground with a command written as text, and the y is rounded down (-20.25 -> -21).
+    let m = summon("minecraft:marker", 7, 80, 9);
+    let moved = run_command(f"tp {m.selector()} 5.5 -20.25 9.5");
+    let place = m.position();
+    if place.is_ok() {
+        let v = place.unwrap();
+        r_pos_x = v.x;
+        r_pos_y = v.y;
+        r_pos_z = v.z;
+    }
+    let snap = m.fetch();
+    if snap.is_ok() {
+        let entity = snap.unwrap();
+        if entity.pos.z == 9 && entity.id == m { r_pos_fetch = 1; }
+    }
+    if m.is_alive() { r_pos_alive = 1; }
+    let sel_text = m.selector();
+    let hit = run_command(f"execute if entity {sel_text}");
+    if hit.is_ok() { r_pos_sel = 1; }
+    kill(m);
+    let after = m.position();
+    let alive = m.is_alive();
+    if after.is_err() && !alive { r_pos_gone = 1; }
 
     kill(a);
     kill(c);

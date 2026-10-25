@@ -79,3 +79,22 @@ A handle is a plain integer: copying it copies the reference, and nothing happen
 * each use searches all loaded entities for the id score, like any selector;
 * reading entity data (`Health`, `Pos`, ...) is not available yet; it needs floats;
 * a selector with a variable part (`@e[distance=..r]`) is not supported.
+
+## Reading an entity: `EntityId` methods and `Entity`
+
+An `EntityId` is only a handle. To look at the entity, `game.slab` (ctrl+click the names in the editor) has ordinary slab code over [`run_command`](stdlib.md):
+
+| | |
+|---|---|
+| `id.selector() -> str` | the text of the selector that finds it, `@e[scores={<ns>_id=7},limit=1]` (a compiler intrinsic: it only needs the namespace) |
+| `id.is_alive() -> bool` | `exists(id)` |
+| `id.position() -> Result<Vec3i, ()>` | three `run_command(f"data get entity {sel} Pos[0]")` (`[1]`, `[2]`), rounded **down** to whole blocks until floats exist; `Err(())` when the entity is gone |
+| `id.fetch() -> Result<Entity, ()>` | a snapshot `Entity { id, pos }` |
+
+```slab
+let cow = summon("minecraft:cow", 4, 70, -6);
+let p = cow.position();          // Ok(Vec3i { x: 4, y: 70, z: -6 }): summon centres x and z (4.5, -5.5) and the position is rounded down
+if p.is_ok() { print(p.unwrap().x); }
+```
+
+`Entity` is a plain struct, copied out of the world at one moment; it does not follow the entity. Anything else can be written the same way in your own code: `run_command(f"data get entity {id.selector()} Health")`. Reading names and tags (strings and lists) needs a few more compiler intrinsics and is not done yet.

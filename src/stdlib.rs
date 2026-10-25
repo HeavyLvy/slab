@@ -148,7 +148,8 @@ mod tests {
             for item in &program.items {
                 let ast::ItemKind::Impl(i) = &item.kind else { continue };
                 for m in &i.methods {
-                    assert!(!m.decl.has_body, "{} has a body: the library's methods are intrinsics so far", m.decl.name.name);
+                    let intrinsic = m.attrs.iter().any(|a| a.name.name == "intrinsic");
+                    assert_eq!(m.decl.has_body, !intrinsic, "{}: a method of the library is either an intrinsic or has a body", m.decl.name.name);
                     for a in m.attrs.iter().filter(|a| a.name.name == "intrinsic") {
                         let Some(ast::ExprKind::Str(id)) = a.args.first().map(|e| &e.kind) else { panic!("an intrinsic without a name") };
                         declared.push(id.clone());

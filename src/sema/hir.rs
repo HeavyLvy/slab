@@ -110,6 +110,8 @@ pub struct FnDef {
     pub body: Block,
     pub entry: Option<EntryKind>,
     pub span: Span,
+    /// Declared in the embedded standard library: only generated when something calls it.
+    pub std: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Default)]
@@ -210,12 +212,50 @@ pub enum ExprKind {
 }
 
 impl Expr {
+    fn calls(&self, out: &mut Vec<FuncId>) {
+        match &self.kind {
+            ExprKind::Call { func, args } => {
+                out.push(*func);
+                args.iter().for_each(|a| a.calls(out));
+            }
+            ExprKind::Format(parts) => {
+                for p in parts {
+                    if let FormatPart::Expr(e) = p {
+                        e.calls(out);
+                    }
+                }
+            }
+            ExprKind::List(es) | ExprKind::Struct { fields: es, .. } | ExprKind::Variant { args: es, .. } | ExprKind::Selector(_, es) | ExprKind::Builtin { args: es, .. } => es.iter().for_each(|e| e.calls(out)),
+            ExprKind::ToEntity(e) | ExprKind::Unary { expr: e, .. } | ExprKind::Field { base: e, .. } | ExprKind::Score { holder: e, .. } => e.calls(out),
+            ExprKind::Binary { lhs, rhs, .. } => {
+                lhs.calls(out);
+                rhs.calls(out);
+            }
+            ExprKind::Method { recv, args, .. } => {
+                recv.calls(out);
+                args.iter().for_each(|a| a.calls(out));
+            }
+            ExprKind::Index { base, index } => {
+                base.calls(out);
+                index.calls(out);
+            }
+            ExprKind::Int(_) | ExprKind::Bool(_) | ExprKind::Str(_) | ExprKind::Unit | ExprKind::Local(_) | ExprKind::Global(_) | ExprKind::Rel { .. } | ExprKind::Error => {}
+        }
+    }
+
     pub fn error(span: Span) -> Expr {
         Expr { kind: ExprKind::Error, ty: Ty::Error, span }
     }
 }
 
 impl Block {
+    /// Every function called (directly) in the block.
+    pub fn calls(&self, out: &mut Vec<FuncId>) {
+        for s in &self.stmts {
+            s.calls(out);
+        }
+    }
+
     /// Whether control can never reach the end of the block normally (it always returns,
     /// breaks, continues or loops forever).
     pub fn diverges(&self) -> bool {
@@ -230,6 +270,54 @@ impl Block {
 }
 
 impl Stmt {
+    fn calls(&self, out: &mut Vec<FuncId>) {
+        match self {
+            Stmt::Let { init, .. } => init.calls(out),
+            Stmt::Assign { target, value, .. } => {
+                target.calls(out);
+                value.calls(out);
+            }
+            Stmt::If { cond, then, els } => {
+                cond.calls(out);
+                then.calls(out);
+                els.calls(out);
+            }
+            Stmt::While { cond, body } => {
+                cond.calls(out);
+                body.calls(out);
+            }
+            Stmt::Loop { body } => body.calls(out),
+            Stmt::ForRange { start, end, body, .. } => {
+                start.calls(out);
+                end.calls(out);
+                body.calls(out);
+            }
+            Stmt::ForList { list, body, .. } => {
+                list.calls(out);
+                body.calls(out);
+            }
+            Stmt::Return(e) => {
+                if let Some(e) = e {
+                    e.calls(out);
+                }
+            }
+            Stmt::Break | Stmt::Continue => {}
+            Stmt::Context { clauses, body } => {
+                for c in clauses {
+                    match c {
+                        CtxClause::As(e) | CtxClause::At(e) => e.calls(out),
+                        CtxClause::Positioned(es) | CtxClause::Facing(es) => es.iter().for_each(|e| e.calls(out)),
+                        CtxClause::Rotated(es) => es.iter().for_each(|e| e.calls(out)),
+                        CtxClause::In(_) | CtxClause::Align(_) | CtxClause::Anchored(_) => {}
+                    }
+                }
+                body.calls(out);
+            }
+            Stmt::Block(b) => b.calls(out),
+            Stmt::Expr(e) => e.calls(out),
+        }
+    }
+
     pub fn diverges(&self) -> bool {
         match self {
             Stmt::Return(_) | Stmt::Break | Stmt::Continue => true,

@@ -115,7 +115,7 @@ fn globals_get_const_initialisers() {
 #[test]
 fn entry_attributes() {
     let c = ok("#[load] fn a() {} #[tick] fn b() {} #[every(1s)] fn c() {} #[every(5)] fn d() {} fn e() {}");
-    let entries: Vec<_> = c.hir.fns.iter().map(|f| f.entry).collect();
+    let entries: Vec<_> = c.hir.fns.iter().filter(|f| !f.std).map(|f| f.entry).collect();
     assert_eq!(entries, [Some(EntryKind::Load), Some(EntryKind::Tick), Some(EntryKind::Every(20)), Some(EntryKind::Every(5)), None]);
 }
 

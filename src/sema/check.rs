@@ -1907,6 +1907,7 @@ impl<'a> Checker<'a> {
             body,
             entry: self.fns[idx].entry,
             span: self.fns[idx].span,
+            std: self.mods[self.fns[idx].module].std,
         });
     }
 

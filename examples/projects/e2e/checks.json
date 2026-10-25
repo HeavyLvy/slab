@@ -509,6 +509,34 @@
   "expect": "has 1 [e2e]"
  },
  {
+  "cmd": "scoreboard players get #g.r_pos_x e2e",
+  "expect": "has 5 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_pos_y e2e",
+  "expect": "has -21 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_pos_z e2e",
+  "expect": "has 9 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_pos_fetch e2e",
+  "expect": "has 1 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_pos_alive e2e",
+  "expect": "has 1 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_pos_sel e2e",
+  "expect": "has 1 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_pos_gone e2e",
+  "expect": "has 1 [e2e]"
+ },
+ {
   "cmd": "scoreboard players get #g.r_impl_expect e2e",
   "expect": "has 3 [e2e]"
  },

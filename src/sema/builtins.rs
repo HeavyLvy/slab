@@ -81,6 +81,7 @@ pub const METHOD_IDS: &[&str] = &[
     "result.expect",
     "result.ok",
     "result.err",
+    "entity.selector",
 ];
 
 pub fn method_id(id: &str) -> Option<&'static str> {

@@ -47,3 +47,49 @@ pub fn summon(kind: str, x: Coord, y: Coord, z: Coord) -> EntityId;
 /// function for yet; it is not checked beyond being one line, so a typo only shows up in game.
 #[intrinsic("run_command")]
 pub fn run_command(command: str) -> Result<int, ()>;
+
+/// A position in whole blocks.
+pub struct Vec3i {
+    x: int,
+    y: int,
+    z: int,
+}
+
+/// What is known about an entity at one moment, copied out of the world by `fetch`. Unlike an
+/// `EntityId` it does not follow the entity: ask for a new one to see where it went.
+pub struct Entity {
+    id: EntityId,
+    pos: Vec3i,
+}
+
+impl EntityId {
+    /// The selector text that finds this entity: `@e[scores={<namespace>_id=7},limit=1]`.
+    /// Pass it to `run_command` to do something slab has no function for.
+    #[intrinsic("entity.selector")]
+    pub fn selector(self) -> str;
+
+    /// Whether the entity is still there (it may have died or been unloaded).
+    pub fn is_alive(self) -> bool {
+        return exists(self);
+    }
+
+    /// Where the entity is, rounded down to whole blocks. `Err(())` when it is gone. Written in
+    /// slab on top of `run_command`: `data get entity <selector> Pos[0]`.
+    pub fn position(self) -> Result<Vec3i, ()> {
+        let sel = self.selector();
+        let x = run_command(f"data get entity {sel} Pos[0]");
+        let y = run_command(f"data get entity {sel} Pos[1]");
+        let z = run_command(f"data get entity {sel} Pos[2]");
+        if x.is_err() { return Err(()); }
+        if y.is_err() { return Err(()); }
+        if z.is_err() { return Err(()); }
+        return Ok(Vec3i { x: x.unwrap(), y: y.unwrap(), z: z.unwrap() });
+    }
+
+    /// A snapshot of the entity, or `Err(())` when it is gone.
+    pub fn fetch(self) -> Result<Entity, ()> {
+        let pos = self.position();
+        if pos.is_err() { return Err(()); }
+        return Ok(Entity { id: self, pos: pos.unwrap() });
+    }
+}
