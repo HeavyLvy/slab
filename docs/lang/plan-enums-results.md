@@ -54,7 +54,7 @@ fn boot() {
         Ok(n) => print(f"it is called {n}"),
         Err(_) => print("it is gone"),
     }
-    if let Ok(info) = cow.fetch() { print(f"{info.kind} at {info.pos.x} {info.pos.y} {info.pos.z}, tags {info.tags}"); }
+    if let Ok(info) = cow.fetch() { print(f"{info.name} at {info.pos.x} {info.pos.y} {info.pos.z}, tags {info.tags}"); }
 
     // 4. any command
     match run_command("data get entity @e[type=cow,limit=1] Health") {
@@ -143,9 +143,9 @@ A prelude is the small set of names a language puts in scope in **every file wit
 ### Entities (written in slab)
 
 - `game::EntityId`: the handle (`#[lang]`, an int id, cheap, copyable, comparable). Replaces today's `Entity` type name everywhere (`let boss: EntityId = ..`; examples, tests and docs migrate).
-- `game::Entity`: a **snapshot struct** `{ id: EntityId, kind: str, name: str, tags: list<str>, pos: Vec3i }` plus `pub struct Vec3i { x: int, y: int, z: int }`. `id.fetch() -> Result<Entity, ()>` (also `game::get(id)`) builds it with ordinary slab code from the live reads below.
-- Live single reads on the handle, all `Result<_, ()>` (the entity may be dead): `is_alive() -> bool`, `kind() -> Result<str, ()>`, `name()`, `tags() -> Result<list<str>, ()>`, `position() -> Result<Vec3i, ()>`.
-- Their bodies are slab code over a few NBT-reading intrinsics (`nbt_int`, `nbt_str`, `nbt_str_list`, `nbt_text`: each copies `data get entity <handle selector> <path>` through a macro). `position` is whole numbers (`Pos[i]` read with scale 1 floors) until floats exist; then a float `Vec3` replaces it. `name` is the plain text of `CustomName` (`""` when absent; component styling is dropped).
+- `game::Entity`: a **snapshot struct** `{ id: EntityId, name: str, tags: list<str>, pos: Vec3i }` plus `pub struct Vec3i { x: int, y: int, z: int }`. `id.fetch() -> Result<Entity, ()>` (also `game::get(id)`) builds it with ordinary slab code from the live reads below.
+- Live single reads on the handle, all `Result<_, ()>` (the entity may be dead): `is_alive() -> bool`, `is_kind("minecraft:cow") -> bool` (the type id is **not** in the entity NBT in 26.3, so it is a test, `execute if entity <sel>[type=...]`, which also works for modded ids), `name()`, `tags() -> Result<list<str>, ()>`, `position() -> Result<Vec3i, ()>`.
+- Their bodies are slab code over a few NBT-reading intrinsics (`nbt_int`, `nbt_str`, `nbt_str_list`, `nbt_text`: each copies `data get entity <handle selector> <path>` through a macro). `position` is whole numbers (`Pos[i]` read with scale 1 floors) until floats exist; then a float `Vec3` replaces it. `name` is the plain text of `CustomName` (a string tag, or the `text` of a component; `""` when the entity has none; styling is dropped). An entity with no tags has no `Tags` path, so `tags()` returns `Ok([])` when the entity is alive.
 
 ### Dynamic selectors (`$name`, `${expr}`)
 
@@ -187,7 +187,7 @@ NBT equality relies on `data modify <t> set from <b>` **failing when nothing cha
 
 Each step is a commit that passes `cargo test`, clippy and `tools/verify_all.sh`.
 
-0. **Probe the real server** (no code): `data modify set from` fails on no change (strings, lists, compounds, int vs byte); two `store` clauses on one `execute`; `return run <cmd>` vs `function` success/result; `datapack disable "file/x"` from inside a function; `data get entity` for `Tags`, `CustomName`, `Pos` through a macro; macro selectors with `tag=$(h0)`, `..$(h0)`, `scores={x=$(h0)..}`. Record in `docs/mc/05-verified-by-slab.md`.
+0. **Probe the real server** (done, results in `docs/mc/05-verified-by-slab.md`; the only surprise is that entity NBT has no `id`, see Entities): `data modify set from` fails on no change (strings, lists, compounds, int vs byte); two `store` clauses on one `execute`; `return run <cmd>` vs `function` success/result; `datapack disable "file/x"` from inside a function; `data get entity` for `Tags`, `CustomName`, `Pos` through a macro; macro selectors with `tag=$(h0)`, `..$(h0)`, `scores={x=$(h0)..}`. Record in `docs/mc/05-verified-by-slab.md`.
 1. **Dynamic selectors** (your immediate bug; independent of everything else).
 2. **Stdlib in slab, behaviour unchanged**: embedded std/game modules, body-less `#[intrinsic]` fns with today's signatures (`bool` returns still), `#[lang]`, dead-code pruning, the `builtins.rs` / checker / LSP special cases removed, go-to-definition into the cache files. The existing test-suite and e2e must pass untouched apart from import names.
 3. **Equality**: `str`, lists, structs, handle vs selector.
@@ -195,7 +195,7 @@ Each step is a commit that passes `cargo test`, clippy and `tools/verify_all.sh`
 5. **`impl` blocks**: `self`, methods, associated functions, lang-type methods, generic `impl` headers for intrinsics; Option / Result methods (intrinsics).
 6. **`match` + `if let`**, statement and expression, patterns and exhaustiveness.
 7. **`run_command` and the `Result` builtins**: fused / materialised forms, migration of every `bool` use, `unwrap` failure behaviour.
-8. **Entities in slab**: `EntityId` rename, `Entity` / `Vec3i`, NBT-reading intrinsics, `name()`/`tags()`/`kind()`/`position()`/`fetch()`.
+8. **Entities in slab**: `EntityId` rename, `Entity` / `Vec3i`, NBT-reading intrinsics, `name()`/`tags()`/`is_kind()`/`position()`/`fetch()`.
 9. Struct-like variants, LSP polish.
 
 Rough size: 0 small; 1 small-medium; 2 large (a refactor, no new behaviour); 3 small-medium; 4 and 6 large; 5 medium-large; 7 medium-large (touches every builtin and test); 8 medium; 9 medium.
