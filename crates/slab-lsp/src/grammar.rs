@@ -234,12 +234,11 @@ fn repository() -> Map<String, Value> {
             "name": "support.function.slab",
         }),
     );
-    let mods: Vec<String> = builtins::MODULES.iter().map(|m| escaped(m)).collect();
     r.insert(
         "builtin-modules".into(),
         json!({
-            "comment": "the heads of dotted builtins: effect., tag.",
-            "match": format!(r"\b(?:{})\b(?=\s*\.)", mods.join("|")),
+            "comment": "the built-in modules at the head of a path: std::, game::",
+            "match": r"\b(?:std|game)\b(?=\s*::)",
             "name": "support.namespace.slab",
         }),
     );
@@ -311,11 +310,17 @@ fn keyword_rule(class: KwClass) -> Value {
     })
 }
 
-/// The builtin call rule: longest names first so dotted names stay whole.
+/// The builtin call rule: a builtin named right after `::` (`game::tag::add(`), or one of the
+/// functions of `std`/`game` called bare (`print(`, after an import). Longest names first.
 fn builtin_call_pattern() -> String {
-    let mut names: Vec<String> = builtins::BUILTINS.iter().map(|b| escaped(b.name)).collect();
-    names.sort_by_key(|a| std::cmp::Reverse(a.len()));
-    format!(r"\b(?:{})\b(?=\s*\()", names.join("|"))
+    let sorted = |it: Vec<&str>| {
+        let mut names: Vec<String> = it.into_iter().map(escaped).collect();
+        names.sort_by_key(|a| std::cmp::Reverse(a.len()));
+        names.join("|")
+    };
+    let qualified = sorted(builtins::BUILTINS.iter().map(|b| b.name).collect());
+    let bare = sorted(builtins::BUILTINS.iter().filter(|b| matches!(b.module, "std" | "game")).map(|b| b.name).collect());
+    format!(r"(?:(?<=::)\s*(?:{qualified})|\b(?:{bare}))\b(?=\s*\()")
 }
 
 /// Operator alternation, longest first, regex-escaped.

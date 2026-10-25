@@ -185,12 +185,15 @@ mod tests {
         assert!(text.contains("due to 1 error"), "{text}");
     }
 
+    /// Test programs start with these imports (on the same line, so positions don't shift).
+    const PRELUDE: &str = "import std::*; import game::*; ";
+
     fn build_main(src: &str) -> Compiled {
-        build(&[("main.slab", src)])
+        build(&[("main.slab", &format!("{PRELUDE}{src}"))])
     }
 
     fn build_err(src: &str) -> String {
-        let d = Dir::new("e", &[("main.slab", src)]);
+        let d = Dir::new("e", &[("main.slab", &format!("{PRELUDE}{src}"))]);
         match compile(&d.0, &Options { namespace: Some("t".into()), ..Options::default() }) {
             Ok(_) => panic!("expected an error"),
             Err(e) => e.render(),
@@ -270,7 +273,7 @@ mod tests {
 
     #[test]
     fn builtins_become_typed_commands() {
-        let c = build_main("fn f() { effect.give(@s, \"speed\", 10s, 1); tp(@s, ~, ~2, ~); setblock(1, 64, -3, \"stone\"); tag.add(@s, \"x\"); kill(@e[type=zombie]); }");
+        let c = build_main("fn f() { effect::give(@s, \"speed\", 10s, 1); tp(@s, ~, ~2, ~); setblock(1, 64, -3, \"stone\"); tag::add(@s, \"x\"); kill(@e[type=zombie]); }");
         let f = fn_text(&c, "t:f");
         for line in [
             "effect give @s minecraft:speed 10 1",
@@ -292,7 +295,7 @@ mod tests {
 
     #[test]
     fn summoned_entities_are_owned_and_removed_by_uninstall() {
-        let c = build_main("fn f() { summon(\"minecraft:marker\"); summon(\"minecraft:pig\", 1, 64, 2); tag.add(@s, \"seen\"); tag.add(@a, \"seen\"); tag.add(@s, \"other\"); }");
+        let c = build_main("fn f() { summon(\"minecraft:marker\"); summon(\"minecraft:pig\", 1, 64, 2); tag::add(@s, \"seen\"); tag::add(@a, \"seen\"); tag::add(@s, \"other\"); }");
         let f = fn_text(&c, "t:f");
         assert!(f.contains("summon minecraft:marker ~ ~ ~ {Tags:[\"t.owned\"]}"), "{f}");
         assert!(f.contains("summon minecraft:pig 1 64 2 {Tags:[\"t.owned\"]}"), "{f}");
@@ -363,7 +366,7 @@ mod tests {
 
     #[test]
     fn effect_values_can_be_variables() {
-        let c = build_main("fn f(secs: int, level: int) { effect.give(@s, \"speed\", secs * 20, level); effect.give(@s, \"speed\", 10s, 1); }");
+        let c = build_main("fn f(secs: int, level: int) { effect::give(@s, \"speed\", secs * 20, level); effect::give(@s, \"speed\", 10s, 1); }");
         let f = fn_text(&c, "t:f");
         // a variable duration is in ticks and rounded up to seconds: (ticks + 19) / 20
         assert_eq!(fn_text(&c, "t:f/m0"), "$effect give @s minecraft:speed $(h0) $(h1)\n");
@@ -429,14 +432,14 @@ mod tests {
 
     #[test]
     fn exists_and_tag_has_still_test_directly() {
-        let c = build_main("fn f() -> bool { return exists(@e[tag=a]) && tag.has(@s, \"b\"); }");
+        let c = build_main("fn f() -> bool { return exists(@e[tag=a]) && tag::has(@s, \"b\"); }");
         let f = fn_text(&c, "t:f");
         assert!(f.contains("execute store success score") && f.contains("if entity @e[tag=a] if entity @s[tag=b]"), "{f}");
     }
 
     #[test]
     fn a_selector_becomes_a_handle_through_the_id_helper() {
-        let c = build_main("fn f() -> entity { let me = @p; return me; }");
+        let c = build_main("fn f() -> Entity { let me = @p; return me; }");
         let f = fn_text(&c, "t:f");
         // the id is read back from #new_id after the helper ran for the matched entity
         assert!(f.contains("scoreboard players set #new_id t 0\nexecute as @p run function t:_ensure_id\n"), "{f}");
@@ -461,7 +464,7 @@ mod tests {
 
     #[test]
     fn summon_as_a_value_creates_and_numbers_the_entity() {
-        let c = build_main("fn f(x: int) -> entity { return summon(\"minecraft:zombie\", x, 64, 3); }");
+        let c = build_main("fn f(x: int) -> Entity { return summon(\"minecraft:zombie\", x, 64, 3); }");
         let f = fn_text(&c, "t:f");
         assert!(f.contains("scoreboard players set #new_id t 0"), "{f}");
         assert_eq!(fn_text(&c, "t:f/m0"), "$execute positioned $(h0) 64 3 summon minecraft:zombie run function t:_new_entity\n");
@@ -474,7 +477,7 @@ mod tests {
 
     #[test]
     fn a_handle_is_found_again_by_its_id() {
-        let c = build_main("fn f(b: entity) -> bool { tp(b, 1, 2, 3); effect.give(b, \"speed\", 10s); return kill(b); }");
+        let c = build_main("fn f(b: Entity) -> bool { tp(b, 1, 2, 3); effect::give(b, \"speed\", 10s); return kill(b); }");
         let f = fn_text(&c, "t:f");
         assert_eq!(fn_text(&c, "t:f/m0"), "$teleport @e[scores={t_id=$(h0)},limit=1] 1 2 3\n");
         assert_eq!(fn_text(&c, "t:f/m1"), "$effect give @e[scores={t_id=$(h0)},limit=1] minecraft:speed 10\n");
@@ -485,7 +488,7 @@ mod tests {
 
     #[test]
     fn handles_work_as_context_targets_scores_and_existence_tests() {
-        let c = build_main("objective pts = \"dummy\"; fn f(b: entity) { as b at b { say(\"x\"); } pts[b] += 2; print(exists(b)); }");
+        let c = build_main("objective pts = \"dummy\"; fn f(b: Entity) { as b at b { say(\"x\"); } pts[b] += 2; print(exists(b)); }");
         let f = fn_text(&c, "t:f");
         assert!(f.contains("function t:f/m0 with storage t:macro"), "{f}");
         assert_eq!(fn_text(&c, "t:f/m0"), "$execute as @e[scores={t_id=$(h0)},limit=1] at @e[scores={t_id=$(h1)},limit=1] run function t:f/b0\n");
@@ -495,7 +498,7 @@ mod tests {
 
     #[test]
     fn handles_are_ints_inside_lists_and_structs() {
-        let c = build_main("struct S { e: entity } fn f(a: entity) { let xs = [a, a]; let s = S { e: a }; kill(xs[0]); kill(s.e); }");
+        let c = build_main("struct S { e: Entity } fn f(a: Entity) { let xs = [a, a]; let s = S { e: a }; kill(xs[0]); kill(s.e); }");
         let f = fn_text(&c, "t:f");
         // stored as int tags like any int
         assert!(f.contains("execute store result storage t:vars f.t_0 int 1 run scoreboard players get #f.v_a t") || f.contains("int 1 run scoreboard players get #f.v_a t"), "{f}");

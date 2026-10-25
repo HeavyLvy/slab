@@ -22,7 +22,7 @@ pub struct Doc {
 }
 
 pub struct ModuleInfo {
-    /// Project-level module name: `main`, `game::arena`.
+    /// Project-level module name: `main`, `maps::arena`.
     pub name: String,
     pub file_idx: usize,
     pub program: ast::Program,

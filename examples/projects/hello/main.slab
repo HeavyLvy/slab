@@ -1,6 +1,7 @@
 // A small multi-file project: main.slab is the entry point, everything else is a module.
+import std::print;
 import util;
-import game::arena;
+import maps::arena;
 
 global ticks: int = 0;
 global boots: int = 0;

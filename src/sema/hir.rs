@@ -19,7 +19,7 @@ pub struct ObjectiveId(pub usize);
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Hir {
-    /// Module names, index 0 is the root (`main`); nested modules look like `game::arena`.
+    /// Module names, index 0 is the root (`main`); nested modules look like `maps::arena`.
     pub modules: Vec<String>,
     /// `files[m]` is the source-file index (for diagnostics) of module `m`.
     pub files: Vec<usize>,

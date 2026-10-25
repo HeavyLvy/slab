@@ -4,7 +4,6 @@
 //! through `.get()`, and `ExprKind::Error` is expected.
 
 use slab::diag::Span;
-use slab::sema::builtins;
 use slab::sema::hir::{self as shir, Expr as HirExpr, ExprKind as HirExprKind, Stmt as HirStmt};
 use slab::syntax::ast::{self, ExprKind, ItemKind, StmtKind};
 
@@ -260,7 +259,7 @@ impl Walker<'_> {
         match &c.kind {
             ExprKind::Ident(name) => self.emit(c.span, name, Role::Callee),
             ExprKind::Field { base, name } => {
-                self.receiver(base);
+                self.expr(base, Role::Plain);
                 self.emit(name.span, &name.name, Role::MethodName);
             }
             ExprKind::Path { module, name } => {
@@ -268,18 +267,6 @@ impl Walker<'_> {
                 self.emit(name.span, &name.name, Role::Callee);
             }
             _ => self.expr(c, Role::Plain),
-        }
-    }
-
-    /// The receiver of a dotted callee. A bare builtin module head (`effect.give`) is a module
-    /// name; everything else is a value use.
-    fn receiver(&mut self, r: &ast::Expr) {
-        match &r.kind {
-            ExprKind::Ident(name) => {
-                let role = if builtins::is_module(name) { Role::ModuleName } else { Role::Plain };
-                self.emit(r.span, name, role);
-            }
-            _ => self.expr(r, Role::Plain),
         }
     }
 

@@ -214,7 +214,12 @@ impl Parser {
         self.expect(&Tok::Kw(Kw::Import))?;
         let mut path = vec![self.ident("a module name")?];
         let mut items = None;
+        let mut glob = false;
         while self.eat(&Tok::ColonColon) {
+            if self.eat(&Tok::Star) {
+                glob = true;
+                break;
+            }
             if self.eat(&Tok::LBrace) {
                 let mut names = Vec::new();
                 while !self.at(&Tok::RBrace) {
@@ -233,15 +238,15 @@ impl Parser {
             path.push(self.ident("a module name")?);
         }
         let alias = if self.eat(&Tok::Kw(Kw::As)) {
-            if items.is_some() {
-                return Err(Diagnostic::new("`as` cannot be combined with an item list", self.prev_span()));
+            if items.is_some() || glob {
+                return Err(Diagnostic::new("`as` cannot be combined with an item list or `*`", self.prev_span()));
             }
             Some(self.ident("an alias")?)
         } else {
             None
         };
         self.expect_semi()?;
-        Ok(ImportDecl { path, alias, items })
+        Ok(ImportDecl { path, alias, items, glob })
     }
 
     fn fn_decl(&mut self) -> R<FnDecl> {
@@ -289,9 +294,27 @@ impl Parser {
         Ok(StructDecl { name, fields })
     }
 
+    /// The rest of `a::b::c` after its first segment: the module (`a::b`, one identifier joined
+    /// with `::`) and the final name; `(None, a)` when there is no `::`.
+    fn path_tail(&mut self, first: Ident, what: &str) -> R<(Option<Ident>, Ident)> {
+        if !self.at(&Tok::ColonColon) {
+            return Ok((None, first));
+        }
+        let mut module = first;
+        loop {
+            self.expect(&Tok::ColonColon)?;
+            let next = self.ident(what)?;
+            if self.at(&Tok::ColonColon) {
+                module = Ident { name: format!("{}::{}", module.name, next.name), span: module.span.to(next.span) };
+            } else {
+                return Ok((Some(module), next));
+            }
+        }
+    }
+
     fn ty(&mut self) -> R<Type> {
         let first = self.ident("a type")?;
-        let (module, name) = if self.eat(&Tok::ColonColon) { (Some(first), self.ident("a type name")?) } else { (None, first) };
+        let (module, name) = self.path_tail(first, "a type name")?;
         let mut args = Vec::new();
         let mut end = name.span;
         if self.eat(&Tok::Lt) {
@@ -598,7 +621,7 @@ impl Parser {
             }
             Tok::Ident(_) => {
                 let first = self.ident("a name")?;
-                let (module, name) = if self.eat(&Tok::ColonColon) { (Some(first), self.ident("a name after `::`")?) } else { (None, first) };
+                let (module, name) = self.path_tail(first, "a name after `::`")?;
                 if !flags.no_struct && self.looks_like_struct_body() {
                     self.expect(&Tok::LBrace)?;
                     let fields = self.field_inits()?;

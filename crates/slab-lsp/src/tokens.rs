@@ -219,7 +219,7 @@ pub fn ident_token(hit: Option<&Hit>, name: &str) -> (ST, u32) {
         Role::StructFieldName | Role::FieldInitName => (ST::Prop, if hit.role == Role::FieldInitName { 0 } else { M_DECLARATION }),
         Role::Param => (ST::Param, M_DECLARATION),
         Role::LetName => (ST::Var, M_DECLARATION),
-        Role::Callee => (ST::Function, if builtins::lookup(name).is_some() { M_DEFAULT_LIBRARY } else { 0 }),
+        Role::Callee => (ST::Function, if builtins::BUILTINS.iter().any(|b| b.name == name) { M_DEFAULT_LIBRARY } else { 0 }),
         Role::MethodName => (ST::Method, 0),
         Role::FieldName => (ST::Prop, 0),
         Role::TypeName => (ST::Type, 0),

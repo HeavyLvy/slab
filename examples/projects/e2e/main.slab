@@ -1,7 +1,9 @@
 // End-to-end test project: every result lands in a global that tools/verify_pack.py reads back
 // from the running game (see checks.json).
+import std::*;
+import game::*;
 import mathx;
-import game::arena;
+import maps::arena;
 import mathx::{Pair, square};
 
 objective pts = "dummy";
@@ -260,10 +262,10 @@ fn world_test() {
 
     if exists(@e[type=minecraft:marker]) { r_exists = 1; }
 
-    as @e[type=minecraft:marker, limit=2] { tag.add(@s, "seen"); }
+    as @e[type=minecraft:marker, limit=2] { tag::add(@s, "seen"); }
     let mut t = 0;
     as @e[type=minecraft:marker] at @s {
-        if tag.has(@s, "seen") { t += 1; }
+        if tag::has(@s, "seen") { t += 1; }
     }
     r_tagged = t;
     kill(@e[type=minecraft:marker]);
@@ -289,8 +291,8 @@ fn world_test() {
     let ok1 = tp(@e[tag=e2e.owned, limit=1], bx, ty, bx);        // a marker exists (macro helper)
     let ok2 = tp(@e[tag=nobody, limit=1], 1, 2, 3);              // nothing matches
     let ok3 = tp(@e[tag=nobody, limit=1], bx, ty, bx);           // nothing matches (macro helper)
-    let ok4 = tag.add(@e[tag=e2e.owned, limit=1], "mark");       // first time
-    let ok5 = tag.add(@e[tag=e2e.owned, limit=1], "mark");       // already has it
+    let ok4 = tag::add(@e[tag=e2e.owned, limit=1], "mark");       // first time
+    let ok5 = tag::add(@e[tag=e2e.owned, limit=1], "mark");       // already has it
     let ok6 = kill(@e[tag=nobody]);                              // nothing to kill
     let ok7 = setblock(bx, 80, bx, "minecraft:stone");           // changes the block
     let ok8 = setblock(bx, 80, bx, "minecraft:stone");           // already stone
@@ -309,19 +311,19 @@ fn world_test() {
 
     // variable effect duration (ticks) and amplifier; nobody is online, but the command must parse
     let secs = 3;
-    effect.give(@a, "minecraft:speed", secs * 20, level);
+    effect::give(@a, "minecraft:speed", secs * 20, level);
 }
 
 struct Duel {
-    left: entity,
-    right: entity,
+    left: Entity,
+    right: Entity,
 }
 
-fn raise(e: entity, y: int) -> bool {
+fn raise(e: Entity, y: int) -> bool {
     return tp(e, 8, y, 8);
 }
 
-fn spawn_at(x: int) -> entity {
+fn spawn_at(x: int) -> Entity {
     return summon("minecraft:marker", x, 64, 8);
 }
 
@@ -337,13 +339,13 @@ fn string_test() {
     // an entity type, a tag name and a block id built at run time
     let ty = "marker";
     let m = summon("minecraft:" + ty, 14, 64, 14);
-    if tag.add(m, f"t_{n}") { r_str_tag = 1; }
+    if tag::add(m, f"t_{n}") { r_str_tag = 1; }
     let mut c = 0;
     as @e[type=minecraft:marker, tag=t_7] { c += 1; }
     r_str_tag_n = c;
     let mat = "emerald";
     setblock(14, 63, 14, "minecraft:" + mat + "_block");
-    say(f"string test done, n = {n}");
+    game::say(f"string test done, n = {n}");
     kill(m);
 }
 
@@ -366,7 +368,7 @@ fn entity_test() {
     let c = spawn_at(12);
     let hs = [a, b, c];
     let mut n = 0;
-    for h in hs { if tag.add(h, "listed") { n += 1; } }
+    for h in hs { if tag::add(h, "listed") { n += 1; } }
     r_ent_list = n;
     let duel = Duel { left: a, right: c };
     r_ent_struct = 0;
@@ -385,8 +387,8 @@ fn entity_test() {
     // `for` over a selector: one entity at a time, with the match bound as an entity
     let d = summon("minecraft:marker", 10, 64, 10);
     let q = summon("minecraft:marker", 11, 64, 11);
-    tag.add(d, "forz");
-    tag.add(q, "forz");
+    tag::add(d, "forz");
+    tag::add(q, "forz");
     let mut n = 0;
     for z in @e[tag=forz] {
         n += 1;

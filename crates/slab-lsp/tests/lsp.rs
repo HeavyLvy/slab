@@ -37,7 +37,7 @@ impl Drop for Dir {
     }
 }
 
-const MAIN: &str = "import util;\n\nstruct Point { x: int, y: int }\n\nglobal ticks: int = 0;\n\n#[load]\nfn boot() {\n    let p = Point { x: 0, y: 1 };\n    print(f\"booted {p.x}\");\n    ticks = util::clamp(ticks, 0, 100);\n}\n";
+const MAIN: &str = "import std::print;\nimport util;\n\nstruct Point { x: int, y: int }\n\nglobal ticks: int = 0;\n\n#[load]\nfn boot() {\n    let p = Point { x: 0, y: 1 };\n    print(f\"booted {p.x}\");\n    ticks = util::clamp(ticks, 0, 100);\n}\n";
 const UTIL: &str = "pub fn clamp(x: int, lo: int, hi: int) -> int {\n    if x < lo { return lo; }\n    if x > hi { return hi; }\n    return x;\n}\n";
 
 fn file_uri(path: &std::path::Path) -> String {
@@ -57,7 +57,7 @@ fn project_diagnostics_and_symbols() {
     assert_eq!(module, Some(0));
     let symbols = symbols::document_symbols(state, module.unwrap(), Enc::Utf16);
     let names: Vec<&str> = symbols.iter().map(|s| s.name.as_str()).collect();
-    assert_eq!(names, ["util", "Point", "ticks", "boot"]);
+    assert_eq!(names, ["print", "util", "Point", "ticks", "boot"]);
     let boot = symbols.iter().find(|s| s.name == "boot").unwrap();
     assert_eq!(boot.kind, 12);
     assert_eq!(boot.detail.as_deref(), Some("#[load] fn boot()"));
@@ -107,7 +107,7 @@ fn goto_definition_across_modules() {
     let def = state.goto_definition(module, at).expect("resolves");
     assert_eq!(def.file_idx, state.modules[module].file_idx);
     let line = LineIndex::new(text).position(text, def.span.start as usize, Enc::Utf8);
-    assert_eq!(line.line, 8, "the `let p` line");
+    assert_eq!(line.line, 9, "the `let p` line");
 
     // a type name: `Point` in the literal
     let at = text.find("Point {").unwrap();
@@ -153,7 +153,7 @@ fn hover_shows_signatures_and_builtins() {
 
 #[test]
 fn semantic_tokens_classify() {
-    let src = "import util;\n\n#[load]\nfn boot() {\n    let s = \"a\\\"b\";\n    print(f\"x {s}\");\n    as @a at @s {\n        effect.give(@s, \"minecraft:speed\", 10s);\n    }\n    util::clamp(0, 0, 1);\n}\n";
+    let src = "import std::print;\nimport game::effect;\nimport util;\n\n#[load]\nfn boot() {\n    let s = \"a\\\"b\";\n    print(f\"x {s}\");\n    as @a at @s {\n        effect::give(@s, \"minecraft:speed\", 10s);\n    }\n    util::clamp(0, 0, 1);\n}\n";
     let file = slab::diag::SourceFile::new("t.slab", src);
     let program = slab::syntax::parse(&file.text).expect("parses");
     let toks = tokens::document_tokens(&file.text, &program);
@@ -167,11 +167,11 @@ fn semantic_tokens_classify() {
     assert_eq!(tok_at("\"a", 0), Some(tokens::ST::Str));
     assert_eq!(tok_at("@a", 0), None, "selectors stay with the TextMate grammar");
     assert_eq!(tok_at("10s", 0), Some(tokens::ST::Number));
-    let builtin_start = src.find("effect.give").unwrap();
+    let builtin_start = src.find("effect::give").unwrap();
     let t = toks.iter().find(|t| t.start == builtin_start).expect("effect head");
     assert_eq!(t.ty, tokens::ST::Namespace);
-    let give = toks.iter().find(|t| t.start == builtin_start + "effect.".len()).unwrap();
-    assert_eq!(give.ty, tokens::ST::Method);
+    let give = toks.iter().find(|t| t.start == builtin_start + "effect::".len()).unwrap();
+    assert_eq!(give.ty, tokens::ST::Function);
     // f-string: the hole's identifier is a variable token with the right text
     let hole_start = src.find("f\"").unwrap() + "f\"x {".len();
     let t = toks.iter().find(|t| t.start == hole_start).unwrap();
@@ -189,11 +189,11 @@ fn completion_modes() {
     // plain: keywords + builtins + items
     let items = completion::completions(&ws, &uri, MAIN.len()).unwrap();
     assert!(items.iter().any(|i| i.label == "fn" && i.kind == 14));
-    assert!(items.iter().any(|i| i.label == "print" && i.kind == 3 && i.insert.is_some()));
+    assert!(items.iter().any(|i| i.label == "std" && i.kind == 9), "built-in module heads are offered");
     assert!(items.iter().any(|i| i.label == "boot" && i.kind == 3));
 
     // after `.` on a struct: fields
-    let src = "struct Point { x: int, y: int }\n#[load]\nfn boot() {\n    let p = Point { x: 0, y: 0 };\n    print(p.x);\n}\n";
+    let src = "import std::print;\nstruct Point { x: int, y: int }\n#[load]\nfn boot() {\n    let p = Point { x: 0, y: 0 };\n    print(p.x);\n}\n";
     let publishes = ws.change(&uri, src, 2);
     assert!(publishes[0].diagnostics.is_empty(), "{:?}", publishes[0].diagnostics.iter().map(|x| x.message.clone()).collect::<Vec<_>>());
     let at = src.find("p.x").unwrap() + 2; // right after the dot
@@ -207,12 +207,19 @@ fn completion_modes() {
     let items = completion::completions(&ws, &uri, at).unwrap();
     assert!(items.iter().any(|i| i.label == "clamp" && i.kind == 3), "{items:?}");
 
-    // builtin member: `effect.`
-    let src = "fn f() {\n    effect.\n}\n";
-    ws.change(&uri, src, 3);
-    let at = src.find("effect.").unwrap() + "effect.".len();
+    // built-in modules: a full path, and an imported alias
+    let src = "import game::effect;\nfn f() {\n    game::\n    effect::\n    std::\n}\n";
+    ws.change(&uri, src, 4);
+    let at = src.find("game::").unwrap() + "game::".len();
     let items = completion::completions(&ws, &uri, at).unwrap();
-    assert!(items.iter().any(|i| i.label == "give"), "{items:?}");
+    assert!(items.iter().any(|i| i.label == "summon" && i.kind == 3 && i.insert.as_deref().is_some_and(|s| s.starts_with("summon("))), "{items:?}");
+    assert!(items.iter().any(|i| i.label == "Entity" && i.kind == 22) && items.iter().any(|i| i.label == "tag" && i.kind == 9), "{items:?}");
+    let at = src.find("effect::\n").unwrap() + "effect::".len();
+    let items = completion::completions(&ws, &uri, at).unwrap();
+    assert!(items.iter().any(|i| i.label == "give") && items.iter().any(|i| i.label == "clear"), "{items:?}");
+    let at = src.find("std::").unwrap() + "std::".len();
+    let items = completion::completions(&ws, &uri, at).unwrap();
+    assert!(items.iter().any(|i| i.label == "print"), "{items:?}");
 }
 
 #[test]
@@ -221,7 +228,7 @@ fn tolerant_analysis_keeps_working_under_errors() {
     let mut ws = Workspace::default();
     let uri = file_uri(&d.0.join("main.slab"));
     // a type error mid-file: diagnostics arrive, hover still knows the builtin
-    let broken = "import util;\nfn f() {\n    print(util::clamp(\"a\", 0, 1));\n}\n";
+    let broken = "import std::print;\nimport util;\nfn f() {\n    print(util::clamp(\"a\", 0, 1));\n}\n";
     let publishes = ws.open(&uri, broken, 1);
     assert!(publishes[0].diagnostics.iter().any(|x| x.message.contains("mismatched types")));
     let (_, doc, module) = ws.locate(&uri).unwrap();

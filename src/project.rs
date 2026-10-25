@@ -13,7 +13,7 @@ use crate::syntax::parse;
 pub const ROOT_FILE: &str = "main.slab";
 
 pub struct Module {
-    /// `"main"` for the root, otherwise the import path: `"game::arena"`.
+    /// `"main"` for the root, otherwise the import path: `"maps::arena"`.
     pub name: String,
     /// Index into [`Project::sources`].
     pub file: usize,
@@ -126,7 +126,7 @@ fn load_inner(root_file: &Path, overlay: &Overlay, tolerant: bool) -> Result<(Pr
                 diagnostics.push(Diagnostic::new("the root module `main` cannot be imported", span).in_file(file));
                 continue;
             }
-            if loaded.contains_key(&key) {
+            if loaded.contains_key(&key) || crate::sema::builtins::is_import_path(&key) {
                 continue;
             }
             let target = module_file(&root, &segs);
@@ -185,13 +185,13 @@ mod tests {
         let d = Dir::new(
             "ok",
             &[
-                ("main.slab", "import util; import game::arena; fn main() {}"),
-                ("util.slab", "import game::arena; pub fn f() {}"),
-                ("game/arena.slab", "import util; pub fn g() {}"), // cycle: allowed
+                ("main.slab", "import util; import maps::arena; fn main() {}"),
+                ("util.slab", "import maps::arena; pub fn f() {}"),
+                ("maps/arena.slab", "import util; pub fn g() {}"), // cycle: allowed
             ],
         );
         let p = load(&d.0.join("main.slab")).ok().expect("loads");
-        assert_eq!(names(&p), ["main", "util", "game::arena"]);
+        assert_eq!(names(&p), ["main", "util", "maps::arena"]);
         assert_eq!(p.sources.files.len(), 3);
         assert!(p.sources.files[2].name.ends_with("arena.slab"));
     }
@@ -233,6 +233,14 @@ mod tests {
         let d = Dir::new("several", &[("main.slab", "import a; import b; import c;"), ("a.slab", "fn ("), ("b.slab", "fn g() {}"), ("c.slab", "let")]);
         let Err(LoadError::Invalid { diagnostics, .. }) = load(&d.0.join("main.slab")) else { panic!() };
         assert_eq!(diagnostics.len(), 2);
+    }
+
+    #[test]
+    fn built_in_modules_are_not_files() {
+        // `std` and `game` need no file, for the module, its submodules and its items alike
+        let d = Dir::new("builtin", &[("main.slab", "import std::print; import game::*; import game::tag; import game::tag::{add}; import game::Entity as E; fn main() {}")]);
+        let p = load(&d.0.join("main.slab")).ok().expect("loads");
+        assert_eq!(names(&p), ["main"]);
     }
 
     #[test]

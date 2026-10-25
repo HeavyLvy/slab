@@ -43,7 +43,7 @@ fn build_command_writes_a_folder_and_a_zip() {
     assert!(out.join("pack.mcmeta").is_file());
     assert!(out.join("data/demo/function/boot.mcfunction").is_file());
     assert!(out.join("data/demo/function/util__fib.mcfunction").is_file());
-    assert!(out.join("data/demo/function/game__arena__advance.mcfunction").is_file());
+    assert!(out.join("data/demo/function/maps__arena__advance.mcfunction").is_file());
     let zip = fs::read(format!("{}.zip", out.display())).unwrap();
     assert_eq!(&zip[..4], b"PK\x03\x04");
     // rebuilding replaces the previous output instead of accumulating stale files
@@ -57,7 +57,7 @@ fn build_command_writes_a_folder_and_a_zip() {
 fn default_output_goes_under_the_project() {
     let dir = scratch("default");
     fs::create_dir_all(&dir).unwrap();
-    fs::write(dir.join("main.slab"), "#[load] fn boot() { print(1); }").unwrap();
+    fs::write(dir.join("main.slab"), "import std::print; #[load] fn boot() { print(1); }").unwrap();
     let o = slab(&["build", dir.to_str().unwrap(), "--namespace", "mine"]);
     assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
     assert!(dir.join("build/mine/pack.mcmeta").is_file());

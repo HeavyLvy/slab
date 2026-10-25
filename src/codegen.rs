@@ -3,7 +3,7 @@
 //! `str`/`list`/structs in command storage.
 //!
 //! Notable translations (docs/lang/codegen.md):
-//! * module-qualified names become flat `[a-z0-9_]` IR names (`game::arena::start` -> `game_arena__start`);
+//! * module-qualified names become flat `[a-z0-9_]` IR names (`maps::arena::start` -> `maps_arena__start`);
 //! * `break`/`continue` become flag variables and the code after a statement that may jump is
 //!   guarded by them;
 //! * a non-constant list/struct literal is built in a temporary with `Append`/`SetField`
@@ -47,7 +47,7 @@ fn sanitize(s: &str) -> String {
     s.chars().map(|c| if c.is_ascii_alphanumeric() || c == '_' { c.to_ascii_lowercase() } else { '_' }).collect()
 }
 
-/// `game::arena` -> `game_arena__`; the root module has no prefix.
+/// `maps::arena` -> `maps_arena__`; the root module has no prefix.
 fn module_prefix(module: &str) -> String {
     if module == "main" { String::new() } else { format!("{}__", sanitize(module)) }
 }

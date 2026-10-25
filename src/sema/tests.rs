@@ -3,8 +3,12 @@ use super::hir::*;
 use super::ty::Ty;
 use crate::syntax::parse;
 
+/// Every test program starts with these imports (on the same line, so positions don't shift).
+const PRELUDE: &str = "import std::*; import game::*; ";
+
 /// (errors, warnings) messages of a program.
 fn run(src: &str) -> (Vec<String>, Vec<String>) {
+    let src = &format!("{PRELUDE}{src}");
     let program = parse(src).unwrap_or_else(|e| panic!("parse error: {}\n{src}", e.message));
     match check(&program) {
         Ok(c) => (Vec::new(), c.warnings.into_iter().map(|d| d.message).collect()),
@@ -21,6 +25,7 @@ fn warnings(src: &str) -> Vec<String> {
 }
 
 fn ok(src: &str) -> Checked {
+    let src = &format!("{PRELUDE}{src}");
     let program = parse(src).unwrap_or_else(|e| panic!("parse error: {}\n{src}", e.message));
     match check(&program) {
         Ok(c) => c,
@@ -128,7 +133,7 @@ fn unknown_names() {
     one_error(&in_fn("nope();"), "cannot find function `nope`");
     one_error("fn f(a: Nope) {}", "unknown type `Nope`");
     one_error("fn f() -> int { return g; } fn g() {}", "used as a value");
-    one_error(&in_fn("let x = print;"), "must be called");
+    one_error(&in_fn("let x = print;"), "is used as a value");
 }
 
 #[test]
@@ -281,7 +286,7 @@ fn warning_rules() {
 
 #[test]
 fn errors_are_sorted_by_position() {
-    let program = parse("fn a() { zzz(); }\nfn b() { let x: int = \"s\"; print(x); }\nconst C: int = \"c\";").unwrap();
+    let program = parse(&format!("{PRELUDE}fn a() {{ zzz(); }}\nfn b() {{ let x: int = \"s\"; print(x); }}\nconst C: int = \"c\";")).unwrap();
     let Err(r) = check(&program) else { panic!() };
     let starts: Vec<u32> = r.errors.iter().map(|d| d.span.start).collect();
     let mut sorted = starts.clone();
@@ -345,35 +350,35 @@ fn selectors_are_validated_and_typed() {
     assert_eq!(e.len(), 2, "{e:?}");
     assert!(e[0].contains("unknown selector argument `tpye`"));
     assert!(e[1].contains("positive integer"));
-    one_error(&in_fn("kill(1);"), "expected a `selector` or an `entity`, found `int`");
+    one_error(&in_fn("kill(1);"), "expected a `selector` or an `Entity`, found `int`");
     one_error(&in_fn("let n = @s + 1;"), "cannot apply `+`");
 }
 
 #[test]
 fn builtins() {
-    ok(&in_fn("print(1); print(\"s\"); print(true); say(\"hi\"); tag.add(@s, \"x\"); tag.remove(@s, \"x\"); let b = tag.has(@s, \"x\"); print(b); print(exists(@a)); effect.give(@s, \"speed\", 10s); effect.give(@s, \"speed\", 10s, 2); effect.clear(@s); tp(@s, ~, ~1, ~-1); tp(@s, 1, 2, 3); setblock(~, ~-1, ~, \"minecraft:stone\"); summon(\"minecraft:pig\"); summon(\"minecraft:pig\", ~, ~, ~);"));
-    one_error(&in_fn("say();"), "`say` takes 1 argument but 0 were supplied");
-    one_error(&in_fn("effect.give(@s);"), "takes 2 to 4 arguments but 1 was supplied");
-    one_error(&in_fn("tag.add(@s, \"a b\");"), "invalid tag name");
+    ok(&in_fn("print(1); print(\"s\"); print(true); say(\"hi\"); tag::add(@s, \"x\"); tag::remove(@s, \"x\"); let b = tag::has(@s, \"x\"); print(b); print(exists(@a)); effect::give(@s, \"speed\", 10s); effect::give(@s, \"speed\", 10s, 2); effect::clear(@s); tp(@s, ~, ~1, ~-1); tp(@s, 1, 2, 3); setblock(~, ~-1, ~, \"minecraft:stone\"); summon(\"minecraft:pig\"); summon(\"minecraft:pig\", ~, ~, ~);"));
+    one_error(&in_fn("say();"), "`game::say` takes 1 argument but 0 were supplied");
+    one_error(&in_fn("effect::give(@s);"), "takes 2 to 4 arguments but 1 was supplied");
+    one_error(&in_fn("tag::add(@s, \"a b\");"), "invalid tag name");
     one_error(&in_fn("summon(\"Bad Id\");"), "invalid id");
-    one_error(&in_fn("effect.give(@s, \"speed\", 0);"), "between 1 and 20000000 ticks");
-    one_error(&in_fn("effect.give(@s, \"speed\", 10, 300);"), "amplifier");
+    one_error(&in_fn("effect::give(@s, \"speed\", 0);"), "between 1 and 20000000 ticks");
+    one_error(&in_fn("effect::give(@s, \"speed\", 10, 300);"), "amplifier");
     // text arguments may be computed at run time; a literal is still checked now
-    ok(&in_fn("let m = \"a\"; say(m); tag.add(@s, m); setblock(~, ~, ~, m); summon(m);"));
-    one_error(&in_fn("tag.add(@s, \"bad tag\");"), "tag");
+    ok(&in_fn("let m = \"a\"; say(m); tag::add(@s, m); setblock(~, ~, ~, m); summon(m);"));
+    one_error(&in_fn("tag::add(@s, \"bad tag\");"), "tag");
     // arguments that must be known at compile time reject runtime values
-    one_error(&in_fn("let m = \"a\"; if tag.has(@s, m) { }"), "`m` is not a constant");
+    one_error(&in_fn("let m = \"a\"; if tag::has(@s, m) { }"), "`m` is not a constant");
 }
 
 #[test]
 fn builtin_const_arguments_accept_constants() {
-    ok("const MSG: str = \"hello\"; const T: int = 5s; fn f() { say(MSG); effect.give(@s, \"speed\", T); }");
+    ok("const MSG: str = \"hello\"; const T: int = 5s; fn f() { say(MSG); effect::give(@s, \"speed\", T); }");
     ok("global g: str = \"a\"; fn f() { say(g); }");
 }
 
 #[test]
 fn world_acting_builtins_return_whether_they_worked() {
-    ok(&in_fn("let a = tp(@s, 1, 2, 3); let b = kill(@e[tag=x]); let c = tag.add(@s, \"t\"); let d = effect.give(@s, \"speed\", 10s); let e = setblock(1, 2, 3, \"stone\"); print(a && b && c && d && e);"));
+    ok(&in_fn("let a = tp(@s, 1, 2, 3); let b = kill(@e[tag=x]); let c = tag::add(@s, \"t\"); let d = effect::give(@s, \"speed\", 10s); let e = setblock(1, 2, 3, \"stone\"); print(a && b && c && d && e);"));
     ok(&in_fn("if !tp(@s, 0, 70, 0) { print(\"gone\"); } while kill(@e[tag=x]) { }"));
     // ignoring the result is fine and warns about nothing
     assert!(warnings(&in_fn("tp(@s, 1, 2, 3); kill(@s);")).is_empty());
@@ -384,16 +389,43 @@ fn world_acting_builtins_return_whether_they_worked() {
 }
 
 #[test]
-fn builtins_cannot_be_redefined_or_shadow_modules() {
-    one_error("fn print() {}", "builtin");
-    one_error("global tag: int = 0;", "builtin");
-    one_error("fn effect() {}", "builtin");
+fn builtin_names_are_ordinary_names() {
+    // a glob import never overrides what the module defines itself
+    ok("fn print() {} global tag: int = 0; fn effect() {}");
+    one_error("import game::kill; fn kill() {}", "already used");
+    // and nothing is in scope until it is imported
+    let program = parse("fn f() { print(1); }").unwrap();
+    let Err(r) = check(&program) else { panic!("expected an error") };
+    assert!(r.errors[0].message.contains("cannot find function `print`"), "{:?}", r.errors);
+    assert!(r.errors[0].hint.as_deref().unwrap_or("").contains("std::print"), "{:?}", r.errors);
+}
+
+#[test]
+fn builtin_modules_use_double_colon_paths() {
+    // fully qualified, with no import at all
+    let program = parse("fn f() { std::print(1); game::say(\"x\"); game::tag::add(@s, \"t\"); let e: game::Entity = game::summon(\"minecraft:cow\"); game::effect::clear(e); }").unwrap();
+    assert!(check(&program).is_ok());
+    // module aliases, item imports and globs
+    ok("import game::tag; import game::effect as fx; import game::summon as spawn; import game::Entity as Mob; fn f() { tag::add(@s, \"t\"); fx::clear(@s); let m: Mob = spawn(\"minecraft:cow\"); kill(m); }");
+    ok("import game::tag::{add, has}; fn f() { add(@s, \"t\"); print(has(@s, \"t\")); }");
+    // mistakes
+    one_error(&in_fn("game::nope();"), "module `game` has no function `nope`");
+    one_error(&in_fn("game::tag::nope(@s);"), "module `game::tag` has no function `nope`");
+    one_error(&in_fn("let e: game::Nope = 1;"), "module `game` has no type `Nope`");
+    one_error(&in_fn("nope::say(\"x\");"), "cannot find module `nope`");
+    one_error(&in_fn("game.say(\"x\");"), "`game` is a module");
+    one_error(&in_fn("let e = game::Entity { };"), "cannot be built with a struct literal");
+    one_error("import game::nope;", "cannot find module `game::nope`");
+    one_error("import game::{nope};", "has no item `nope`");
+    one_error("import game::say::*;", "is not a module");
+    one_error(&in_fn("let x = game;"), "is a module, not a value");
 }
 
 #[test]
 fn unknown_builtin_members() {
-    one_error(&in_fn("effect.nope(@s);"), "`effect` has no function `nope`");
-    one_error(&in_fn("let x = effect.give;"), "must be called");
+    one_error(&in_fn("tag::nope(@s);"), "module `game::tag` has no function `nope`");
+    one_error(&in_fn("let x = tag::add;"), "is used as a value");
+    one_error(&in_fn("effect.give(@s, \"speed\", 10);"), "`effect` is a module: its functions are called with `::`");
 }
 
 // ------------------------------------------------------------------ objectives
@@ -413,7 +445,7 @@ fn objectives() {
 #[test]
 fn context_blocks() {
     ok(&in_fn("as @a[tag=ready] at @s positioned ~ ~1 ~ rotated 0 90 align xz anchored eyes { say(\"x\"); } in \"minecraft:the_nether\" { } facing 0 64 0 { }"));
-    one_error(&in_fn("as 1 { }"), "expected a `selector` or an `entity`, found `int`");
+    one_error(&in_fn("as 1 { }"), "expected a `selector` or an `Entity`, found `int`");
     one_error(&in_fn("positioned \"a\" 0 0 { }"), "expected a coordinate");
     one_error(&in_fn("align xx { }"), "invalid axes `xx`");
     one_error(&in_fn("align w { }"), "invalid axes");
@@ -473,7 +505,7 @@ fn bad_types() {
     one_error("fn f(a: list) {}", "`list` takes exactly one type argument");
     one_error("fn f(a: int<str>) {}", "does not take type arguments");
     one_error("struct S { a: list<Nope> }", "unknown type `Nope`");
-    one_error("global g: entity = 0;", "expected `entity`, found `int`");
+    one_error("global g: Entity = 0;", "expected `Entity`, found `int`");
 }
 
 // ------------------------------------------------------------------ entities
@@ -481,18 +513,18 @@ fn bad_types() {
 #[test]
 fn entity_values() {
     // a single-entity selector becomes a handle; `summon` returns one
-    ok(&in_fn("let me = @p; let boss = summon(\"minecraft:zombie\", 1, 64, 2); let e: entity = @s; let n = @n[type=zombie]; let f = @a[limit=1]; print(me); print(boss == e && n != f);"));
-    ok("struct Fight { boss: entity, helpers: list<entity> } fn pick() -> entity { return @r; } fn hit(e: entity) -> bool { return kill(e); } fn f() { let fight = Fight { boss: @p, helpers: [@s, pick()] }; hit(fight.boss); for h in fight.helpers { tp(h, 0, 70, 0); } }");
+    ok(&in_fn("let me = @p; let boss = summon(\"minecraft:zombie\", 1, 64, 2); let e: Entity = @s; let n = @n[type=zombie]; let f = @a[limit=1]; print(me); print(boss == e && n != f);"));
+    ok("struct Fight { boss: Entity, helpers: list<Entity> } fn pick() -> Entity { return @r; } fn hit(e: Entity) -> bool { return kill(e); } fn f() { let fight = Fight { boss: @p, helpers: [@s, pick()] }; hit(fight.boss); for h in fight.helpers { tp(h, 0, 70, 0); } }");
     // and usable as a target anywhere a selector is
-    ok(&in_fn("let b = summon(\"minecraft:pig\"); kill(b); tp(b, 1, 2, 3); effect.give(b, \"speed\", 10s); tag.add(b, \"x\"); as b at b { say(\"hi\"); } print(exists(b)); print(tag.has(b, \"x\"));"));
-    ok("objective pts = \"dummy\"; fn f(b: entity) { pts[b] += 1; print(pts[b]); }");
+    ok(&in_fn("let b = summon(\"minecraft:pig\"); kill(b); tp(b, 1, 2, 3); effect::give(b, \"speed\", 10s); tag::add(b, \"x\"); as b at b { say(\"hi\"); } print(exists(b)); print(tag::has(b, \"x\"));"));
+    ok("objective pts = \"dummy\"; fn f(b: Entity) { pts[b] += 1; print(pts[b]); }");
     // it is its own type
-    one_error(&in_fn("let e: entity = 5; print(e);"), "expected `entity`, found `int`");
-    one_error(&in_fn("let e = @p; let n: int = e; print(n);"), "expected `int`, found `entity`");
-    one_error(&in_fn("let e = @p; let b = e + 1; print(b);"), "cannot apply `+` to `entity` and `int`");
+    one_error(&in_fn("let e: Entity = 5; print(e);"), "expected `Entity`, found `int`");
+    one_error(&in_fn("let e = @p; let n: int = e; print(n);"), "expected `int`, found `Entity`");
+    one_error(&in_fn("let e = @p; let b = e + 1; print(b);"), "cannot apply `+` to `Entity` and `int`");
     // a selector that can match several entities is not one entity
-    one_error(&in_fn("let all: entity = @a; print(all);"), "can match several entities");
-    one_error("fn f(e: entity) {} fn g() { f(@e[type=pig]); }", "can match several entities");
+    one_error(&in_fn("let all: Entity = @a; print(all);"), "can match several entities");
+    one_error("fn f(e: Entity) {} fn g() { f(@e[type=pig]); }", "can match several entities");
     // a plain selector value is still not storable
     one_error(&in_fn("let a = @a[tag=x]; print(1);"), "can match several entities");
 }
@@ -594,8 +626,8 @@ fn for_over_a_selector_rejects_loop_jumps_and_assignment() {
 
 #[test]
 fn for_over_one_entity_selector_works_and_others_error() {
-    ok(&in_fn("for e in @s { tp(e, 0, 70, 0); } for me in @p { tag.add(me, \"seen\"); }"));
-    one_error(&in_fn("let boss = summon(\"minecraft:zombie\", 0, 64, 0); for e in boss { tp(e, 0, 70, 0); }"), "cannot iterate over an `entity`");
+    ok(&in_fn("for e in @s { tp(e, 0, 70, 0); } for me in @p { tag::add(me, \"seen\"); }"));
+    one_error(&in_fn("let boss = summon(\"minecraft:zombie\", 0, 64, 0); for e in boss { tp(e, 0, 70, 0); }"), "cannot iterate over an `Entity`");
     one_error(&in_fn("for x in 1 { print(x); }"), "cannot iterate over `int`");
 }
 
@@ -626,7 +658,13 @@ use super::{ModuleInput, check_modules};
 
 /// Checks `(module name, source)` pairs; the first is the root. Returns (errors with file, hir).
 fn project(files: &[(&str, &str)]) -> Result<Checked, Vec<(usize, String)>> {
-    let programs: Vec<_> = files.iter().map(|(_, src)| parse(src).unwrap_or_else(|e| panic!("parse error: {}\n{src}", e.message))).collect();
+    let programs: Vec<_> = files
+        .iter()
+        .map(|(_, src)| {
+            let src = format!("{PRELUDE}{src}");
+            parse(&src).unwrap_or_else(|e| panic!("parse error: {}\n{src}", e.message))
+        })
+        .collect();
     let inputs: Vec<ModuleInput> = files.iter().zip(&programs).enumerate().map(|(i, ((name, _), program))| ModuleInput { name, file: i, program }).collect();
     check_modules(&inputs).map_err(|r| r.errors.into_iter().map(|d| (d.file, d.message)).collect())
 }
@@ -686,8 +724,8 @@ fn item_imports_and_aliases() {
         ("util", UTIL),
     ]);
     ok_project(&[("main", "import util as u; fn main() { print(u::clamp(1, 0, 2)); }"), ("util", UTIL)]);
-    ok_project(&[("main", "import game::arena; fn main() { arena::start(); }"), ("game::arena", "pub fn start() { print(1); }")]);
-    ok_project(&[("main", "import game::arena as a; fn main() { a::start(); }"), ("game::arena", "pub fn start() { print(1); }")]);
+    ok_project(&[("main", "import maps::arena; fn main() { arena::start(); }"), ("maps::arena", "pub fn start() { print(1); }")]);
+    ok_project(&[("main", "import maps::arena as a; fn main() { a::start(); }"), ("maps::arena", "pub fn start() { print(1); }")]);
 }
 
 fn ok_project(files: &[(&str, &str)]) -> Checked {

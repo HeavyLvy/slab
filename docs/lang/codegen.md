@@ -14,7 +14,7 @@ An `int` stored *inside* a list or struct is an int tag, so values are converted
 
 ## Translations
 
-* **Names**: `[a-z0-9_]` only; module `game::arena` + function `start` -> `game__arena__start`; locals keep their name, shadowed or colliding ones get `_2`, `_3` (`docs/lang/modules.md`).
+* **Names**: `[a-z0-9_]` only; module `maps::arena` + function `start` -> `maps__arena__start`; locals keep their name, shadowed or colliding ones get `_2`, `_3` (`docs/lang/modules.md`).
 * **`break` / `continue`**: the IR has neither. A loop that uses them gets flag variables (`brk`, `cont`). `break` sets `brk` and every statement after one that may jump, in its block, is wrapped in `if brk == 0 && cont == 0`. `continue`'s flag is cleared at the top of each iteration, and a `for` counter's increment sits outside the guard so `continue` still advances.
 * **`while`**: `while c { body }`. If `c` needs statements (a temporary), `c` is recomputed into a flag at the end of each iteration; if the loop also uses `break`, the condition is evaluated *inside* the body so a call in it is not re-run after a break. `loop` is `while true`.
 * **`for i in a..b`**: `let i = a; let end = b; while i < end { body; i += 1 }` (`b` is evaluated once; `..=` uses `<=`).
@@ -22,8 +22,8 @@ An `int` stored *inside* a list or struct is an int tag, so values are converted
 * **List/struct literals**: constant ones become one NBT literal; otherwise a temporary is built with `Append`/`SetField` before the statement that uses it.
 * **Context blocks**: `as @a at @s { .. }` -> `execute as @a at @s run function <block>`; the body is its own function. `return`, `break` and `continue` cannot cross it (checked earlier).
 * **`#[every(N)]`**: a counter global `<fn>__every` plus a tick function `<fn>__every_tick` that increments it and calls the function when it reaches `N`, then resets it. `#[every(1)]` is just `#[tick]`.
-* **Builtins** become typed `datapack::Command`s: `say`, `kill`, `tag.*`, `effect.give` (ticks are rounded up to whole seconds), `effect.clear`, `tp`, `setblock`, `summon`. `print` is `tellraw @a`. `exists(sel)` / `tag.has` become `execute if entity`.
-* **Cleanup** (`docs/lang/memory.md`): `summon` tags the entity `<ns>.owned`, `tag.add` names are remembered, and both feed `_uninstall`.
+* **Builtins** become typed `datapack::Command`s: `say`, `kill`, `tag::*`, `effect::give` (ticks are rounded up to whole seconds), `effect::clear`, `tp`, `setblock`, `summon`. `print` is `tellraw @a`. `exists(sel)` / `tag::has` become `execute if entity`.
+* **Cleanup** (`docs/lang/memory.md`): `summon` tags the entity `<ns>.owned`, `tag::add` names are remembered, and both feed `_uninstall`.
 * **Globals** are initialised once (`_init` only sets one that is unset), so `/reload` keeps their value.
 
 ## Variables inside commands: macros
@@ -33,7 +33,7 @@ A command argument that is only known at run time cannot be written into the com
 | slab | becomes |
 |---|---|
 | `tp(@s, x, 64, z)`, `setblock(x, y, z, ..)`, `summon(id, x, y, z)` | a coordinate that is not a literal is a `Hole` in the typed command |
-| `effect.give(@s, "speed", secs * 20, level)` | duration (ticks, rounded up to seconds) and amplifier may be holes |
+| `effect::give(@s, "speed", secs * 20, level)` | duration (ticks, rounded up to seconds) and amplifier may be holes |
 | `positioned x 64 z { .. }`, `facing`, `rotated` | the whole `execute` command is the macro line |
 | `xs[i]`, `xs[i] = v`, `xs[i] += 1`, `ps[j].a += 10` | `ReadAt` / `WriteAt` with a hole in the NBT path (`xs[$(h0)]`); `xs[-1]` works too |
 
@@ -49,7 +49,7 @@ Constant arguments never use this: `tp(@s, 1, 64, 2)` is the plain command `tele
 
 ## String values
 
-`str` values can be used where a command takes text. Which arguments take a run-time string: `say`, `tag.add`/`tag.remove` (tag name), `effect.give` (effect id), `setblock` (block id), `summon` (entity type). A literal (or a join of literals, folded by the checker) is validated at compile time and rendered into the command as before; anything else becomes a macro hole (`Arg::Hole`, `$(hN)`) whose value is the string stored in `<ns>:macro`. Not yet: selector parts (`tag=` in `@e[..]`), `tag.has`, score-holder names, `pts["name"]`: those still need compile-time text.
+`str` values can be used where a command takes text. Which arguments take a run-time string: `say`, `tag::add`/`tag::remove` (tag name), `effect::give` (effect id), `setblock` (block id), `summon` (entity type). A literal (or a join of literals, folded by the checker) is validated at compile time and rendered into the command as before; anything else becomes a macro hole (`Arg::Hole`, `$(hN)`) whose value is the string stored in `<ns>:macro`. Not yet: selector parts (`tag=` in `@e[..]`), `tag::has`, score-holder names, `pts["name"]`: those still need compile-time text.
 
 `a + b` and `s += x` on strings, and f-strings used as values, become `ir::Expr::Concat(parts)`. The lowering builds the string with one macro: `$data modify storage <ns>:vars <tmp> set value "lit$(h0)lit$(h1)"` (`ModifySource::Template`). A literal part is escaped (`"`, `\`, `$`, control characters); an `int`/`bool`/`entity` part is substituted as its number (`true` is `1`, an entity is its id); a `list` or `struct` part is a compile error. Adjacent literals are merged, nested joins flattened, and an all-literal join is a plain string literal.
 

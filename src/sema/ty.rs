@@ -71,7 +71,7 @@ impl fmt::Display for TyDisplay<'_> {
             Ty::Unit => f.write_str("()"),
             Ty::List(t) => write!(f, "list<{}>", t.display(self.structs)),
             Ty::Struct(id) => f.write_str(self.structs.get(id.0).map_or("?", String::as_str)),
-            Ty::Entity => f.write_str("entity"),
+            Ty::Entity => f.write_str("Entity"),
             Ty::Selector => f.write_str("selector"),
             Ty::Coord => f.write_str("coordinate"),
             Ty::Error => f.write_str("{error}"),

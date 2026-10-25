@@ -23,7 +23,7 @@ pub struct Report {
 
 /// One parsed source file of the project.
 pub struct ModuleInput<'a> {
-    /// `"main"` for the root, `"game::arena"` for `game/arena.slab`.
+    /// `"main"` for the root, `"maps::arena"` for `maps/arena.slab`.
     pub name: &'a str,
     /// Index into the project's `SourceMap`, stamped on every diagnostic from this module.
     pub file: usize,
@@ -72,6 +72,14 @@ enum ValueSym {
     Global(GlobalId),
     Const(usize),
     Objective(ObjectiveId),
+    /// A built-in function: an index into `builtins::BUILTINS`.
+    Builtin(usize),
+}
+
+/// A module named in a path: a project file, or a built-in module (`std`, `game`, ...).
+enum ModRef {
+    User(usize),
+    Builtin(String),
 }
 
 /// What a module can see: its own items, module aliases and imported items.
@@ -87,6 +95,10 @@ struct ModScope<'a> {
     /// `import a::{x};` -> `x` usable unqualified
     imported_values: HashMap<String, ValueSym>,
     imported_types: HashMap<String, StructId>,
+    /// `import game::tag;` -> alias `tag` -> built-in module path `game::tag`
+    builtin_modules: HashMap<String, String>,
+    /// `import game::Entity;` -> `Entity` usable unqualified
+    imported_builtin_types: HashMap<String, Ty>,
 }
 
 struct StructInfo<'a> {
@@ -185,6 +197,8 @@ impl<'a> Checker<'a> {
                 modules: HashMap::new(),
                 imported_values: HashMap::new(),
                 imported_types: HashMap::new(),
+                builtin_modules: HashMap::new(),
+                imported_builtin_types: HashMap::new(),
             })
             .collect();
         let by_name = mods.iter().enumerate().map(|(i, m)| (m.name.clone(), i)).collect();
@@ -270,14 +284,59 @@ impl<'a> Checker<'a> {
         m.types.get(name).map(|v| v.0).or_else(|| m.imported_types.get(name).copied())
     }
 
+    /// The module a path names: an imported project module, an imported alias of (or a full path
+    /// to) a built-in one. Reports a missing module.
+    fn module_ref(&mut self, alias: &ast::Ident) -> Option<ModRef> {
+        let name = alias.name.as_str();
+        let (first, rest) = match name.split_once("::") {
+            Some((f, r)) => (f, Some(r)),
+            None => (name, None),
+        };
+        let m = &self.mods[self.cur];
+        if let Some(&u) = m.modules.get(name) {
+            return Some(ModRef::User(u));
+        }
+        if let Some(base) = m.builtin_modules.get(first) {
+            let full = match rest {
+                Some(r) => format!("{base}::{r}"),
+                None => base.clone(),
+            };
+            if builtins::is_module(&full) {
+                return Some(ModRef::Builtin(full));
+            }
+        }
+        if builtins::is_module(name) {
+            return Some(ModRef::Builtin(name.to_owned()));
+        }
+        self.error_hint(alias.span, format!("cannot find module `{name}`"), format!("import it first: `import {name};`"));
+        None
+    }
+
     fn module_alias(&mut self, alias: &ast::Ident) -> Option<usize> {
-        match self.mods[self.cur].modules.get(&alias.name).copied() {
-            Some(m) => Some(m),
-            None => {
-                self.error_hint(alias.span, format!("cannot find module `{}`", alias.name), format!("import it first: `import {};`", alias.name));
+        match self.module_ref(alias)? {
+            ModRef::User(m) => Some(m),
+            ModRef::Builtin(path) => {
+                self.error(alias.span, format!("`{path}` is a built-in module here, not a project module"));
                 None
             }
         }
+    }
+
+    /// A hint for a bare name that is a builtin which has not been imported.
+    fn builtin_hint(&self, name: &str) -> Option<String> {
+        let b = builtins::BUILTINS.iter().find(|b| b.name == name)?;
+        Some(format!("call it as `{}(...)`, or import it: `import {}::{};`", b.path(), b.module, b.name))
+    }
+
+    /// `base` names a built-in module and is not shadowed by a variable or item (`game.say(..)`
+    /// is a mistake: module paths use `::`).
+    fn module_dot_misuse(&mut self, base: &ast::Expr) -> Option<String> {
+        let ast::ExprKind::Ident(m) = &base.kind else { return None };
+        if self.lookup_value_or_local(m).is_some() {
+            return None;
+        }
+        let known = self.mods[self.cur].builtin_modules.get(m.as_str()).cloned().or_else(|| builtins::is_module(m).then(|| m.clone()));
+        known.map(|_| m.clone())
     }
 
     fn private_item(&mut self, name: &ast::Ident, module: usize) {
@@ -287,7 +346,18 @@ impl<'a> Checker<'a> {
 
     /// `module::name` as a value.
     fn qualified_value(&mut self, module: &ast::Ident, name: &ast::Ident) -> Option<ValueSym> {
-        let m = self.module_alias(module)?;
+        let m = match self.module_ref(module)? {
+            ModRef::User(m) => m,
+            ModRef::Builtin(path) => {
+                return match builtins::member(&path, &name.name) {
+                    Some(i) => Some(ValueSym::Builtin(i)),
+                    None => {
+                        self.error(name.span, format!("module `{path}` has no function `{}`", name.name));
+                        None
+                    }
+                };
+            }
+        };
         match self.mods[m].values.get(&name.name).copied() {
             Some((_, false)) if m != self.cur => {
                 self.private_item(name, m);
@@ -300,6 +370,21 @@ impl<'a> Checker<'a> {
                 None
             }
         }
+    }
+
+    /// The built-in module path `m` names, if it is one and not a project module imported
+    /// under that name. Reports nothing.
+    fn builtin_path(&self, m: &ast::Ident) -> Option<String> {
+        let name = m.name.as_str();
+        if self.mods[self.cur].modules.contains_key(name) {
+            return None;
+        }
+        let (first, rest) = name.split_once("::").map_or((name, None), |(f, r)| (f, Some(r)));
+        let full = match self.mods[self.cur].builtin_modules.get(first) {
+            Some(base) => rest.map_or_else(|| base.clone(), |r| format!("{base}::{r}")),
+            None => name.to_owned(),
+        };
+        builtins::is_module(&full).then_some(full)
     }
 
     /// `module::Name` as a struct type.
@@ -321,7 +406,13 @@ impl<'a> Checker<'a> {
 
     fn find_struct(&mut self, module: Option<&ast::Ident>, name: &ast::Ident) -> Option<StructId> {
         match module {
-            Some(m) => self.qualified_struct(m, name),
+            Some(m) => {
+                if let Some(path) = self.builtin_path(m) {
+                    self.error(name.span, format!("`{path}::{}` cannot be built with a struct literal", name.name));
+                    return None;
+                }
+                self.qualified_struct(m, name)
+            }
             None => match self.lookup_struct(&name.name) {
                 Some(id) => Some(id),
                 None => {
@@ -406,10 +497,6 @@ impl<'a> Checker<'a> {
     }
 
     fn declare_value(&mut self, name: &ast::Ident, sym: ValueSym, public: bool) -> bool {
-        if builtins::lookup(&name.name).is_some() || builtins::is_module(&name.name) {
-            self.error(name.span, format!("`{}` is the name of a builtin and cannot be redefined", name.name));
-            return false;
-        }
         if self.mods[self.cur].values.contains_key(&name.name) {
             self.error(name.span, format!("`{}` is defined more than once", name.name));
             return false;
@@ -425,22 +512,68 @@ impl<'a> Checker<'a> {
             || m.modules.contains_key(name)
             || m.imported_values.contains_key(name)
             || m.imported_types.contains_key(name)
+            || m.builtin_modules.contains_key(name)
+            || m.imported_builtin_types.contains_key(name)
     }
 
     fn resolve_imports(&mut self) {
+        // glob imports go last, so an explicit import or definition wins over them
+        for glob_pass in [false, true] {
+            self.resolve_imports_pass(glob_pass);
+        }
+    }
+
+    fn resolve_imports_pass(&mut self, glob_pass: bool) {
         for mi in 0..self.mods.len() {
             self.cur = mi;
             let program = self.mods[mi].program;
             for item in &program.items {
                 let ast::ItemKind::Import(imp) = &item.kind else { continue };
+                if imp.glob != glob_pass {
+                    continue;
+                }
                 let key = imp.path.iter().map(|i| i.name.as_str()).collect::<Vec<_>>().join("::");
                 let path_span = imp.path[0].span.to(imp.path[imp.path.len() - 1].span);
+                if builtins::is_module(&key) {
+                    self.import_builtin(mi, imp, &key);
+                    continue;
+                }
+                if builtins::is_import_path(&key) {
+                    // `import std::print;` brings one item in, under its own name or an alias
+                    let (parent, last) = key.rsplit_once("::").expect("an item path");
+                    let (name, kind) = builtins::module_items(parent).into_iter().find(|(n, _)| *n == last).expect("an item");
+                    let bound = imp.alias.as_ref().unwrap_or(&imp.path[imp.path.len() - 1]);
+                    if imp.glob || imp.items.is_some() {
+                        self.error(path_span, format!("`{key}` is not a module, so it has no items to import"));
+                    } else if self.name_taken(mi, &bound.name) {
+                        self.error(bound.span, format!("the name `{}` is already used in this module", bound.name));
+                    } else {
+                        self.bind_builtin_as(mi, parent, name, kind, &bound.name);
+                    }
+                    continue;
+                }
                 let Some(&target) = self.by_name.get(&key) else {
                     self.error_hint(path_span, format!("cannot find module `{key}`"), format!("it would be the file `{}.slab` in the project", imp.path.iter().map(|i| i.name.as_str()).collect::<Vec<_>>().join("/")));
                     continue;
                 };
                 if target == mi {
                     self.error(path_span, "a module cannot import itself");
+                    continue;
+                }
+                if imp.glob {
+                    // `import util::*;` brings every public item in, unless the name is already taken
+                    let values: Vec<(String, ValueSym)> = self.mods[target].values.iter().filter(|(_, (_, public))| *public).map(|(n, (s, _))| (n.clone(), *s)).collect();
+                    let types: Vec<(String, StructId)> = self.mods[target].types.iter().filter(|(_, (_, public))| *public).map(|(n, (s, _))| (n.clone(), *s)).collect();
+                    for (n, sym) in values {
+                        if !self.name_taken(mi, &n) {
+                            self.mods[mi].imported_values.insert(n, sym);
+                        }
+                    }
+                    for (n, id) in types {
+                        if !self.name_taken(mi, &n) {
+                            self.mods[mi].imported_types.insert(n, id);
+                        }
+                    }
                     continue;
                 }
                 match &imp.items {
@@ -481,6 +614,64 @@ impl<'a> Checker<'a> {
                         }
                     }
                 }
+            }
+        }
+    }
+
+    /// `import std::*;`, `import game::{summon, Entity};`, `import game::tag;`
+    fn import_builtin(&mut self, mi: usize, imp: &'a ast::ImportDecl, key: &str) {
+        let items = builtins::module_items(key);
+        if imp.glob {
+            for (name, kind) in items {
+                if self.name_taken(mi, name) {
+                    continue;
+                }
+                self.bind_builtin(mi, key, name, kind);
+            }
+            return;
+        }
+        match &imp.items {
+            None => {
+                let alias = imp.alias.as_ref().unwrap_or(&imp.path[imp.path.len() - 1]);
+                if self.name_taken(mi, &alias.name) {
+                    self.error(alias.span, format!("the name `{}` is already used in this module", alias.name));
+                } else {
+                    self.mods[mi].builtin_modules.insert(alias.name.clone(), key.to_owned());
+                }
+            }
+            Some(names) => {
+                for n in names {
+                    let Some((name, kind)) = items.iter().find(|(i, _)| *i == n.name).copied() else {
+                        self.error(n.span, format!("module `{key}` has no item `{}`", n.name));
+                        continue;
+                    };
+                    if self.name_taken(mi, &n.name) {
+                        self.error(n.span, format!("the name `{}` is already used in this module", n.name));
+                        continue;
+                    }
+                    self.bind_builtin(mi, key, name, kind);
+                }
+            }
+        }
+    }
+
+    fn bind_builtin(&mut self, mi: usize, module: &str, name: &'static str, kind: builtins::ItemKind) {
+        self.bind_builtin_as(mi, module, name, kind, name);
+    }
+
+    /// Makes the built-in item `module::name` usable as `bound`.
+    fn bind_builtin_as(&mut self, mi: usize, module: &str, name: &str, kind: builtins::ItemKind, bound: &str) {
+        match kind {
+            builtins::ItemKind::Fn(i) => {
+                self.mods[mi].imported_values.insert(bound.to_owned(), ValueSym::Builtin(i));
+            }
+            builtins::ItemKind::Type => {
+                if let Some(ty) = builtins::builtin_type(module, name) {
+                    self.mods[mi].imported_builtin_types.insert(bound.to_owned(), ty);
+                }
+            }
+            builtins::ItemKind::Module => {
+                self.mods[mi].builtin_modules.insert(bound.to_owned(), format!("{module}::{name}"));
             }
         }
     }
@@ -552,16 +743,27 @@ impl<'a> Checker<'a> {
             ty
         };
         if let Some(m) = &t.module {
+            if let Some(path) = self.builtin_path(m) {
+                return match builtins::builtin_type(&path, name) {
+                    Some(ty) => no_args(self, ty),
+                    None => {
+                        self.error(t.name.span, format!("module `{path}` has no type `{name}`"));
+                        Ty::Error
+                    }
+                };
+            }
             return match self.qualified_struct(m, &t.name) {
                 Some(id) => no_args(self, Ty::Struct(id)),
                 None => Ty::Error,
             };
         }
+        if let Some(ty) = self.mods[self.cur].imported_builtin_types.get(name).cloned() {
+            return no_args(self, ty);
+        }
         match name {
             "int" => no_args(self, Ty::Int),
             "bool" => no_args(self, Ty::Bool),
             "str" => no_args(self, Ty::Str),
-            "entity" => no_args(self, Ty::Entity),
             "list" => {
                 if t.args.len() != 1 {
                     self.error(t.span, "`list` takes exactly one type argument, as in `list<int>`");
@@ -577,7 +779,7 @@ impl<'a> Checker<'a> {
             _ => match self.lookup_struct(name) {
                 Some(id) => no_args(self, Ty::Struct(id)),
                 None => {
-                    self.error_hint(t.span, format!("unknown type `{name}`"), "types are int, bool, str, list<T> and your structs");
+                    self.error_hint(t.span, format!("unknown type `{name}`"), "types are int, bool, str, list<T>, game::Entity and your structs");
                     Ty::Error
                 }
             },
@@ -1207,7 +1409,7 @@ impl<'a> Checker<'a> {
             Ty::List(t) => (**t).clone(),
             Ty::Error => Ty::Error,
             Ty::Entity => {
-                self.error_hint(iter.span, "cannot iterate over an `entity`", "an entity is exactly one: use it directly (`tp(name, ...)`) or act on it with `as`");
+                self.error_hint(iter.span, "cannot iterate over an `Entity`", "an entity is exactly one: use it directly (`tp(name, ...)`) or act on it with `as`");
                 Ty::Error
             }
             other => {
@@ -1244,7 +1446,7 @@ impl<'a> Checker<'a> {
     fn selector_operand(&mut self, e: &'a ast::Expr) -> Expr {
         let h = self.expr(e, None);
         if !matches!(h.ty, Ty::Selector | Ty::Entity | Ty::Error) {
-            let msg = format!("expected a `selector` or an `entity`, found `{}`", self.tn(&h.ty));
+            let msg = format!("expected a `selector` or an `Entity`, found `{}`", self.tn(&h.ty));
             self.error(h.span, msg);
         }
         h
@@ -1460,7 +1662,7 @@ impl<'a> Checker<'a> {
                 Some((v, ty)) => self.const_to_expr(&v, &ty, span),
                 None => Expr::error(span),
             },
-            Some(ValueSym::Fn(_)) => {
+            Some(ValueSym::Fn(_) | ValueSym::Builtin(_)) => {
                 self.error_hint(span, format!("function `{name}` is used as a value"), format!("call it: `{name}(...)`"));
                 Expr::error(span)
             }
@@ -1469,8 +1671,10 @@ impl<'a> Checker<'a> {
                 Expr::error(span)
             }
             None => {
-                if builtins::lookup(name).is_some() || builtins::is_module(name) {
-                    self.error_hint(span, format!("builtin `{name}` must be called"), format!("write `{name}(...)`"));
+                if builtins::is_module(name) || self.mods[self.cur].builtin_modules.contains_key(name) {
+                    self.error_hint(span, format!("`{name}` is a module, not a value"), format!("use one of its items: `{name}::item`"));
+                } else if let Some(hint) = self.builtin_hint(name) {
+                    self.error_hint(span, format!("cannot find `{name}` in this scope"), hint);
                 } else {
                     self.error(span, format!("cannot find `{name}` in this scope"));
                 }
@@ -1588,7 +1792,7 @@ impl<'a> Checker<'a> {
                     if l.ty != r.ty {
                         self.bin_error(op, &l.ty, &r.ty, span);
                     } else if !matches!(l.ty, Ty::Int | Ty::Bool | Ty::Entity) {
-                        let msg = format!("`{}` on `{}` values is not supported yet (only `int`, `bool` and `entity`)", op_str(op), self.tn(&l.ty));
+                        let msg = format!("`{}` on `{}` values is not supported yet (only `int`, `bool` and `Entity`)", op_str(op), self.tn(&l.ty));
                         self.error(span, msg);
                     }
                 }
@@ -1610,11 +1814,10 @@ impl<'a> Checker<'a> {
     }
 
     fn field(&mut self, base: &'a ast::Expr, name: &'a ast::Ident, span: Span) -> Expr {
-        if let ast::ExprKind::Ident(m) = &base.kind
-            && builtins::is_module(m) && self.lookup_value_or_local(m).is_none() {
-                self.error_hint(span, format!("builtin `{m}.{}` must be called", name.name), format!("write `{m}.{}(...)`", name.name));
-                return Expr::error(span);
-            }
+        if let Some(m) = self.module_dot_misuse(base) {
+            self.error_hint(span, format!("`{m}` is a module: its items are reached with `::`"), format!("write `{m}::{}`", name.name));
+            return Expr::error(span);
+        }
         let b = self.expr(base, None);
         match &b.ty {
             Ty::Struct(id) => match self.structs[id.0].fields.iter().position(|(n, _)| *n == name.name) {
@@ -1702,18 +1905,19 @@ impl<'a> Checker<'a> {
     fn call(&mut self, callee: &'a ast::Expr, args: &'a [ast::Expr], span: Span) -> Expr {
         match &callee.kind {
             ast::ExprKind::Ident(name) => {
-                if self.lookup_value_or_local(name).is_some() && !matches!(self.lookup_value(name), Some(ValueSym::Fn(_))) {
+                if self.lookup_value_or_local(name).is_some() && !matches!(self.lookup_value(name), Some(ValueSym::Fn(_) | ValueSym::Builtin(_))) {
                     self.error(callee.span, format!("`{name}` is not a function"));
                     self.args_for_errors(args);
                     return Expr::error(span);
                 }
-                if let Some(ValueSym::Fn(id)) = self.lookup_value(name) {
-                    return self.user_call(id, args, span);
-                }
-                match builtins::lookup(name) {
-                    Some(b) => self.builtin_call(b, args, span),
-                    None => {
-                        self.error(callee.span, format!("cannot find function `{name}`"));
+                match self.lookup_value(name) {
+                    Some(ValueSym::Fn(id)) => self.user_call(id, args, span),
+                    Some(ValueSym::Builtin(i)) => self.builtin_call(&builtins::BUILTINS[i], args, span),
+                    _ => {
+                        match self.builtin_hint(name) {
+                            Some(hint) => self.error_hint(callee.span, format!("cannot find function `{name}`"), hint),
+                            None => self.error(callee.span, format!("cannot find function `{name}`")),
+                        }
                         self.args_for_errors(args);
                         Expr::error(span)
                     }
@@ -1721,6 +1925,7 @@ impl<'a> Checker<'a> {
             }
             ast::ExprKind::Path { module, name } => match self.qualified_value(module, name) {
                 Some(ValueSym::Fn(id)) => self.user_call(id, args, span),
+                Some(ValueSym::Builtin(i)) => self.builtin_call(&builtins::BUILTINS[i], args, span),
                 Some(_) => {
                     self.error(callee.span, format!("`{}::{}` is not a function", module.name, name.name));
                     self.args_for_errors(args);
@@ -1732,18 +1937,11 @@ impl<'a> Checker<'a> {
                 }
             },
             ast::ExprKind::Field { base, name } => {
-                if let ast::ExprKind::Ident(m) = &base.kind
-                    && builtins::is_module(m) && self.lookup_value_or_local(m).is_none() {
-                        let full = format!("{m}.{}", name.name);
-                        return match builtins::lookup(&full) {
-                            Some(b) => self.builtin_call(b, args, span),
-                            None => {
-                                self.error(name.span, format!("`{m}` has no function `{}`", name.name));
-                                self.args_for_errors(args);
-                                Expr::error(span)
-                            }
-                        };
-                    }
+                if let Some(m) = self.module_dot_misuse(base) {
+                    self.error_hint(callee.span, format!("`{m}` is a module: its functions are called with `::`"), format!("write `{m}::{}(...)`", name.name));
+                    self.args_for_errors(args);
+                    return Expr::error(span);
+                }
                 self.method_call(base, name, args, span)
             }
             _ => {
@@ -1799,7 +1997,7 @@ impl<'a> Checker<'a> {
             } else {
                 format!("{} to {} arguments", b.min_args, b.params.len())
             };
-            self.arity_error(&format!("`{}`", b.name), takes, args.len(), span);
+            self.arity_error(&format!("`{}`", b.path()), takes, args.len(), span);
             self.args_for_errors(args);
             return Expr { kind: ExprKind::Error, ty: ret, span };
         }
@@ -1848,9 +2046,9 @@ impl<'a> Checker<'a> {
             hargs.push(h);
         }
         if ok {
-            self.builtin_semantics(b.name, &hargs);
+            self.builtin_semantics(b.id, &hargs);
         }
-        Expr { kind: ExprKind::Builtin { name: b.name, args: hargs }, ty: ret, span }
+        Expr { kind: ExprKind::Builtin { name: b.id, args: hargs }, ty: ret, span }
     }
 
     /// Extra checks on constant arguments (valid ids, ranges).

@@ -1,5 +1,5 @@
 //! Completion: what could be typed at the cursor. Three modes — after `::` (module items
-//! and module paths), after `.` (struct fields, list/string methods, builtin members) and
+//! and module paths, built-in modules included), after `.` (struct fields, list/string methods) and
 //! plain (keywords, builtins, project items). Plus type names after `: `.
 
 use std::path::Path;
@@ -23,15 +23,19 @@ pub fn completions(ws: &Workspace, uri: &str, offset: usize) -> Option<Vec<Item>
     }
     let before = &doc.text[..offset.min(doc.text.len())];
     if before.ends_with("::") {
-        return module_items(state, module, &chain_before(before, before.len() - 2));
+        let chain = chain_before(before, before.len() - 2);
+        let mut items = module_items(state, module, &chain).unwrap_or_default();
+        if let Some(path) = builtin_path(&doc.text, &chain) {
+            items.extend(builtin_module_items(&path));
+        }
+        dedupe(&mut items);
+        return Some(items);
     }
     if before.ends_with('.') {
         // `a..b` is a range, not a member access
         let is_range = before.strip_suffix('.').is_some_and(|b| b.ends_with('.'));
         if !is_range {
-            let items = builtin_members(&ident_before(before, before.len() - 1))
-                .or_else(|| member_items(ws, uri, module, offset))
-                .or_else(|| any_fields(state));
+            let items = member_items(ws, uri, module, offset).or_else(|| any_fields(state));
             return items;
         }
     }
@@ -74,6 +78,7 @@ fn type_items(state: &ProjectState, module: usize) -> Option<Vec<Item>> {
         Item { label: "bool".into(), kind: 14, detail: None, docs: None, insert: None },
         Item { label: "str".into(), kind: 14, detail: None, docs: None, insert: None },
         Item { label: "list<T>".into(), kind: 14, detail: None, docs: None, insert: Some("list<${1:int}>".to_owned()) },
+        Item { label: "game::Entity".into(), kind: 22, detail: Some("a reference to one entity".into()), docs: None, insert: None },
     ];
     for m in &state.modules {
         for def in m.defs.by_kind(DefKind::Struct) {
@@ -91,8 +96,9 @@ fn type_items(state: &ProjectState, module: usize) -> Option<Vec<Item>> {
 fn plain_items(state: &ProjectState, module: usize) -> Option<Vec<Item>> {
     use slab::syntax::token::Kw;
     let mut out: Vec<Item> = Kw::ALL.iter().map(|k| Item { label: k.as_str().to_owned(), kind: 14, detail: None, docs: None, insert: None }).collect();
-    for b in builtins::BUILTINS {
-        out.push(builtin_item(b));
+    // module heads; the functions themselves are offered after `std::` / `game::`
+    for m in ["std", "game"] {
+        out.push(Item { label: m.into(), kind: 9, detail: Some("built-in module".into()), docs: None, insert: None });
     }
     for m in &state.modules {
         for def in m.defs.defs().iter() {
@@ -109,26 +115,62 @@ fn plain_items(state: &ProjectState, module: usize) -> Option<Vec<Item>> {
     Some(out)
 }
 
-/// Members of a builtin module: `effect.` and `tag.`. Labels are the tail (`give`), since
-/// the client completes the word right after the dot.
-fn builtin_members(base: &Option<Ident>) -> Option<Vec<Item>> {
-    let head = base.as_ref()?.content.clone();
-    if !builtins::is_module(&head) {
-        return None;
+/// The built-in module a `::` chain names: a full path (`game::tag`) or one starting with an
+/// alias this file imported (`import game::tag;` -> `tag`). Reads the import lines from the
+/// text, because the file being typed in rarely parses.
+fn builtin_path(text: &str, chain: &[String]) -> Option<String> {
+    let joined = chain.join("::");
+    if builtins::is_module(&joined) {
+        return Some(joined);
     }
-    let prefix = format!("{head}.");
-    Some(
-        builtins::BUILTINS
-            .iter()
-            .filter(|b| b.name.starts_with(&prefix))
-            .map(|b| {
-                let mut item = builtin_item(b);
-                item.label = b.name[prefix.len()..].to_owned();
-                item.insert = item.insert.map(|i| i.strip_prefix(&prefix).unwrap_or(i.as_str()).to_owned());
+    let (head, rest) = (chain.first()?, &chain[1..]);
+    for line in text.lines() {
+        let Some(import) = line.trim().strip_prefix("import ") else { continue };
+        let import = import.trim().trim_end_matches(';').trim();
+        let (path, alias) = match import.split_once(" as ") {
+            Some((p, a)) => (p.trim(), Some(a.trim())),
+            None => (import, None),
+        };
+        let (key, glob) = match path.strip_suffix("::*") {
+            Some(k) => (k, true),
+            None => (path, false),
+        };
+        if !builtins::is_module(key) || key.contains('{') {
+            continue;
+        }
+        let base = if glob {
+            builtins::module_items(key).iter().any(|(n, k)| n == head && *k == builtins::ItemKind::Module).then(|| format!("{key}::{head}"))
+        } else {
+            let alias = alias.or_else(|| key.rsplit("::").next());
+            (alias == Some(head.as_str())).then(|| key.to_owned())
+        };
+        if let Some(base) = base {
+            let full = rest.iter().fold(base, |acc, r| format!("{acc}::{r}"));
+            if builtins::is_module(&full) {
+                return Some(full);
+            }
+        }
+    }
+    None
+}
+
+/// What a built-in module offers after `::`: functions, types and submodules.
+fn builtin_module_items(path: &str) -> Vec<Item> {
+    builtins::module_items(path)
+        .into_iter()
+        .map(|(name, kind)| match kind {
+            builtins::ItemKind::Fn(i) => {
+                let mut item = builtin_item(&builtins::BUILTINS[i], false);
+                item.label = name.to_owned();
                 item
-            })
-            .collect(),
-    )
+            }
+            builtins::ItemKind::Type => {
+                let docs = builtins::TYPES.iter().find(|(m, n, _)| *m == path && *n == name).map(|(_, _, d)| (*d).to_owned());
+                Item { label: name.to_owned(), kind: 22, detail: Some(format!("{path}::{name}")), docs, insert: None }
+            }
+            builtins::ItemKind::Module => Item { label: name.to_owned(), kind: 9, detail: Some(format!("module `{path}::{name}`")), docs: None, insert: None },
+        })
+        .collect()
 }
 
 /// Fields and methods after `a.`: resolved through a repaired HIR when possible.
@@ -175,7 +217,7 @@ fn any_fields(state: &ProjectState) -> Option<Vec<Item>> {
     (!out.is_empty()).then_some(out)
 }
 
-fn builtin_item(b: &builtins::Builtin) -> Item {
+fn builtin_item(b: &builtins::Builtin, qualified: bool) -> Item {
     let mut placeholders = Vec::new();
     for (i, p) in b.params.iter().enumerate() {
         if i < b.min_args {
@@ -186,14 +228,15 @@ fn builtin_item(b: &builtins::Builtin) -> Item {
     let ret = match b.ret {
         builtins::BRet::Unit => "",
         builtins::BRet::Bool => " -> bool",
-        builtins::BRet::Entity => " -> entity",
+        builtins::BRet::Entity => " -> game::Entity",
     };
+    let name = if qualified { b.path() } else { b.name.to_owned() };
     Item {
-        label: b.name.to_owned(),
+        label: name.clone(),
         kind: 3,
-        detail: Some(format!("{}({args}){ret}", b.name)),
+        detail: Some(format!("{}({args}){ret}", b.path())),
         docs: Some(b.docs.to_owned()),
-        insert: Some(format!("{}({args})", b.name)),
+        insert: Some(format!("{name}({args})")),
     }
 }
 

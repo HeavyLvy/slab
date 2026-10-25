@@ -165,7 +165,7 @@ impl ProjectState {
 
     /// An import whose alias (or last path segment) is `hit.name`; None for builtin modules.
     fn import_target(&self, program: &ast::Program, hit: &Hit) -> Option<usize> {
-        if builtins::is_module(&hit.name) {
+        if builtin_module_for(program, &hit.name).is_some() {
             return None;
         }
         for item in &program.items {
@@ -299,18 +299,18 @@ impl ProjectState {
                 let (n, t) = &def.fields[i];
                 let _ = mi;
                 let doc = self.docs_of(mi, *def.field_spans.get(i)?);
-                return Some(match doc {
+                Some(match doc {
                     Some(d) => format!("```slab\n{n}: {t}\n```\nfield of `struct {}`\n\n{d}", def.name),
                     None => format!("```slab\n{n}: {t}\n```\nfield of `struct {}`", def.name),
-                });
+                })
             }
             Role::TypeName => {
                 let (mi, def) = self.struct_by_name(module, program, &hit.name)?;
                 Some(def_hover(&def, &self.modules[mi].name, DefKind::Struct))
             }
             Role::ModuleName | Role::ImportModule => {
-                if builtins::is_module(&hit.name) {
-                    return Some(format!("```slab\n{}\n```\na builtin module; its functions are called dotted, like `{0}.give(...)`", hit.name));
+                if let Some(path) = builtin_module_for(program, &hit.name) {
+                    return Some(format!("```slab\n{path}\n```\na built-in module; reach its items with `::`, like `{path}::item`"));
                 }
                 let target = self.import_target(program, &hit)?;
                 let text = self.module_text(self.modules[target].file_idx);
@@ -459,6 +459,32 @@ fn fn_signature(f: &shir::FnDef, hir: &shir::Hir) -> String {
     format!("fn {}({params}){ret}", f.name)
 }
 
+/// The built-in module a name stands for in this file: a full path (`game::tag`) or an alias
+/// brought in by an `import` (`import game::tag;`, or `game::*`).
+fn builtin_module_for(program: &ast::Program, name: &str) -> Option<String> {
+    if builtins::is_module(name) {
+        return Some(name.to_owned());
+    }
+    for item in &program.items {
+        let ast::ItemKind::Import(imp) = &item.kind else { continue };
+        let key = imp.path.iter().map(|p| p.name.as_str()).collect::<Vec<_>>().join("::");
+        if !builtins::is_module(&key) {
+            continue;
+        }
+        if imp.glob {
+            if builtins::module_items(&key).iter().any(|(n, k)| *n == name && *k == builtins::ItemKind::Module) {
+                return Some(format!("{key}::{name}"));
+            }
+        } else if imp.items.is_none() {
+            let alias = imp.alias.as_ref().map_or_else(|| imp.path.last().map(|p| p.name.as_str()), |a| Some(a.name.as_str()));
+            if alias == Some(name) {
+                return Some(key);
+            }
+        }
+    }
+    None
+}
+
 fn builtin_hover(b: &builtins::Builtin) -> String {
     let (required, optional) = b.params.split_at(b.min_args.min(b.params.len()));
     let params = required.iter().map(|p| p.label()).collect::<Vec<_>>().join(", ");
@@ -473,9 +499,9 @@ fn builtin_hover(b: &builtins::Builtin) -> String {
     let ret = match b.ret {
         BRet::Unit => String::new(),
         BRet::Bool => " -> bool".to_owned(),
-        BRet::Entity => " -> entity".to_owned(),
+        BRet::Entity => " -> game::Entity".to_owned(),
     };
-    format!("```slab\n{}({all}){ret}\n```\nbuiltin — {}", b.name, b.docs)
+    format!("```slab\n{}({all}){ret}\n```\nbuiltin — {}", b.path(), b.docs)
 }
 
 fn method_text(kind: MethodKind) -> String {

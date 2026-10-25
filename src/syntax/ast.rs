@@ -42,14 +42,17 @@ pub enum ItemKind {
     Import(ImportDecl),
 }
 
-/// `import a::b;`, `import a::b as c;`, `import a::b::{x, y};`
+/// `import a::b;`, `import a::b as c;`, `import a::b::{x, y};`, `import a::b::*;`
 #[derive(Clone, Debug, PartialEq)]
 pub struct ImportDecl {
-    /// The module path: `a::b` is the file `a/b.slab` under the project root.
+    /// The module path: `a::b` is the file `a/b.slab` under the project root (`std` and `game`
+    /// are built in).
     pub path: Vec<Ident>,
     pub alias: Option<Ident>,
     /// `Some` for the braced form, which imports these items instead of the module name.
     pub items: Option<Vec<Ident>>,
+    /// The `*` form: every public item of the module, by its own name.
+    pub glob: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -82,7 +85,8 @@ pub struct StructDecl {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Type {
-    /// `utils::Point` has `module == Some(utils)`.
+    /// `utils::Point` has `module == Some(utils)`. A longer path is one identifier joined with
+    /// `::` (`game::tag::Foo` has the module `game::tag`).
     pub module: Option<Ident>,
     pub name: Ident,
     /// `list<int>` has `args == [int]`.
@@ -228,7 +232,7 @@ pub enum ExprKind {
     Compound(Vec<FieldInit>),
     /// `Point { x: 1, y: 2 }`
     StructLit { module: Option<Ident>, name: Ident, fields: Vec<FieldInit> },
-    /// `module::name`
+    /// `module::name`; the module of `a::b::name` is the identifier `a::b`.
     Path { module: Ident, name: Ident },
     Selector(SelectorLit),
     /// `~`, `~1`, `^-2`

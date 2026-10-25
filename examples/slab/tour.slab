@@ -1,4 +1,6 @@
 // A tour of the whole syntax (docs/lang/syntax.md). It only has to parse for now.
+import std::*;
+import game::*;
 
 const MAX_PLAYERS: int = 8;
 const GREETING: str = "welcome";
@@ -36,10 +38,10 @@ fn step() {
 #[every(1s)]
 fn heartbeat() {
     as @a[tag=ready, distance=..50, scores={kills=1..}] at @s {
-        effect.give(@s, "minecraft:speed", 10s);
+        effect::give(@s, "minecraft:speed", 10s);
         points[@s] += 1;
-        if points[@s] >= 10 && !tag.has(@s, "winner") {
-            tag.add(@s, "winner");
+        if points[@s] >= 10 && !tag::has(@s, "winner") {
+            tag::add(@s, "winner");
             arena.winners.push("someone");
         }
     }

@@ -103,13 +103,13 @@
       "name": "constant.language.boolean.slab"
     },
     "builtin-modules": {
-      "comment": "the heads of dotted builtins: effect., tag.",
-      "match": "\\b(?:effect|tag)\\b(?=\\s*\\.)",
+      "comment": "the built-in modules at the head of a path: std::, game::",
+      "match": "\\b(?:std|game)\\b(?=\\s*::)",
       "name": "support.namespace.slab"
     },
     "builtins": {
       "comment": "builtin functions in call position, longest names first",
-      "match": "\\b(?:effect\\.clear|effect\\.give|tag\\.remove|tag\\.add|tag\\.has|setblock|exists|summon|print|kill|say|tp)\\b(?=\\s*\\()",
+      "match": "(?:(?<=::)\\s*(?:setblock|exists|remove|summon|print|clear|kill|give|say|add|has|tp)|\\b(?:setblock|exists|summon|print|kill|say|tp))\\b(?=\\s*\\()",
       "name": "support.function.slab"
     },
     "call": {

@@ -21,7 +21,7 @@ State that **grows without bound** or **outlives its use**. Fixed-size state tha
 | `int` / `bool` locals and temporaries (scoreboard) | **not reset**: a fixed set of slots reused by every call. Resetting them would add commands to every call, and commands per tick are limited. They are removed by `_uninstall` |
 | **globals** | persist on purpose (that is what they are for, also across `/reload`) |
 | **entities** you `summon` | tagged `<ns>.owned`; killed by `_uninstall` |
-| **tags** you add with `tag.add` | removed from every entity by `_uninstall` |
+| **tags** you add with `tag::add` | removed from every entity by `_uninstall` |
 | scores of fake players / entities on your `objective`s | removed with the objective by `_uninstall` |
 
 Locals are dropped at the *function* boundary, not at the end of every `{ }` block: a block's locals share the function's storage slots, so a function that returns early still cleans up everything it declared. A long-running loop inside one function keeps its locals until it finishes.
@@ -45,5 +45,5 @@ A data pack cannot detect that it has been removed, so the call has to be made b
 
 * `lower.rs`: `FnState::drop` holds the Data locals of the function (parameters and every `Let` of kind `Data`, found by a scan of the body before lowering). `emit_drop` is called before each `return 1` (after the return value has been assigned) and at the end of the function body. One local is removed inline; two or more share a generated `<fn>/_drop` function. `release_data` removes a Data temporary when it is released; call-argument temporaries are removed only after being copied into the callee's parameters.
 * Recursion: a callee's exit cleanup removes the *same* slots the caller is using, which is safe because the caller restores its saved slots from the stack right after the call returns.
-* `codegen.rs`: `summon` adds `{Tags:["<ns>.owned"]}` (an NBT argument needs a position, so `~ ~ ~` is used when none is given); `tag.add` names are collected. Both end up in `ir::Program::uninstall`, which `lower.rs` writes into `_uninstall` ahead of the state removal.
+* `codegen.rs`: `summon` adds `{Tags:["<ns>.owned"]}` (an NBT argument needs a position, so `~ ~ ~` is used when none is given); `tag::add` names are collected. Both end up in `ir::Program::uninstall`, which `lower.rs` writes into `_uninstall` ahead of the state removal.
 * Tests: `src/lower.rs` and `src/compile.rs` check the generated commands; `examples/projects/e2e/checks.json` checks on a real server that locals are gone after the functions ran and that `_uninstall` removes objectives, storage, owned entities and tags while an unrelated entity survives.
