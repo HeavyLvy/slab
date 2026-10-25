@@ -142,6 +142,27 @@ mod tests {
     }
 
     #[test]
+    fn every_method_intrinsic_id_is_declared_exactly_once() {
+        let mut declared: Vec<String> = Vec::new();
+        for (_, program) in parsed() {
+            for item in &program.items {
+                let ast::ItemKind::Impl(i) = &item.kind else { continue };
+                for m in &i.methods {
+                    assert!(!m.decl.has_body, "{} has a body: the library's methods are intrinsics so far", m.decl.name.name);
+                    for a in m.attrs.iter().filter(|a| a.name.name == "intrinsic") {
+                        let Some(ast::ExprKind::Str(id)) = a.args.first().map(|e| &e.kind) else { panic!("an intrinsic without a name") };
+                        declared.push(id.clone());
+                    }
+                }
+            }
+        }
+        declared.sort();
+        let mut known: Vec<String> = crate::sema::builtins::METHOD_IDS.iter().map(|s| (*s).to_owned()).collect();
+        known.sort();
+        assert_eq!(declared, known, "the std sources and sema::builtins::METHOD_IDS must list the same methods");
+    }
+
+    #[test]
     fn import_paths() {
         assert!(is_import_path("game"));
         assert!(is_import_path("game::tag"));

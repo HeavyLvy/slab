@@ -242,7 +242,7 @@ pub fn decl_token_for(kind: DefKind) -> (ST, u32) {
         DefKind::Fn => (ST::Function, M_DECLARATION | M_DEFINITION),
         DefKind::Global => (ST::Var, M_STATIC | M_DECLARATION),
         DefKind::Const => (ST::Var, M_STATIC | M_READONLY | M_DECLARATION),
-        DefKind::Struct | DefKind::Enum => (ST::Type, M_DECLARATION | M_DEFINITION),
+        DefKind::Struct | DefKind::Enum | DefKind::Impl => (ST::Type, M_DECLARATION | M_DEFINITION),
         DefKind::Objective => (ST::Prop, M_DECLARATION),
         DefKind::Import => (ST::Namespace, M_DECLARATION),
     }

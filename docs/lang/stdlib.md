@@ -39,6 +39,8 @@ accepted in these embedded modules.
 
 `std.slab` also declares `Option<T>` and `Result<T, E>` as ordinary enums (`docs/lang/enums.md`). The checker makes `Option`, `Result`, `Some`, `None`, `Ok` and `Err` visible in every module (the prelude); the variants of enums declared in the standard library are names of their own.
 
+The methods of both are declared in `impl<T> Option<T>` / `impl<T, E> Result<T, E>` blocks of `std.slab` as body-less `#[intrinsic("option.unwrap")]` functions, with ordinary types (`fn unwrap_or(self, default: T) -> T;`): the receiver's type argument fills in `T`. The names it accepts are `sema::builtins::METHOD_IDS`; `codegen.rs` (`method_intrinsic`) implements them.
+
 ## Compiler types
 
 `#[lang("entity")] pub struct Entity {}` in `game.slab` binds the name `Entity` to the type the

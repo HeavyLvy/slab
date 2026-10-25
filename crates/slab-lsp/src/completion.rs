@@ -172,9 +172,46 @@ fn member_items(ws: &Workspace, uri: &str, module: usize, offset: usize) -> Opti
             out.push(method("len", " -> int", &[]));
         }
         Ty::Str => out.push(method("len", " -> int", &[])),
+        Ty::Enum(..) => {}
+        Ty::Entity => {}
         _ => return None,
     }
-    Some(out)
+    // methods written in `impl` blocks (the receiver's type name prefixes their definitions)
+    let type_name = match ty {
+        Ty::Struct(id) => hir.structs.get(id.0).map(|s| s.name.clone()),
+        Ty::Enum(id, _) => hir.enums.get(id.0).map(|e| e.name.clone()),
+        Ty::Entity => Some("Entity".to_owned()),
+        _ => None,
+    };
+    if let Some(type_name) = type_name {
+        let prefix = format!("{type_name}::");
+        // methods the checker found (the file being typed in often does not parse, so its own
+        // definitions may be missing from the index)
+        for f in &hir.fns {
+            let Some(name) = f.name.strip_prefix(&prefix) else { continue };
+            if f.params.first().is_none_or(|p| f.locals[p.0].name != "self") {
+                continue;
+            }
+            let rest: Vec<String> = f.params.iter().skip(1).map(|p| f.locals[p.0].name.clone()).collect();
+            let placeholders = rest.iter().enumerate().map(|(i, a)| format!("${{{}:{a}}}", i + 1)).collect::<Vec<_>>().join(", ");
+            let args = f.params.iter().skip(1).map(|p| format!("{}: {}", f.locals[p.0].name, display(&f.locals[p.0].ty))).collect::<Vec<_>>().join(", ");
+            let ret = if matches!(f.ret, Ty::Unit) { String::new() } else { format!(" -> {}", display(&f.ret)) };
+            out.push(Item { label: name.to_owned(), kind: 2, detail: Some(format!("fn {name}(self{}{args}){ret}", if args.is_empty() { "" } else { ", " })), docs: None, insert: Some(format!("{name}({placeholders})")) });
+        }
+        for m in &ws.locate(uri)?.0.modules {
+            for def in m.defs.defs() {
+                let Some(name) = def.name.strip_prefix(&prefix) else { continue };
+                if def.kind != DefKind::Fn || !def.detail.contains("(self") || out.iter().any(|i| i.label == name) {
+                    continue;
+                }
+                let args = def.detail.split_once('(').and_then(|(_, r)| r.rsplit_once(')')).map_or("", |(a, _)| a);
+                let rest: Vec<&str> = args.split(',').map(str::trim).skip(1).filter(|a| !a.is_empty()).collect();
+                let placeholders = rest.iter().enumerate().map(|(i, a)| format!("${{{}:{}}}", i + 1, a.split(':').next().unwrap_or("x"))).collect::<Vec<_>>().join(", ");
+                out.push(Item { label: name.to_owned(), kind: 2, detail: Some(def.detail.clone()), docs: def.docs.clone(), insert: Some(format!("{name}({placeholders})")) });
+            }
+        }
+    }
+    (!out.is_empty()).then_some(out)
 }
 
 /// Every struct's fields, when nothing better worked.
@@ -213,6 +250,7 @@ fn item_kind(def: &Def) -> u8 {
         DefKind::Const => 21,
         DefKind::Struct => 22,
         DefKind::Enum => 13,
+        DefKind::Impl => 7,
         DefKind::Objective => 10,
         DefKind::Import => 9,
     }

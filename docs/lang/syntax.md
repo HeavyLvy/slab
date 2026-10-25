@@ -34,7 +34,7 @@ fn fib(n: int) -> int {
 
 * Whitespace separates tokens. Comments: `// to end of line`, `/* block, nests */`.
 * Identifiers: `[A-Za-z_][A-Za-z0-9_]*`. Keywords (cannot be identifiers):
-  `fn let mut if else while loop for in return break continue struct enum global const objective pub import true false as at positioned rotated facing align anchored`.
+  `fn let mut if else while loop for in return break continue struct enum impl global const objective pub import true false as at positioned rotated facing align anchored`.
 * **Paths** use `::`: `util::clamp`, `game::tag::add`, `game::Entity`. `import a::b;`, `import a::b as c;`, `import a::{x, y};` and `import a::*;` (docs/lang/modules.md).
 * Integers: decimal with `_` separators (`1_000`), or hex `0xFF`. They are `i64` in the AST and range-checked to `i32` later.
 * **Time literals**: an integer directly followed by `t` (ticks), `s` (seconds, x20) or `d` (days, x24000): `5t`, `10s`, `1d`. They are plain integers (ticks) with no separate type.
@@ -49,7 +49,7 @@ fn fib(n: int) -> int {
 
 ```
 program     := item*
-item        := attr* 'pub'? ( fn_decl | global_decl | const_decl | struct_decl | enum_decl | objective_decl )
+item        := attr* 'pub'? ( fn_decl | global_decl | const_decl | struct_decl | enum_decl | impl_decl | objective_decl )
              | import_decl                                       // `pub import` is an error
 import_decl := 'import' IDENT ('::' IDENT)* ['as' IDENT] ';'    // the module a/b -> a/b.slab
              | 'import' IDENT ('::' IDENT)* '::' '{' IDENT (',' IDENT)* [','] '}' ';'   // items
@@ -60,6 +60,7 @@ param       := IDENT ':' type
 global_decl := 'global' IDENT ':' type '=' expr ';'
 const_decl  := 'const'  IDENT ':' type '=' expr ';'
 struct_decl := 'struct' IDENT '{' [field_decl (',' field_decl)* [',']] '}'
+impl_decl   := 'impl' ['<' IDENT (',' IDENT)* '>'] type '{' (attr* 'pub'? fn_decl)* '}'    // fn_decl may start with a bare `self`
 enum_decl   := 'enum' IDENT ['<' IDENT (',' IDENT)* '>'] '{' variant (',' variant)* [','] '}'
 variant     := IDENT ['(' type (',' type)* [','] ')']          // payload types; named fields: not yet
 type        := ['const'] [path '::'] IDENT ['<' type (',' type)* '>'] | '(' ')'   // '()' is the unit type

@@ -197,6 +197,7 @@ impl Parser {
             }
             Tok::Kw(Kw::Struct) => ItemKind::Struct(self.struct_decl()?),
             Tok::Kw(Kw::Enum) => ItemKind::Enum(self.enum_decl()?),
+            Tok::Kw(Kw::Impl) => ItemKind::Impl(self.impl_decl()?),
             Tok::Kw(Kw::Objective) => {
                 self.next();
                 let name = self.ident("an objective name")?;
@@ -205,7 +206,7 @@ impl Parser {
                 self.expect_semi()?;
                 ItemKind::Objective { name, criteria }
             }
-            _ => return self.unexpected("an item (`fn`, `global`, `const`, `struct`, `enum`, `objective` or `import`)"),
+            _ => return self.unexpected("an item (`fn`, `global`, `const`, `struct`, `enum`, `impl`, `objective` or `import`)"),
         };
         Ok(Item { attrs, public, kind, span: start.to(self.prev_span()) })
     }
@@ -254,16 +255,26 @@ impl Parser {
         self.expect(&Tok::Kw(Kw::Fn))?;
         let name = self.ident("a function name")?;
         self.expect(&Tok::LParen)?;
-        let params = self.params(&Tok::RParen)?;
+        // a bare `self` first: the receiver of a method, typed `Self`
+        let mut params = Vec::new();
+        let mut has_self = false;
+        if matches!(self.peek(), Tok::Ident(n) if n == "self") && matches!(self.peek_at(1), Tok::Comma | Tok::RParen) {
+            let ident = self.ident("`self`")?;
+            let ty = Type { module: None, name: Ident { name: "Self".into(), span: ident.span }, args: Vec::new(), constant: false, span: ident.span };
+            params.push(Param { name: ident, ty });
+            has_self = true;
+            self.eat(&Tok::Comma);
+        }
+        params.extend(self.params(&Tok::RParen)?);
         self.expect(&Tok::RParen)?;
         let ret = if self.eat(&Tok::Arrow) { Some(self.ty()?) } else { None };
         if self.at(&Tok::Semi) {
             // `fn f(..) -> T;`: implemented by the compiler (`#[intrinsic]`)
             let semi = self.expect_semi()?;
-            return Ok(FnDecl { name, params, ret, body: Block { stmts: Vec::new(), span: semi }, has_body: false });
+            return Ok(FnDecl { name, params, ret, body: Block { stmts: Vec::new(), span: semi }, has_body: false, has_self });
         }
         let body = self.block()?;
-        Ok(FnDecl { name, params, ret, body, has_body: true })
+        Ok(FnDecl { name, params, ret, body, has_body: true, has_self })
     }
 
     /// `name: type, ...` up to (not including) `end`.
@@ -289,6 +300,42 @@ impl Parser {
         let init = self.expr(FREE)?;
         self.expect_semi()?;
         Ok(VarDecl { name, ty, init })
+    }
+
+    /// `impl<T> Name<T> { fn m(self) -> T { .. } pub fn make() -> Name<T> { .. } }`
+    fn impl_decl(&mut self) -> R<ImplDecl> {
+        self.expect(&Tok::Kw(Kw::Impl))?;
+        let mut generics = Vec::new();
+        if self.eat(&Tok::Lt) {
+            loop {
+                generics.push(self.ident("a type parameter name")?);
+                if !self.eat(&Tok::Comma) {
+                    break;
+                }
+            }
+            self.expect(&Tok::Gt)?;
+        }
+        let target = self.ty()?;
+        self.expect(&Tok::LBrace)?;
+        let mut methods = Vec::new();
+        while !self.at(&Tok::RBrace) {
+            if self.at(&Tok::Eof) {
+                return Err(Diagnostic::new("unclosed `impl` block, expected `}`", target.span).hint("this `impl` is never closed"));
+            }
+            let mut attrs = Vec::new();
+            while self.at(&Tok::Hash) {
+                attrs.push(self.attr()?);
+            }
+            let start = attrs.first().map(|a| a.span).unwrap_or_else(|| self.span());
+            let public = self.eat(&Tok::Kw(Kw::Pub));
+            if !self.at(&Tok::Kw(Kw::Fn)) {
+                return self.unexpected("a method (`fn`) or `}`");
+            }
+            let decl = self.fn_decl()?;
+            methods.push(ImplFn { attrs, public, decl, span: start.to(self.prev_span()) });
+        }
+        self.expect(&Tok::RBrace)?;
+        Ok(ImplDecl { generics, target, methods })
     }
 
     /// `enum Name<T, U> { Unit, Tuple(T, int), }`
@@ -1232,6 +1279,28 @@ mod tests {
         assert!(err("enum E { A { x: int } }").message.contains("not supported yet"));
         assert!(err("enum { A }").message.contains("an enum name"));
         assert!(err("enum E<> { A }").message.contains("type parameter"));
+    }
+
+    #[test]
+    fn impl_blocks_and_self() {
+        let p = ok("impl<T, E> Result<T, E> { #[intrinsic(\"x\")] pub fn ok(self) -> Option<T>; fn make(a: int) -> Self { return a; } pub fn both(self, other: Self, k: int) {} }");
+        let ItemKind::Impl(i) = &p.items[0].kind else { panic!() };
+        assert_eq!(i.generics.iter().map(|g| g.name.as_str()).collect::<Vec<_>>(), ["T", "E"]);
+        assert_eq!((i.target.name.name.as_str(), i.target.args.len()), ("Result", 2));
+        assert_eq!(i.methods.len(), 3);
+        let ok = &i.methods[0];
+        assert!(ok.public && ok.decl.has_self && !ok.decl.has_body && ok.attrs.len() == 1);
+        assert_eq!(ok.decl.params.len(), 1);
+        assert_eq!((ok.decl.params[0].name.name.as_str(), ok.decl.params[0].ty.name.name.as_str()), ("self", "Self"));
+        let make = &i.methods[1];
+        assert!(!make.public && !make.decl.has_self && make.decl.has_body);
+        let both = &i.methods[2];
+        assert_eq!(both.decl.params.iter().map(|p| p.name.name.as_str()).collect::<Vec<_>>(), ["self", "other", "k"]);
+        // `self` is only the receiver when it stands alone first
+        assert!(!func("fn f(x: int, self: int) {}").has_self);
+        assert!(err("impl Foo { let x = 1; }").message.contains("a method"));
+        assert!(err("impl Foo { fn f() {}").message.contains("unclosed"));
+        assert!(err("impl { }").message.contains("a type"));
     }
 
     #[test]

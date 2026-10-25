@@ -12,6 +12,8 @@ pub enum DefKind {
     Const,
     Struct,
     Enum,
+    /// An `impl` block; the methods are further `Fn` entries named `Type::method`.
+    Impl,
     Objective,
     Import,
 }
@@ -43,6 +45,7 @@ pub struct DefIndex {
 impl DefIndex {
     pub fn build(program: &ast::Program) -> DefIndex {
         let mut defs = Vec::new();
+        let mut method_defs = Vec::new();
         for item in &program.items {
             let mut entry = item.attrs.iter().find_map(entry_attr_name);
             let mut def = Def {
@@ -106,6 +109,16 @@ impl DefIndex {
                         .collect();
                     def.detail = format!("enum {}{generics} {{ {} }}", e.name.name, variants.join(", "));
                 }
+                ItemKind::Impl(i) => {
+                    def.kind = DefKind::Impl;
+                    def.name = format!("impl {}", type_string(&i.target));
+                    def.name_span = i.target.span;
+                    let generics = if i.generics.is_empty() { String::new() } else { format!("<{}>", i.generics.iter().map(|g| g.name.as_str()).collect::<Vec<_>>().join(", ")) };
+                    def.detail = format!("impl{generics} {}", type_string(&i.target));
+                    for m in &i.methods {
+                        method_defs.push(method_def(&i.target.name.name, m));
+                    }
+                }
                 ItemKind::Objective { name, criteria } => {
                     def.kind = DefKind::Objective;
                     def.name = name.name.clone();
@@ -130,6 +143,8 @@ impl DefIndex {
             }
             defs.push(def);
         }
+        // the methods of every `impl`, after the one-per-item entries
+        defs.extend(method_defs);
         DefIndex { defs }
     }
 
@@ -150,6 +165,30 @@ impl DefIndex {
         for def in &mut self.defs {
             def.docs = crate::docs::doc_before(text, def.name_span.start as usize);
         }
+    }
+}
+
+/// A method as a definition named `Type::method`.
+fn method_def(type_name: &str, m: &ast::ImplFn) -> Def {
+    let f = &m.decl;
+    let params = f
+        .params
+        .iter()
+        .map(|p| if f.has_self && p.name.name == "self" { "self".to_owned() } else { format!("{}: {}", p.name.name, type_string(&p.ty)) })
+        .collect::<Vec<_>>()
+        .join(", ");
+    let ret = f.ret.as_ref().map_or_else(String::new, |t| format!(" -> {}", type_string(t)));
+    Def {
+        name: format!("{type_name}::{}", f.name.name),
+        kind: DefKind::Fn,
+        name_span: f.name.span,
+        full_span: m.span,
+        public: m.public,
+        entry: None,
+        detail: format!("fn {}({params}){ret}", f.name.name),
+        docs: None,
+        fields: Vec::new(),
+        field_spans: Vec::new(),
     }
 }
 

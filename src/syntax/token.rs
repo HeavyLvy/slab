@@ -16,6 +16,7 @@ pub enum Kw {
     Continue,
     Struct,
     Enum,
+    Impl,
     Global,
     Const,
     Objective,
@@ -49,6 +50,7 @@ impl Kw {
             "continue" => Kw::Continue,
             "struct" => Kw::Struct,
             "enum" => Kw::Enum,
+            "impl" => Kw::Impl,
             "global" => Kw::Global,
             "const" => Kw::Const,
             "objective" => Kw::Objective,
@@ -83,6 +85,7 @@ impl Kw {
             Kw::Continue => "continue",
             Kw::Struct => "struct",
             Kw::Enum => "enum",
+            Kw::Impl => "impl",
             Kw::Global => "global",
             Kw::Const => "const",
             Kw::Objective => "objective",
@@ -117,6 +120,7 @@ impl Kw {
         Kw::Continue,
         Kw::Struct,
         Kw::Enum,
+        Kw::Impl,
         Kw::Global,
         Kw::Const,
         Kw::Objective,
@@ -136,7 +140,7 @@ impl Kw {
     /// The broad role of a keyword: how highlighting scopes and completion group it.
     pub fn class(self) -> KwClass {
         match self {
-            Kw::Fn | Kw::Let | Kw::Struct | Kw::Enum | Kw::Global | Kw::Const | Kw::Objective | Kw::Import | Kw::Pub => KwClass::Declaration,
+            Kw::Fn | Kw::Let | Kw::Struct | Kw::Enum | Kw::Impl | Kw::Global | Kw::Const | Kw::Objective | Kw::Import | Kw::Pub => KwClass::Declaration,
             Kw::If | Kw::Else | Kw::While | Kw::Loop | Kw::For | Kw::In | Kw::Return | Kw::Break | Kw::Continue => KwClass::Control,
             Kw::Mut => KwClass::Modifier,
             Kw::As | Kw::At | Kw::Positioned | Kw::Rotated | Kw::Facing | Kw::Align | Kw::Anchored => KwClass::Context,

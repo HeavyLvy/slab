@@ -38,6 +38,7 @@ pub enum ItemKind {
     Const(VarDecl),
     Struct(StructDecl),
     Enum(EnumDecl),
+    Impl(ImplDecl),
     /// `objective kills = "playerKillCount";`
     Objective { name: Ident, criteria: Expr },
     Import(ImportDecl),
@@ -65,6 +66,27 @@ pub struct FnDecl {
     /// False for `fn f(..) -> T;`, a declaration whose implementation is provided by the
     /// compiler (`#[intrinsic]`, only in the standard library); `body` is then empty.
     pub has_body: bool,
+    /// The first parameter is a bare `self` (only meaningful inside an `impl`); it is also
+    /// `params[0]`, typed `Self`.
+    pub has_self: bool,
+}
+
+/// `impl<T> Name<T> { methods }`: functions attached to a type.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ImplDecl {
+    /// Type parameters of the impl (`T` in `impl<T> Option<T>`).
+    pub generics: Vec<Ident>,
+    /// The type the methods belong to.
+    pub target: Type,
+    pub methods: Vec<ImplFn>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ImplFn {
+    pub attrs: Vec<Attr>,
+    pub public: bool,
+    pub decl: FnDecl,
+    pub span: Span,
 }
 
 #[derive(Clone, Debug, PartialEq)]

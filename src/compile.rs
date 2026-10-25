@@ -15,6 +15,10 @@ pub struct Options {
     /// directory's name.
     pub namespace: Option<String>,
     pub description: Option<String>,
+    /// A failed `unwrap()` also runs `datapack disable` for the pack (`--abort-on-unwrap`).
+    pub abort_on_unwrap: bool,
+    /// The pack id `datapack disable` uses; defaults to `file/<namespace>` (`--pack-id`).
+    pub pack_id: Option<String>,
 }
 
 pub struct Compiled {
@@ -106,7 +110,8 @@ pub fn compile(entry: &Path, opts: &Options) -> Result<Compiled, CompileError> {
     validate_namespace(&namespace).map_err(CompileError::Io)?;
     let description = opts.description.clone().unwrap_or_else(|| format!("{namespace} (compiled by slab)"));
 
-    let program = match codegen::generate(&checked.hir, &namespace, &description) {
+    let gen_opts = codegen::GenOptions { sources: &project.sources, abort_on_unwrap: opts.abort_on_unwrap, pack_id: opts.pack_id.clone().unwrap_or_else(|| format!("file/{namespace}")) };
+    let program = match codegen::generate(&checked.hir, &namespace, &description, &gen_opts) {
         Ok(p) => p,
         Err(errors) => return Err(CompileError::Source { sources: project.sources, errors, warnings: checked.warnings }),
     };
@@ -456,6 +461,78 @@ mod tests {
         let c = build_main("fn f(e: Entity) -> bool { return e == @s; }");
         let f = fn_text(&c, "t:f");
         assert!(f.contains("execute as @s run function t:_ensure_id") && f.contains("if score #f.v_e t = #f.t_0 t"), "{f}");
+    }
+
+    fn build_with(src: &str, abort_on_unwrap: bool, pack_id: Option<&str>) -> Compiled {
+        let d = Dir::new("t", &[("main.slab", &format!("{PRELUDE}{src}"))]);
+        match compile(&d.0, &Options { namespace: Some("t".into()), abort_on_unwrap, pack_id: pack_id.map(str::to_owned), ..Options::default() }) {
+            Ok(c) => c,
+            Err(e) => panic!("{}", e.render()),
+        }
+    }
+
+    #[test]
+    fn methods_are_functions_named_after_their_type_and_called_with_the_receiver_first() {
+        let c = build_main("struct P { x: int } impl P { fn new(x: int) -> P { return P { x: x }; } fn get(self, k: int) -> int { return self.x + k; } } fn f() -> int { let p = P::new(1); return p.get(2); }");
+        let f = fn_text(&c, "t:f");
+        assert!(f.contains("scoreboard players set #p__new.v_x t 1\nfunction t:p__new\n"), "{f}");
+        // `self` is the first parameter: the receiver is copied into it, then the other arguments
+        assert!(f.contains("data modify storage t:vars p__get.v_self set from storage t:vars f.v_p\nscoreboard players set #p__get.v_k t 2\nfunction t:p__get\n"), "{f}");
+        assert!(fn_text(&c, "t:p__get").contains("get storage t:vars p__get.v_self.x"), "{}", fn_text(&c, "t:p__get"));
+    }
+
+    #[test]
+    fn option_methods_read_the_variant_tag() {
+        let c = build_main("fn f(o: Option<int>, r: Result<int, str>) -> bool { return o.is_some() && o.is_none() || r.is_ok() && r.is_err(); }");
+        let f = fn_text(&c, "t:f");
+        // the tag is read into a score, then compared with the variant's index
+        assert!(f.contains("run data get storage t:vars f.v_o.t\n") && f.contains("run data get storage t:vars f.v_r.t\n"), "{f}");
+        for want in ["if score #f.t_1 t matches 1 if score #f.t_2 t matches 0", "if score #f.t_1 t matches 0 if score #f.t_2 t matches 1"] {
+            assert!(f.contains(want), "{want}: {f}");
+        }
+        // unwrap_or evaluates the default, then takes the value when there is one
+        let c = build_main("fn f(o: Option<int>) -> int { return o.unwrap_or(9); }");
+        let f = fn_text(&c, "t:f");
+        assert!(f.contains("scoreboard players set #f.v_or t 9\n") && f.contains("execute if score #f.t_0 t matches 1 run function t:f/b0"), "{f}");
+        assert_eq!(fn_text(&c, "t:f/b0"), "execute store result score #f.v_or t run data get storage t:vars f.v_o.f0\n");
+        // ok() / err() convert between the two enums
+        let c = build_main("fn f(r: Result<int, str>) { let a = r.ok(); let b = r.err(); print(a); print(b); }");
+        let f = fn_text(&c, "t:f");
+        assert!(f.contains("f.v_opt set value {t:0}") && f.contains("f.v_opt_2 set value {t:0}"), "{f}");
+        assert!(fn_text(&c, "t:f/b0").contains("f.v_opt set value {t:1}\ndata modify storage t:vars f.v_opt.f0 set from storage t:vars f.v_r.f0"), "{}", fn_text(&c, "t:f/b0"));
+        assert!(fn_text(&c, "t:f/b1").contains("f.v_opt_2.f0 set from storage t:vars f.v_r.f0"), "{}", fn_text(&c, "t:f/b1"));
+    }
+
+    #[test]
+    fn a_failed_unwrap_tells_the_players_and_returns() {
+        let c = build_main("fn f(o: Option<int>) -> int { return o.unwrap(); }");
+        let f = fn_text(&c, "t:f");
+        assert!(f.contains("execute unless score #f.t_0 t matches 1 if function t:f/b0 run return 1\nexecute store result score #ret t run data get storage t:vars f.v_o.f0\n"), "{f}");
+        let b = fn_text(&c, "t:f/b0");
+        assert!(b.contains("tellraw @a {text:\"\",extra:[\"slab: unwrap on None (main.slab:1)\"]}\n") && b.contains("scoreboard players set #ret t 0\n") && b.ends_with("return 1\n"), "{b}");
+        // the message of `expect`, a string that may be computed
+        let c = build_main("fn f(o: Result<str, int>, why: str) -> str { return o.expect(why); }");
+        let b = fn_text(&c, "t:f/b0");
+        assert!(b.contains("tellraw @a {text:\"\",extra:[\"slab: \",{nbt:\"f.v_why\",storage:\"t:vars\"},\" (main.slab:1)\"]}"), "{b}");
+        assert!(b.contains("data modify storage t:ret v set value \"\""), "a string function returns an empty string: {b}");
+        // a function that returns nothing just returns
+        let c = build_main("fn f(o: Option<int>) { o.unwrap(); }");
+        let b = fn_text(&c, "t:f/b0");
+        assert!(!b.contains("#ret") && b.ends_with("return 1\n"), "{b}");
+        // a context block cannot be left: it only reports
+        let c = build_main("fn f(o: Option<int>) { as @a { print(o.unwrap()); } }");
+        let all: String = (0..3).filter_map(|i| c.pack.function(&ResourceLocation::parse(&format!("t:f/b{i}")).unwrap()).map(|f| f.render())).collect();
+        assert!(all.contains("unwrap on None") && !all.contains("return"), "{all}");
+    }
+
+    #[test]
+    fn a_failed_unwrap_can_stop_the_pack() {
+        let c = build_with("fn f(o: Option<int>) { o.unwrap(); }", true, None);
+        assert!(fn_text(&c, "t:f/b0").contains("datapack disable \"file/t\"\n"), "{}", fn_text(&c, "t:f/b0"));
+        let c = build_with("fn f(o: Option<int>) { o.unwrap(); }", true, Some("file/my pack.zip"));
+        assert!(fn_text(&c, "t:f/b0").contains("datapack disable \"file/my pack.zip\"\n"), "{}", fn_text(&c, "t:f/b0"));
+        let c = build_with("fn f(o: Option<int>) { o.unwrap(); }", false, None);
+        assert!(!fn_text(&c, "t:f/b0").contains("datapack"), "{}", fn_text(&c, "t:f/b0"));
     }
 
     #[test]

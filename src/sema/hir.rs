@@ -160,6 +160,9 @@ pub enum MethodKind {
     ListPush,
     ListLen,
     StrLen,
+    /// A method of the standard library the compiler implements (`option.unwrap`,
+    /// `result.is_ok`, ...); the code generator matches on the id.
+    Intrinsic(&'static str),
 }
 
 #[derive(Clone, Debug, PartialEq)]

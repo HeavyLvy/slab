@@ -16,7 +16,7 @@ fn demo() {
 }
 ```
 
-Every variant is written `Enum::Variant`, with the payload in parentheses. Variants are compared with `==` / `!=` like any stored value. (Looking inside a value, `match`, is the next step in `docs/lang/plan-enums-results.md`; today an enum can be built, stored, passed, returned, printed and compared.)
+Every variant is written `Enum::Variant`, with the payload in parentheses. Variants are compared with `==` / `!=` like any stored value. (Looking inside a value with `match` is the next step in `docs/lang/plan-enums-results.md`; until then `Option` and `Result` have methods, below, and an enum can be built, stored, passed, returned, printed and compared. Your own enums can have methods too: `impl Shape { fn area(self) -> int { .. } }`, see `docs/lang/semantics.md`.)
 
 ## Generic enums
 
@@ -43,6 +43,24 @@ pub enum Result<T, E> { Ok(T), Err(E) }
 
 `Option`, `Result`, `Some`, `None`, `Ok` and `Err` are the **prelude**: they are visible in every module without an import (a definition of your own with the same name wins). They are also reachable as `Option::Some(1)`, `std::Option::None` and `import std::*;`. The variants of enums in the standard library are names of their own (`Some`, not only `Option::Some`); the variants of your enums are not, they are always written `Shape::Dot`.
 
+### Methods
+
+| `Option<T>` | |
+|---|---|
+| `is_some()`, `is_none()` | `bool` |
+| `unwrap()` | the `T` inside `Some` |
+| `unwrap_or(default)` | the `T` inside, or `default` |
+| `expect("message")` | like `unwrap`, with your message |
+
+| `Result<T, E>` | |
+|---|---|
+| `is_ok()`, `is_err()` | `bool` |
+| `unwrap()`, `expect("message")` | the `T` inside `Ok` |
+| `unwrap_or(default)` | the `T` inside, or `default` |
+| `ok()`, `err()` | `Option<T>`, `Option<E>` |
+
+`default` is always evaluated. `unwrap()` and `expect()` on `None` / `Err` have no panic to use: they print `slab: unwrap on None (main.slab:12)` to chat and return from the function (zero value of its return type; a context block, which cannot be left, only prints). Built with `--abort-on-unwrap` they also stop the pack (`datapack disable "file/<namespace>"`, or the `--pack-id` you give).
+
 ## Constants and globals
 
 Enum values can be constants and global initialisers when their payload is constant: `global start: Option<int> = Some(7);`, `const NOTHING: Option<str> = None;`.
@@ -53,4 +71,4 @@ A value is a compound in command storage: `{t: <variant index>, f0: .., f1: ..}`
 
 ## What comes next
 
-`match` and `if let` to take a value apart, `impl` blocks with methods (`is_some`, `unwrap`, ...), commands that return `Result`, and `game::run_command`. The plan is in `docs/lang/plan-enums-results.md`.
+`match` and `if let` to take a value apart, commands that return `Result`, and `game::run_command`. The plan is in `docs/lang/plan-enums-results.md`.

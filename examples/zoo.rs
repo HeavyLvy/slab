@@ -317,6 +317,14 @@ fn holes() -> Function {
     f
 }
 
+/// Commands that must parse but would end the run if executed (never called from `zoo:all`).
+fn never() -> Function {
+    let mut f = Function::new();
+    f.comment("stops a pack, so the zoo only checks that the line parses");
+    f.push(Command::DatapackDisable("file/zoo".into()));
+    f
+}
+
 fn main() {
     let out: PathBuf = std::env::args().nth(1).unwrap_or_else(|| "target/zoo".into()).into();
     let mut pack = DataPack::new("slab syntax zoo");
@@ -335,7 +343,7 @@ fn main() {
         pack.add_function(id, f).unwrap();
     }
     all.push(Command::Function { function: FunctionRef::Id(rl("zoo:holes")), args: FnArgs::Inline(Compound::new().with("h0", 3).with("h1", 2).with("h2", 5).with("h3", "cow").with("h4", 1).with("h5", 0)) });
-    for (name, f) in [("returns", returns()), ("returns_all", returns_all()), ("mac", mac()), ("holes", holes())] {
+    for (name, f) in [("returns", returns()), ("returns_all", returns_all()), ("mac", mac()), ("holes", holes()), ("never", never())] {
         pack.add_function(ResourceLocation::new("zoo", name).unwrap(), f).unwrap();
     }
     pack.add_function(rl("zoo:all"), all).unwrap();

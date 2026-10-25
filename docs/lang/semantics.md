@@ -50,6 +50,15 @@ Semantic analysis runs over the whole project at once: it first registers every 
 
 ## Builtins (`sema/builtins.rs`)
 
+**Methods** (`impl`): `impl Point { fn new(x: int, y: int) -> Point { .. } fn sum(self) -> int { .. } pub fn scaled(self, k: int) -> Self { .. } }` attaches functions to a struct or enum. A function whose first parameter is a bare `self` is a method: `p.sum()` is the call `Point::sum(p)` with the receiver as `self`; one without is an associated function, called `Point::new(1, 2)`. `Self` stands for the type inside the block (also `Self { x: 1 }` and `Self::Variant`). Rules:
+* the `impl` must be in the module that declares the type; a method is private to its module unless it is `pub`;
+* `self` is a copy like every argument, so a method cannot change the receiver (assigning to `self` only changes the copy); return the new value instead;
+* a method and a variant of the same enum cannot share a name, and two methods of a type cannot either;
+* methods of a *generic* type (`impl<T> Option<T>`) can only be the standard library's built-in ones (below); there are no generic functions yet;
+* there is no trait or interface system: methods are looked up by the receiver's type.
+
+**`Option` and `Result` methods** (built into the standard library, `docs/lang/enums.md`): `is_some`, `is_none`, `unwrap`, `unwrap_or(default)`, `expect(message)` for `Option<T>`; `is_ok`, `is_err`, `unwrap`, `unwrap_or(default)`, `expect(message)`, `ok()` (-> `Option<T>`), `err()` (-> `Option<E>`) for `Result<T, E>`. `unwrap` and `expect` on a missing value cannot panic in a data pack: they print `slab: unwrap on None (main.slab:12)` (or your `expect` message) to chat and return from the function with a zero value of its return type. `slab build --abort-on-unwrap` also runs `datapack disable "file/<namespace>"` (`--pack-id` names another pack), which stops the whole pack. Inside a context block (`as @a { }`), which a `return` cannot leave, they only print.
+
 **Equality** (`==`, `!=`): both sides must have the same type, which can be any storable type: `int`, `bool`, `Entity`, `str`, `list<T>` and structs (compared by contents, field by field and element by element; order matters for lists). A selector that matches one entity may stand on either side of an `Entity` (`boss == @s`, `@s != @p`): it is converted to a handle first, and a selector that can match several entities is the usual error. `int` and `bool` compare as scores; everything else is compared in command storage (below). Selectors and `()` themselves cannot be compared.
 
 Builtins that act on the world return `bool`: **did the command work?** `if !tp(boss, 0, 70, 0) { ... }` catches a missing target. Ignoring the result is free (the plain command is emitted); using it costs one `execute store success`. "Worked" is Minecraft's own notion: it targeted something and changed something, so `tag::add` fails if the tag is already there, `setblock` fails if the block is unchanged, `kill`/`tp`/`effect::give` fail when nothing matches, and a run-time value out of range fails that one command.

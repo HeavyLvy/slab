@@ -141,6 +141,46 @@ fn enums_have_symbols_hover_and_definitions() {
 }
 
 #[test]
+fn methods_have_symbols_hover_definitions_and_completion() {
+    let main = "import std::print;\nstruct P { x: int }\n\nimpl P {\n    /// The x coordinate.\n    fn get(self) -> int { return self.x; }\n    fn add(self, k: int) -> int { return self.x + k; }\n}\n\nfn f(p: P) {\n    let o = Some(1);\n    print(p.get());\n    print(o.unwrap());\n    print(p.);\n}\n";
+    let d = Dir::new("methods", &[("main.slab", main)]);
+    let mut ws = Workspace::default();
+    let uri = file_uri(&d.0.join("main.slab"));
+    ws.open(&uri, main, 1);
+    // the file does not parse while `p.` is unfinished: check the other features on a complete one
+    let good = main.replace("    print(p.);\n", "");
+    let publishes = ws.change(&uri, &good, 2);
+    assert!(publishes[0].diagnostics.is_empty(), "{:?}", publishes[0].diagnostics.iter().map(|x| x.message.clone()).collect::<Vec<_>>());
+    let (state, _doc, module) = ws.locate(&uri).unwrap();
+    let module = module.unwrap();
+    let symbols = symbols::document_symbols(state, module, Enc::Utf16);
+    let imp = symbols.iter().find(|s| s.name == "impl P").expect("the impl block is in the outline");
+    assert_eq!(imp.children.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(), ["get", "add"]);
+    // hover on a method call: its signature and docs; on a built-in method: the std declaration
+    let at = good.find("p.get()").unwrap() + 2;
+    let hover = state.hover(module, at).expect("hover");
+    assert!(hover.contains("fn get(self) -> int") && hover.contains("The x coordinate."), "{hover}");
+    let at = good.find("o.unwrap()").unwrap() + 2;
+    let hover = state.hover(module, at).expect("hover");
+    assert!(hover.contains("fn unwrap(self) -> T") && hover.contains("in `std`"), "{hover}");
+    // go to definition lands on the method name, in the user's file or in std.slab
+    let def = state.goto_definition(module, good.find("p.get()").unwrap() + 2).expect("resolves");
+    assert_eq!(&state.sources.files[def.file_idx].text[def.span.start as usize..def.span.end as usize], "get");
+    assert_eq!(state.sources.files[def.file_idx].name, state.sources.files[state.modules[module].file_idx].name);
+    let def = state.goto_definition(module, good.find("o.unwrap()").unwrap() + 2).expect("resolves");
+    assert!(state.sources.files[def.file_idx].name.ends_with("std.slab"));
+    // completion after `p.` offers fields and the methods
+    ws.change(&uri, main, 3);
+    let at = main.find("print(p.);").unwrap() + "print(p.".len();
+    let items = completion::completions(&ws, &uri, at).unwrap();
+    for want in ["x", "get", "add"] {
+        assert!(items.iter().any(|i| i.label == want), "{want} in {:?}", items.iter().map(|i| i.label.clone()).collect::<Vec<_>>());
+    }
+    let add = items.iter().find(|i| i.label == "add").unwrap();
+    assert_eq!(add.insert.as_deref(), Some("add(${1:k})"));
+}
+
+#[test]
 fn go_to_definition_opens_the_standard_library_source() {
     let d = Dir::new("stddef", &[("main.slab", MAIN), ("util.slab", UTIL)]);
     let mut ws = Workspace::default();

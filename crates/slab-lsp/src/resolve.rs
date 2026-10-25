@@ -46,7 +46,12 @@ impl ProjectState {
             }
             Role::Decl(DefKind::Import) | Role::ModuleName | Role::ImportModule => self.module_def(program, &hit),
             Role::Decl(_) => Some(Definition { file_idx: own_file, span: hit.span }),
-            Role::AttrName | Role::MethodName => None,
+            Role::AttrName => None,
+            Role::MethodName => {
+                let hir = self.hir.as_ref()?;
+                let ctx = hir_ctx_at(hir, module, offset)?;
+                self.hir_def(hir, module, &ctx)
+            }
             Role::ImportItem => self.imported_item_def(program, &hit),
             Role::Callee | Role::PathItem | Role::Plain => self.value_def(module, offset, &hit),
             Role::FieldName => self.field_def(module, offset, &hit),
@@ -87,6 +92,10 @@ impl ProjectState {
             HirKind::Variant { enum_id, .. } => {
                 let e = hir.enums.get(enum_id.0)?;
                 def_of(&e.name, e.module)
+            }
+            HirKind::Method { kind: MethodKind::Intrinsic(id), .. } => {
+                let (mi, def) = self.intrinsic_def(id)?;
+                Some(Definition { file_idx: self.modules[mi].file_idx, span: def.name_span })
             }
             HirKind::Global(id) => {
                 let g = hir.globals.get(id.0)?;
@@ -197,12 +206,23 @@ impl ProjectState {
     /// The module and declaration of the standard-library function the compiler implements
     /// under this intrinsic id (`#[intrinsic("tag.add")]`).
     fn intrinsic_def(&self, id: &str) -> Option<(usize, Def)> {
+        let is_id = |attrs: &[ast::Attr]| attrs.iter().any(|a| a.name.name == "intrinsic" && matches!(a.args.first().map(|e| &e.kind), Some(ast::ExprKind::Str(s)) if s == id));
         for (mi, m) in self.modules.iter().enumerate() {
             for item in &m.program.items {
-                let ast::ItemKind::Fn(f) = &item.kind else { continue };
-                let is_it = item.attrs.iter().any(|a| a.name.name == "intrinsic" && matches!(a.args.first().map(|e| &e.kind), Some(ast::ExprKind::Str(s)) if s == id));
-                if is_it && let Some(def) = m.defs.by_name(&f.name.name) {
-                    return Some((mi, def.clone()));
+                match &item.kind {
+                    ast::ItemKind::Fn(f) if is_id(&item.attrs) => {
+                        if let Some(def) = m.defs.by_name(&f.name.name) {
+                            return Some((mi, def.clone()));
+                        }
+                    }
+                    ast::ItemKind::Impl(i) => {
+                        for method in i.methods.iter().filter(|x| is_id(&x.attrs)) {
+                            if let Some(def) = m.defs.by_name(&format!("{}::{}", i.target.name.name, method.decl.name.name)) {
+                                return Some((mi, def.clone()));
+                            }
+                        }
+                    }
+                    _ => {}
                 }
             }
         }
@@ -328,8 +348,10 @@ impl ProjectState {
                 let hir = self.hir.as_ref()?;
                 let ctx = hir_ctx_at(hir, module, offset)?;
                 match &ctx.expr.kind {
+                    HirKind::Method { kind: MethodKind::Intrinsic(id), .. } => self.intrinsic_hover(id),
                     HirKind::Method { kind, .. } => Some(method_text(*kind)),
                     HirKind::Builtin { name, .. } => self.intrinsic_hover(name),
+                    HirKind::Call { .. } => self.hir_hover_text(hir, module, &ctx),
                     _ => None,
                 }
             }
@@ -402,6 +424,7 @@ impl ProjectState {
                 let docs = named_def_docs(self, hir, e.module, &e.name).map_or_else(String::new, |d| format!("\n\n{d}"));
                 Some(format!("```slab\n{}::{}{payload}\n```\nvariant {} of `enum {}{generics}`, in module `{}`{docs}", e.name, v.name, index, e.name, hir.modules.get(e.module)?))
             }
+            HirKind::Method { kind: MethodKind::Intrinsic(id), .. } => self.intrinsic_hover(id),
             HirKind::Method { kind, .. } => Some(method_text(*kind)),
             HirKind::Local(id) => {
                 let f = hir.fns.get(ctx.fn_idx)?;
@@ -496,14 +519,18 @@ fn fn_signature(f: &shir::FnDef, hir: &shir::Hir) -> String {
     let params = f
         .params
         .iter()
-        .map(|p| {
+        .enumerate()
+        .map(|(i, p)| {
             let l = &f.locals[p.0];
-            format!("{}: {}", l.name, analysis::ty_string(&l.ty, hir))
+            // a method's receiver is just `self`
+            if i == 0 && l.name == "self" && f.name.contains("::") { "self".to_owned() } else { format!("{}: {}", l.name, analysis::ty_string(&l.ty, hir)) }
         })
         .collect::<Vec<_>>()
         .join(", ");
     let ret = if matches!(f.ret, Ty::Unit) { String::new() } else { format!(" -> {}", analysis::ty_string(&f.ret, hir)) };
-    format!("fn {}({params}){ret}", f.name)
+    // a method is listed with its short name (`get`, not `P::get`)
+    let name = f.name.rsplit("::").next().unwrap_or(&f.name);
+    format!("fn {name}({params}){ret}")
 }
 
 /// A payload type of an enum's variant, with the enum's own type parameters by name.
@@ -524,6 +551,8 @@ fn method_text(kind: MethodKind) -> String {
         MethodKind::ListPush => "```slab\nxs.push(value)\n```\nAdd a value to the end of a list.".to_owned(),
         MethodKind::ListLen => "```slab\nlen() -> int\n```\nThe number of elements in the list.".to_owned(),
         MethodKind::StrLen => "```slab\nlen() -> int\n```\nThe number of characters in the string.".to_owned(),
+        // shown from the declaration in the standard library instead (`intrinsic_hover`)
+        MethodKind::Intrinsic(id) => format!("```slab\n{id}\n```\na method of the standard library"),
     }
 }
 

@@ -138,6 +138,49 @@ struct FnSig<'a> {
     ret: Ty,
     entry: Option<EntryKind>,
     span: Span,
+    /// For a method: the type it belongs to (what `Self` means in its signature and body).
+    self_ty: Option<Ty>,
+    /// For a method: its name qualified by the type, `Point::sum`.
+    qual: Option<String>,
+}
+
+/// What a method can be attached to.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+enum TypeKey {
+    Struct(StructId),
+    Enum(EnumId),
+    /// The entity handle (`game::Entity`).
+    Entity,
+}
+
+/// An `impl` block.
+struct ImplInfo<'a> {
+    module: usize,
+    decl: &'a ast::ImplDecl,
+    /// The type the block is for, with the block's own type parameters as `Ty::Param`.
+    self_ty: Ty,
+    methods: Vec<usize>,
+}
+
+enum MethodBody {
+    /// A function written in slab, checked like any other.
+    User(FuncId),
+    /// Implemented by the compiler, matched by id in code generation.
+    Intrinsic(&'static str),
+}
+
+struct MethodInfo<'a> {
+    name: String,
+    module: usize,
+    public: bool,
+    impl_idx: usize,
+    decl: &'a ast::FnDecl,
+    takes_self: bool,
+    body: MethodBody,
+    /// Intrinsics only: the parameter types after `self` and the return type, which may mention
+    /// the block's type parameters.
+    params: Vec<Ty>,
+    ret: Ty,
 }
 
 #[derive(Clone)]
@@ -180,6 +223,11 @@ struct Checker<'a> {
     /// Names every module sees without importing them (`Option`, `Some`, ...), from `std`.
     prelude_values: HashMap<String, ValueSym>,
     prelude_types: HashMap<String, Ty>,
+    impls: Vec<ImplInfo<'a>>,
+    methods: Vec<MethodInfo<'a>>,
+    method_index: HashMap<(TypeKey, String), usize>,
+    /// What `Self` means while an `impl` item is being checked.
+    self_ty: Option<Ty>,
     consts: Vec<ConstInfo<'a>>,
     globals: Vec<GlobalDef>,
     global_decls: Vec<(&'a ast::VarDecl, usize)>,
@@ -237,6 +285,10 @@ impl<'a> Checker<'a> {
             generic_scope: Vec::new(),
             prelude_values: HashMap::new(),
             prelude_types: HashMap::new(),
+            impls: Vec::new(),
+            methods: Vec::new(),
+            method_index: HashMap::new(),
+            self_ty: None,
             consts: Vec::new(),
             globals: Vec::new(),
             global_decls: Vec::new(),
@@ -421,6 +473,11 @@ impl<'a> Checker<'a> {
             None => match self.lookup_struct(&name.name) {
                 Some(id) => Some(id),
                 None => {
+                    if name.name == "Self"
+                        && let Some(Ty::Struct(id)) = &self.self_ty
+                    {
+                        return Some(*id);
+                    }
                     self.error(name.span, format!("unknown struct `{}`", name.name));
                     None
                 }
@@ -439,6 +496,7 @@ impl<'a> Checker<'a> {
         self.resolve_imports();
         self.resolve_enums();
         self.resolve_struct_fields();
+        self.resolve_impls();
         self.resolve_signatures();
         self.eval_globals();
         for i in 0..self.fns.len() {
@@ -483,6 +541,7 @@ impl<'a> Checker<'a> {
                         }
                     }
                 }
+                ast::ItemKind::Impl(d) => self.register_impl(mi, d, item.span),
                 ast::ItemKind::Fn(f) => {
                     if let Some(attr) = item.attrs.iter().find(|a| a.name.name == "intrinsic") {
                         self.register_intrinsic(mi, f, attr, item.public);
@@ -494,7 +553,7 @@ impl<'a> Checker<'a> {
                     let id = FuncId(self.fns.len());
                     // Registered even when the name is a duplicate so bodies still get checked.
                     self.declare_value(&f.name, ValueSym::Fn(id), item.public);
-                    self.fns.push(FnSig { decl: f, attrs: &item.attrs, module: mi, params: Vec::new(), ret: Ty::Unit, entry: None, span: item.span });
+                    self.fns.push(FnSig { decl: f, attrs: &item.attrs, module: mi, params: Vec::new(), ret: Ty::Unit, entry: None, span: item.span, self_ty: None, qual: None });
                 }
                 ast::ItemKind::Const(d) => {
                     let idx = self.consts.len();
@@ -821,6 +880,270 @@ impl<'a> Checker<'a> {
         self.mods[mi].lang_types.insert(s.name.name.clone(), (ty, public));
     }
 
+    // ------------------------------------------------------------------ impl blocks
+
+    /// Records an `impl` block and its methods; their types are resolved later, once every
+    /// type name is known ([`Self::resolve_impls`]).
+    fn register_impl(&mut self, mi: usize, d: &'a ast::ImplDecl, _span: Span) {
+        let impl_idx = self.impls.len();
+        self.impls.push(ImplInfo { module: mi, decl: d, self_ty: Ty::Error, methods: Vec::new() });
+        for m in &d.methods {
+            let f = &m.decl;
+            let body = if let Some(attr) = m.attrs.iter().find(|a| a.name.name == "intrinsic") {
+                if !self.mods[mi].std {
+                    self.error(attr.span, "`#[intrinsic]` is only for the standard library");
+                    continue;
+                }
+                if f.has_body {
+                    self.error(f.name.span, "an intrinsic has no body");
+                    continue;
+                }
+                let id = match attr.args.first().map(|a| &a.kind) {
+                    Some(ast::ExprKind::Str(s)) => builtins::method_id(s),
+                    _ => None,
+                };
+                let Some(id) = id else {
+                    self.error(attr.span, "`#[intrinsic]` needs the name of a method the compiler implements");
+                    continue;
+                };
+                MethodBody::Intrinsic(id)
+            } else {
+                if !f.has_body {
+                    self.error_hint(f.name.span, format!("method `{}` has no body", f.name.name), "write `{ ... }` after the signature");
+                    continue;
+                }
+                if !d.generics.is_empty() {
+                    self.error_hint(f.name.span, format!("method `{}` is in a generic `impl`", f.name.name), "methods of generic types cannot be written in slab yet; only the standard library's built-in ones exist");
+                    continue;
+                }
+                let fid = FuncId(self.fns.len());
+                self.fns.push(FnSig { decl: f, attrs: &m.attrs, module: mi, params: Vec::new(), ret: Ty::Unit, entry: None, span: m.span, self_ty: Some(Ty::Error), qual: None });
+                MethodBody::User(fid)
+            };
+            let idx = self.methods.len();
+            self.methods.push(MethodInfo { name: f.name.name.clone(), module: mi, public: m.public, impl_idx, decl: f, takes_self: f.has_self, body, params: Vec::new(), ret: Ty::Unit });
+            self.impls[impl_idx].methods.push(idx);
+        }
+    }
+
+    /// The type each `impl` is for and the signatures of the methods; fills the method table.
+    fn resolve_impls(&mut self) {
+        for ii in 0..self.impls.len() {
+            let (mi, d) = (self.impls[ii].module, self.impls[ii].decl);
+            self.cur = mi;
+            self.generic_scope = d.generics.iter().map(|g| g.name.clone()).collect();
+            let mut seen = HashSet::new();
+            for g in &d.generics {
+                if !seen.insert(g.name.clone()) {
+                    self.error(g.span, format!("type parameter `{}` is declared twice", g.name));
+                }
+            }
+            let target = self.resolve_ty(&d.target);
+            let (key, owner, type_name) = match &target {
+                Ty::Struct(id) => (Some(TypeKey::Struct(*id)), Some(self.structs[id.0].module), self.struct_names[id.0].clone()),
+                Ty::Enum(id, _) => (Some(TypeKey::Enum(*id)), Some(self.enums[id.0].module), self.enum_names[id.0].clone()),
+                Ty::Entity => (Some(TypeKey::Entity), self.mods[mi].std.then_some(mi), "Entity".to_owned()),
+                Ty::Error => (None, None, String::new()),
+                other => {
+                    let msg = format!("methods can only be added to structs, enums and `Entity`, not `{}`", self.tn(other));
+                    self.error(d.target.span, msg);
+                    (None, None, String::new())
+                }
+            };
+            let key = match (key, owner) {
+                (Some(k), Some(o)) if o == mi => Some(k),
+                (Some(_), _) => {
+                    self.error_hint(d.target.span, format!("an `impl` for `{type_name}` has to be in the module that declares it"), "move the `impl` next to the type");
+                    None
+                }
+                (None, _) => None,
+            };
+            self.impls[ii].self_ty = target.clone();
+            self.self_ty = Some(target.clone());
+            for mx in self.impls[ii].methods.clone() {
+                let name = self.methods[mx].name.clone();
+                let f = self.methods[mx].decl;
+                match self.methods[mx].body {
+                    MethodBody::Intrinsic(_) => {
+                        let mut params = Vec::new();
+                        for p in f.params.iter().skip(f.has_self as usize) {
+                            params.push(self.resolve_ty(&p.ty));
+                        }
+                        let ret = match &f.ret {
+                            Some(t) => self.resolve_ty(t),
+                            None => Ty::Unit,
+                        };
+                        self.methods[mx].params = params;
+                        self.methods[mx].ret = ret;
+                    }
+                    MethodBody::User(fid) => {
+                        self.fns[fid.0].self_ty = Some(target.clone());
+                        self.fns[fid.0].qual = Some(format!("{type_name}::{name}"));
+                    }
+                }
+                if let Some(key) = key {
+                    if let TypeKey::Enum(e) = key
+                        && self.enums[e.0].decl.variants.iter().any(|v| v.name.name == name)
+                    {
+                        self.error(f.name.span, format!("`{type_name}` already has a variant called `{name}`"));
+                        continue;
+                    }
+                    if self.method_index.insert((key, name.clone()), mx).is_some() {
+                        self.error(f.name.span, format!("`{type_name}` has two methods called `{name}`"));
+                    }
+                }
+            }
+            self.generic_scope.clear();
+            self.self_ty = None;
+        }
+    }
+
+    fn type_key(ty: &Ty) -> Option<TypeKey> {
+        match ty {
+            Ty::Struct(id) => Some(TypeKey::Struct(*id)),
+            Ty::Enum(id, _) => Some(TypeKey::Enum(*id)),
+            Ty::Entity => Some(TypeKey::Entity),
+            _ => None,
+        }
+    }
+
+    /// The method `Type::name` of a path such as `Point::new`, `Self::new` or `util::Point::new`
+    /// (reports nothing when the prefix is not a type).
+    fn assoc_method(&self, module: &ast::Ident, name: &ast::Ident) -> Option<usize> {
+        let key = self.path_type_key(module)?;
+        self.method_index.get(&(key, name.name.clone())).copied()
+    }
+
+    /// The type a path prefix such as `Point`, `Self` or `util::Point` names, if it names one.
+    fn path_type_key(&self, module: &ast::Ident) -> Option<TypeKey> {
+        let (prefix, type_name) = match module.name.rsplit_once("::") {
+            Some((p, t)) => (Some(p), t),
+            None => (None, module.name.as_str()),
+        };
+        match prefix {
+            None if type_name == "Self" => Self::type_key(self.self_ty.as_ref()?),
+            None => {
+                let m = &self.mods[self.cur];
+                let lang = m.lang_types.get(type_name).map(|(t, _)| t.clone()).or_else(|| m.imported_lang_types.get(type_name).cloned());
+                match lang {
+                    Some(t) => Self::type_key(&t),
+                    None => match self.lookup_struct(type_name) {
+                        Some(id) => Some(TypeKey::Struct(id)),
+                        None => Self::type_key(self.prelude_types.get(type_name)?),
+                    },
+                }
+            }
+            Some(p) => {
+                let mi = self.find_module(p)?;
+                let m = &self.mods[mi];
+                match m.lang_types.get(type_name) {
+                    Some((t, _)) => Self::type_key(t),
+                    None => m.types.get(type_name).map(|(id, _)| TypeKey::Struct(*id)),
+                }
+            }
+        }
+    }
+
+    /// `Type::function(args)`, or `Type::method(receiver, args)`.
+    fn call_assoc(&mut self, mx: usize, args: &'a [ast::Expr], callee: &'a ast::Expr, span: Span) -> Expr {
+        if !self.methods[mx].public && self.methods[mx].module != self.cur {
+            let name = ast::Ident { name: self.methods[mx].name.clone(), span: callee.span };
+            let m = self.methods[mx].module;
+            self.private_item(&name, m);
+            self.args_for_errors(args);
+            return Expr::error(span);
+        }
+        match self.methods[mx].body {
+            MethodBody::User(fid) => self.user_call(fid, args, span),
+            MethodBody::Intrinsic(id) => {
+                if !self.methods[mx].takes_self || args.is_empty() {
+                    self.error(callee.span, format!("`{}` is called on a value: `value.{}(..)`", self.methods[mx].name, self.methods[mx].name));
+                    self.args_for_errors(args);
+                    return Expr::error(span);
+                }
+                let recv = self.expr(&args[0], None);
+                self.call_intrinsic_method(mx, id, recv, &args[1..], span)
+            }
+        }
+    }
+
+    /// `receiver.name(args)` for a method found in the table.
+    fn call_method(&mut self, mx: usize, recv: Expr, args: &'a [ast::Expr], span: Span, name_span: Span) -> Expr {
+        if !self.methods[mx].takes_self {
+            let msg = format!("`{}` is an associated function, not a method", self.methods[mx].name);
+            self.error_hint(name_span, msg, "call it on the type: `Type::name(..)`");
+            self.args_for_errors(args);
+            return Expr::error(span);
+        }
+        if !self.methods[mx].public && self.methods[mx].module != self.cur {
+            let name = ast::Ident { name: self.methods[mx].name.clone(), span: name_span };
+            let m = self.methods[mx].module;
+            self.private_item(&name, m);
+            self.args_for_errors(args);
+            return Expr::error(span);
+        }
+        match self.methods[mx].body {
+            MethodBody::User(fid) => {
+                let params = self.fns[fid.0].params.clone();
+                let ret = self.fns[fid.0].ret.clone();
+                if args.len() + 1 != params.len() {
+                    let takes = format!("{} argument{}", params.len() - 1, if params.len() == 2 { "" } else { "s" });
+                    self.arity_error(&format!("method `{}`", self.methods[mx].name), takes, args.len(), span);
+                    self.args_for_errors(args);
+                    return Expr::error(span);
+                }
+                self.mismatch(recv.span, &params[0], &recv.ty);
+                let mut hargs = vec![recv];
+                for (a, ty) in args.iter().zip(&params[1..]) {
+                    let h = self.expr(a, Some(ty));
+                    self.mismatch(h.span, ty, &h.ty);
+                    hargs.push(h);
+                }
+                Expr { kind: ExprKind::Call { func: fid, args: hargs }, ty: ret, span }
+            }
+            MethodBody::Intrinsic(id) => self.call_intrinsic_method(mx, id, recv, args, span),
+        }
+    }
+
+    /// A method of the standard library the compiler implements (`opt.unwrap()`): the
+    /// signature has the impl's type parameters, which the receiver's type binds.
+    fn call_intrinsic_method(&mut self, mx: usize, id: &'static str, recv: Expr, args: &'a [ast::Expr], span: Span) -> Expr {
+        let (pattern, n) = {
+            let imp = &self.impls[self.methods[mx].impl_idx];
+            (imp.self_ty.clone(), imp.decl.generics.len())
+        };
+        let params = self.methods[mx].params.clone();
+        let ret = self.methods[mx].ret.clone();
+        if recv.ty.is_error() {
+            self.args_for_errors(args);
+            return Expr::error(span);
+        }
+        let mut binds: Vec<Option<Ty>> = vec![None; n];
+        if !Self::unify(&pattern, &recv.ty, &mut binds) {
+            self.mismatch(recv.span, &pattern, &recv.ty);
+            self.args_for_errors(args);
+            return Expr::error(span);
+        }
+        if args.len() != params.len() {
+            let takes = format!("{} argument{}", params.len(), if params.len() == 1 { "" } else { "s" });
+            self.arity_error(&format!("method `{}`", self.methods[mx].name), takes, args.len(), span);
+            self.args_for_errors(args);
+            return Expr::error(span);
+        }
+        let mut hargs = Vec::new();
+        for (a, pty) in args.iter().zip(&params) {
+            let known: Option<Ty> = binds.iter().cloned().collect::<Option<Vec<Ty>>>().map(|all| pty.subst(&all));
+            let h = self.expr(a, known.as_ref());
+            if !h.ty.is_error() && !Self::unify(pty, &h.ty, &mut binds) {
+                let partial: Vec<Ty> = binds.iter().map(|b| b.clone().unwrap_or(Ty::Error)).collect();
+                self.mismatch(h.span, &pty.subst(&partial), &h.ty);
+            }
+            hargs.push(h);
+        }
+        let all: Vec<Ty> = binds.iter().map(|b| b.clone().unwrap_or(Ty::Error)).collect();
+        Expr { kind: ExprKind::Method { kind: MethodKind::Intrinsic(id), recv: Box::new(recv), args: hargs }, ty: ret.subst(&all), span }
+    }
+
     /// `Option`, `Result` and their variants are visible in every module (docs/lang/enums.md).
     fn build_prelude(&mut self) {
         let Some(&std) = self.by_name.get("std") else { return };
@@ -909,6 +1232,7 @@ impl<'a> Checker<'a> {
             None => (None, module.name.as_str()),
         };
         let ty = match prefix {
+            None if enum_name == "Self" => self.self_ty.clone()?,
             None => {
                 let m = &self.mods[self.cur];
                 m.lang_types.get(enum_name).map(|(t, _)| t.clone()).or_else(|| m.imported_lang_types.get(enum_name).cloned()).or_else(|| self.prelude_types.get(enum_name).cloned())?
@@ -1068,6 +1392,15 @@ impl<'a> Checker<'a> {
         if name == "()" {
             return Ty::Unit;
         }
+        if name == "Self" && t.module.is_none() {
+            return match self.self_ty.clone() {
+                Some(ty) => no_args(self, ty),
+                None => {
+                    self.error(t.span, "`Self` is only available inside an `impl` block");
+                    Ty::Error
+                }
+            };
+        }
         if let Some(i) = self.generic_scope.iter().position(|g| g == name) {
             return no_args(self, Ty::Param(i));
         }
@@ -1126,6 +1459,7 @@ impl<'a> Checker<'a> {
         // function signatures (entry attributes need constants, so this runs after the above)
         for fi in 0..self.fns.len() {
             self.cur = self.fns[fi].module;
+            self.self_ty = self.fns[fi].self_ty.clone();
             let f = self.fns[fi].decl;
             let attrs = self.fns[fi].attrs;
             let mut params = Vec::new();
@@ -1150,7 +1484,15 @@ impl<'a> Checker<'a> {
                 }
                 None => Ty::Unit,
             };
-            let entry = self.entry_of(attrs, f, !params.is_empty(), &ret);
+            let entry = if self.fns[fi].self_ty.is_some() {
+                if let Some(a) = attrs.first() {
+                    self.error(a.span, "a method cannot be an entry point or take attributes");
+                }
+                None
+            } else {
+                self.entry_of(attrs, f, !params.is_empty(), &ret)
+            };
+            self.self_ty = None;
             self.fns[fi].params = params;
             self.fns[fi].ret = ret;
             self.fns[fi].entry = entry;
@@ -1532,6 +1874,7 @@ impl<'a> Checker<'a> {
 
     fn check_fn(&mut self, idx: usize) {
         self.cur = self.fns[idx].module;
+        self.self_ty = self.fns[idx].self_ty.clone();
         let decl: &'a ast::FnDecl = self.fns[idx].decl;
         let sig_params = self.fns[idx].params.clone();
         let ret = self.fns[idx].ret.clone();
@@ -1552,8 +1895,9 @@ impl<'a> Checker<'a> {
                 self.warnings.push(d);
             }
         }
+        self.self_ty = None;
         self.hir_fns.push(FnDef {
-            name: decl.name.name.clone(),
+            name: self.fns[idx].qual.clone().unwrap_or_else(|| decl.name.name.clone()),
             module: self.fns[idx].module,
             params,
             ret,
@@ -2313,11 +2657,19 @@ impl<'a> Checker<'a> {
                     }
                 }
             }
+            ast::ExprKind::Path { module, name } if self.assoc_method(module, name).is_some() => {
+                let mx = self.assoc_method(module, name).expect("checked");
+                self.call_assoc(mx, args, callee, span)
+            }
             ast::ExprKind::Path { module, name } => {
                 // `Option::Some(x)` builds an enum value; anything else names a module's function
                 let sym = match self.variant_path(module, name) {
                     Some(Some((eid, vi))) => Some(ValueSym::Variant(eid, vi)),
                     Some(None) => None,
+                    None if self.path_type_key(module).is_some() => {
+                        self.error(name.span, format!("`{}` has no function or method `{}`", module.name, name.name));
+                        None
+                    }
                     None => self.qualified_value(module, name),
                 };
                 match sym {
@@ -2503,6 +2855,11 @@ impl<'a> Checker<'a> {
         if recv.ty.is_error() {
             self.args_for_errors(args);
             return Expr::error(span);
+        }
+        if let Some(key) = Self::type_key(&recv.ty)
+            && let Some(&mx) = self.method_index.get(&(key, name.name.clone()))
+        {
+            return self.call_method(mx, recv, args, span, name.span);
         }
         let arity = |this: &mut Self, want: usize| -> bool {
             if args.len() == want {

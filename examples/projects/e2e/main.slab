@@ -105,6 +105,20 @@ global r_enum_field: int = 0;
 global r_enum_user: int = 0;
 global r_enum_payload: int = 0;
 global r_enum_nested: int = 0;
+global r_impl_struct: int = 0;
+global r_impl_str: int = 0;
+global r_impl_enum: int = 0;
+global r_impl_assoc: int = 0;
+global r_impl_opt_is: int = 0;
+global r_impl_opt_unwrap: int = 0;
+global r_impl_opt_or: int = 0;
+global r_impl_res_is: int = 0;
+global r_impl_res_or: int = 0;
+global r_impl_res_conv: int = 0;
+global r_impl_unwrap_none: int = 9;
+global r_impl_unwrap_some: int = 0;
+global r_impl_unwrap_reached: int = 0;
+global r_impl_expect: int = 0;
 global r_results: int = 0;
 global r_gone: int = 0;
 global r_entities: int = 0;
@@ -332,6 +346,7 @@ fn world_test() {
     selector_test();
     equality_test();
     enum_test();
+    impl_test();
 
     // one owned entity is left alive on purpose: `_uninstall` must remove it
     summon("minecraft:marker", bx, 64, bx);
@@ -428,6 +443,58 @@ fn enum_test() {
     if named == Shape::Named("x", [4, 2]) && named != Shape::Named("x", [4]) { r_enum_payload = 1; }
     let nested: Option<Option<int>> = Some(Some(n));
     if nested == Some(Some(4)) && nested != Some(None) { r_enum_nested = 1; }
+}
+
+struct Counter { n: int, label: str }
+
+impl Counter {
+    fn new(label: str) -> Counter { return Counter { n: 0, label: label }; }
+    fn bumped(self, by: int) -> Counter { return Counter { n: self.n + by, label: self.label }; }
+    fn total(self) -> int { return self.n; }
+    fn describe(self) -> str { return f"{self.label}={self.n}"; }
+}
+
+enum Dir { North, East }
+
+impl Dir {
+    pub fn turn(self) -> Self { if self == Dir::North { return Dir::East; } return Self::North; }
+    fn is_north(self) -> bool { return self == Dir::North; }
+}
+
+fn unwrap_flow(o: Option<int>) -> int {
+    let v = o.unwrap();
+    r_impl_unwrap_reached += 1;
+    return v + 100;
+}
+
+// Methods (`impl`), and the methods of Option and Result.
+fn impl_test() {
+    let c = Counter::new("c").bumped(2).bumped(3);
+    r_impl_struct = c.total();
+    if c.describe() == "c=5" { r_impl_str = 1; }
+    r_impl_assoc = Counter::total(c);
+    let d = Dir::North;
+    let east = d.turn();
+    let back = east.turn();
+    let back_north = back.is_north();
+    if east == Dir::East && back_north { r_impl_enum = 1; }
+
+    let some = Some(4);
+    let none: Option<int> = None;
+    if some.is_some() && none.is_none() && !some.is_none() && !none.is_some() { r_impl_opt_is = 1; }
+    r_impl_opt_unwrap = some.unwrap();
+    r_impl_opt_or = none.unwrap_or(7) + some.unwrap_or(7);
+
+    let ok: Result<int, str> = Ok(3);
+    let bad: Result<int, str> = Err("no");
+    if ok.is_ok() && bad.is_err() && !ok.is_err() && !bad.is_ok() { r_impl_res_is = 1; }
+    r_impl_res_or = bad.unwrap_or(0 - 1) + ok.unwrap_or(0);
+    if ok.ok() == Some(3) && bad.ok() == None && bad.err() == Some("no") && ok.err() == None { r_impl_res_conv = 1; }
+    r_impl_expect = ok.expect("must be ok");
+
+    // a failed unwrap says so in chat and returns from the function: nothing after it runs
+    r_impl_unwrap_none = unwrap_flow(none);
+    r_impl_unwrap_some = unwrap_flow(some);
 }
 
 // `==` / `!=` on strings, lists, structs, and an entity against a selector.

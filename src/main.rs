@@ -18,7 +18,9 @@ build options:
   -o, --out DIR          write the data pack folder here (default: PATH/build/<namespace>)
   --zip                  also write DIR.zip
   --namespace NAME       data pack namespace (default: the project directory's name)
-  --description TEXT     description shown by /datapack list";
+  --description TEXT     description shown by /datapack list
+  --abort-on-unwrap      a failed unwrap()/expect() also runs `datapack disable` for the pack
+  --pack-id ID           the pack id for that (default: file/<namespace>)";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -92,6 +94,8 @@ fn parse_build_args(args: &[String]) -> Result<BuildArgs, String> {
             "--zip" => b.zip = true,
             "--namespace" => b.opts.namespace = Some(value(a)?),
             "--description" => b.opts.description = Some(value(a)?),
+            "--abort-on-unwrap" => b.opts.abort_on_unwrap = true,
+            "--pack-id" => b.opts.pack_id = Some(value(a)?),
             flag if flag.starts_with('-') => return Err(format!("unknown option `{flag}`")),
             p => {
                 if path_set {

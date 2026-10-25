@@ -283,6 +283,62 @@ fn the_prelude_is_the_lowest_priority_and_enums_cross_modules() {
     ok("import std::*; fn f() { let a: Option<int> = std::None; let b = std::Option::Some(1); print(a == b); }");
 }
 
+// ------------------------------------------------------------------------ impl
+
+#[test]
+fn methods_and_associated_functions() {
+    let point = "struct Point { x: int, y: int } impl Point { fn new(x: int, y: int) -> Point { return Point { x: x, y: y }; } fn sum(self) -> int { return self.x + self.y; } pub fn scaled(self, k: int) -> Self { return Self { x: self.x * k, y: self.y * k }; } fn origin() -> Self { return Self::new(0, 0); } }";
+    ok(&format!("{point} fn f() {{ let p = Point::new(1, 2); print(p.sum()); print(p.scaled(3).scaled(2).x); print(Point::sum(p)); print(Point::origin() == p); }}"));
+    // enums and their variants beside methods
+    ok("enum Shape { Dot, Line(int, int) } impl Shape { fn len(self) -> int { if self == Shape::Dot { return 0; } return 1; } fn dot() -> Shape { return Shape::Dot; } } fn f() { print(Shape::Line(1, 2).len() + Shape::dot().len()); }");
+    // a method call is an ordinary call whose first argument is the receiver
+    let c = ok(&format!("{point} fn f(p: Point) -> int {{ return p.scaled(2).sum(); }}"));
+    let names: Vec<&str> = c.hir.fns.iter().map(|f| f.name.as_str()).collect();
+    assert!(names.contains(&"Point::sum") && names.contains(&"Point::scaled"), "{names:?}");
+}
+
+#[test]
+fn method_mistakes() {
+    let point = "struct Point { x: int } impl Point { fn new(x: int) -> Point { return Point { x: x }; } fn get(self) -> int { return self.x; } fn add(self, k: int) -> int { return self.x + k; } }";
+    let in_f = |body: &str| format!("{point} fn f(p: Point) {{ {body} }}");
+    one_error(&in_f("print(p.nope());"), "`Point` has no method `nope`");
+    one_error(&in_f("print(Point::nope());"), "`Point` has no function or method `nope`");
+    one_error(&in_f("print(p.new(1));"), "`new` is an associated function, not a method");
+    one_error(&in_f("print(p.get(1));"), "method `get` takes 0 arguments but 1 was supplied");
+    one_error(&in_f("print(p.add());"), "method `add` takes 1 argument but 0 were supplied");
+    one_error(&in_f("print(p.add(\"s\"));"), "expected `int`, found `str`");
+    one_error(&in_f("print(Point::get(1));"), "expected `Point`, found `int`");
+    one_error("fn f(self) {}", "`Self` is only available inside an `impl` block");
+    one_error("struct S {} impl S { fn a(self) {} fn a(self) {} }", "`S` has two methods called `a`");
+    one_error("enum E { A } impl E { fn A(self) {} }", "`E` already has a variant called `A`");
+    one_error("impl int { fn f(self) {} }", "methods can only be added to structs, enums and `Entity`, not `int`");
+    one_error("impl Nope { }", "unknown type `Nope`");
+    one_error("struct S {} impl S { fn f(self); }", "method `f` has no body");
+    one_error("struct S {} impl S { #[intrinsic(\"x\")] fn f(self); }", "only for the standard library");
+    one_error("struct S {} impl S { #[load] fn f() {} }", "cannot be an entry point");
+    one_error("enum E<T> { A(T) } impl<T> E<T> { fn f(self) {} }", "is in a generic `impl`");
+    // an impl is in the module that declares the type
+    project_one_error(&[("main", "import util; impl util::P { fn f(self) {} }"), ("util", "pub struct P {}")], "has to be in the module that declares it");
+    // private methods stay in their module
+    project_one_error(&[("main", "import util; fn main() { let p = util::P {}; print(p.secret()); }"), ("util", "pub struct P {} impl P { fn secret(self) -> int { return 1; } }")], "`secret` is private to module `util`");
+    project_one_error(&[("main", "import util; fn main() { print(util::P::hidden()); }"), ("util", "pub struct P {} impl P { fn hidden() -> int { return 1; } }")], "`hidden` is private to module `util`");
+    ok_project(&[("main", "import util; fn main() { let p = util::P {}; print(p.open()); print(util::P::make().open()); }"), ("util", "pub struct P {} impl P { pub fn open(self) -> int { return 1; } pub fn make() -> P { return P {}; } }")]);
+}
+
+#[test]
+fn option_and_result_methods() {
+    ok(&in_fn("let a = Some(1); let b: Option<str> = None; print(a.is_some() && b.is_none() && !a.is_none()); print(a.unwrap() + 1); print(b.unwrap_or(\"x\")); print(a.expect(\"need it\"));"));
+    ok(&in_fn("let r: Result<int, str> = Ok(2); print(r.is_ok() && !r.is_err()); print(r.unwrap_or(0)); let o: Option<int> = r.ok(); let e: Option<str> = r.err(); print(o == Some(2) && e.is_none()); print(r.expect(\"x\"));"));
+    ok(&in_fn("let u: Result<(), str> = Ok(()); u.unwrap(); print(u.is_ok()); let n = Some(Some(1)); print(n.unwrap().unwrap());"));
+    ok("fn f(o: Option<int>) -> Option<int> { return Some(o.unwrap_or(0) + 1); } fn g() { print(Option::is_some(f(None))); }");
+    one_error(&in_fn("let a = Some(1); print(a.unwrap_or(\"s\"));"), "expected `int`, found `str`");
+    one_error(&in_fn("let a = Some(1); print(a.expect(5));"), "expected `str`, found `int`");
+    one_error(&in_fn("let a = Some(1); print(a.is_ok());"), "`Option<int>` has no method `is_ok`");
+    one_error(&in_fn("let a = Some(1); print(a.unwrap(1));"), "method `unwrap` takes 0 arguments but 1 was supplied");
+    one_error(&in_fn("let r: Result<int, str> = Ok(1); let x: Option<str> = r.ok();"), "expected `Option<str>`, found `Option<int>`");
+    one_error(&in_fn("print(1.unwrap());"), "`int` has no method `unwrap`");
+}
+
 #[test]
 fn one_mistake_is_reported_once() {
     // `x` is unknown; every use of the poisoned value is silent

@@ -60,6 +60,28 @@ pub const IDS: &[&str] = &[
     "summon",
 ];
 
+/// The intrinsic *methods* (`impl<T> Option<T> { #[intrinsic("option.unwrap")] fn unwrap(self) -> T; }`)
+/// the code generator implements. Their signatures use ordinary types, so they are not
+/// [`Intrinsic`]s.
+pub const METHOD_IDS: &[&str] = &[
+    "option.is_some",
+    "option.is_none",
+    "option.unwrap",
+    "option.unwrap_or",
+    "option.expect",
+    "result.is_ok",
+    "result.is_err",
+    "result.unwrap",
+    "result.unwrap_or",
+    "result.expect",
+    "result.ok",
+    "result.err",
+];
+
+pub fn method_id(id: &str) -> Option<&'static str> {
+    METHOD_IDS.iter().find(|i| **i == id).copied()
+}
+
 /// The static spelling of an intrinsic id, if the compiler knows it.
 pub fn intrinsic_id(id: &str) -> Option<&'static str> {
     IDS.iter().find(|i| **i == id).copied()

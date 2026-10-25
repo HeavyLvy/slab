@@ -102,6 +102,31 @@ pub fn each_ident(program: &ast::Program, out: &mut Vec<Hit>) {
                     }
                 }
             }
+            ItemKind::Impl(i) => {
+                for g in &i.generics {
+                    w.emit(g.span, &g.name, Role::TypeName);
+                }
+                w.ty(&i.target);
+                for m in &i.methods {
+                    for attr in &m.attrs {
+                        w.emit(attr.name.span, &attr.name.name, Role::AttrName);
+                    }
+                    let f = &m.decl;
+                    w.emit(f.name.span, &f.name.name, Role::Decl(crate::defs::DefKind::Fn));
+                    for p in &f.params {
+                        w.emit(p.name.span, &p.name.name, Role::Param);
+                        if !(f.has_self && p.name.name == "self") {
+                            w.ty(&p.ty);
+                        }
+                    }
+                    if let Some(t) = &f.ret {
+                        w.ty(t);
+                    }
+                    for s in &f.body.stmts {
+                        w.stmt(s);
+                    }
+                }
+            }
             ItemKind::Objective { name, criteria } => {
                 w.emit(name.span, &name.name, Role::Decl(crate::defs::DefKind::Objective));
                 w.expr(criteria, Role::Plain);
@@ -324,6 +349,13 @@ pub fn each_expr<'a>(program: &'a ast::Program, f: &mut impl FnMut(&'a ast::Expr
             }
             ItemKind::Global(v) | ItemKind::Const(v) => visit(&v.init, f),
             ItemKind::Objective { criteria, .. } => visit(criteria, f),
+            ItemKind::Impl(i) => {
+                for m in &i.methods {
+                    for s in &m.decl.body.stmts {
+                        stmt(s, f);
+                    }
+                }
+            }
             ItemKind::Struct(_) | ItemKind::Enum(_) | ItemKind::Import(_) => {}
         }
     }

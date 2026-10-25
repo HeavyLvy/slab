@@ -16,17 +16,27 @@
 use std::collections::{BTreeSet, HashSet};
 
 use crate::datapack::{self, Anchor, Axes, Clause, Command, Compound, Coord, Effect, HolderName, Hole, Nbt, NbtPath, Num, Pos, ResourceLocation, Rotation, ScoreHolder, Selector, TagAction, Word};
-use crate::diag::{Diagnostic, Span};
+use crate::diag::{Diagnostic, SourceMap, Span};
 use crate::ir;
 use crate::sema::hir as h;
 use crate::sema::ty::Ty;
 use crate::syntax::ast::{AssignOp, BinOp as AstBin, UnOp as AstUn};
 use crate::syntax::token::RelKind;
 
+/// What code generation needs besides the program.
+pub struct GenOptions<'a> {
+    /// For the `file:line` of an `unwrap` that fails.
+    pub sources: &'a SourceMap,
+    /// A failed `unwrap` also stops the pack with `datapack disable`.
+    pub abort_on_unwrap: bool,
+    /// The pack id for `datapack disable`, such as `file/my_pack`.
+    pub pack_id: String,
+}
+
 /// Translates a checked program. Errors are things the language accepts but the backend cannot
 /// express yet (variable coordinates, variable list indices, ...).
-pub fn generate(hir: &h::Hir, namespace: &str, description: &str) -> Result<ir::Program, Vec<Diagnostic>> {
-    let mut g = Gen::new(hir, namespace);
+pub fn generate(hir: &h::Hir, namespace: &str, description: &str, opts: &GenOptions) -> Result<ir::Program, Vec<Diagnostic>> {
+    let mut g = Gen::new(hir, namespace, opts);
     let mut program = ir::Program::new(namespace);
     program.description = description.to_owned();
     program.objectives = g.objectives();
@@ -136,10 +146,16 @@ struct Gen<'a> {
     used: HashSet<String>,
     pre: Vec<ir::Stmt>,
     loops: Vec<LoopCtx>,
+    /// How many context blocks (`as @a { .. }`) the code being generated is inside: a `return`
+    /// cannot leave one.
+    ctx_depth: usize,
+    sources: &'a SourceMap,
+    abort_on_unwrap: bool,
+    pack_id: String,
 }
 
 impl<'a> Gen<'a> {
-    fn new(hir: &'a h::Hir, namespace: &str) -> Self {
+    fn new(hir: &'a h::Hir, namespace: &str, opts: &GenOptions<'a>) -> Self {
         let mut used_fns = HashSet::from(["_init", "_uninstall", "_alloc_id", "_new_entity", "_ensure_id"].map(str::to_owned));
         let fn_names = hir.fns.iter().map(|f| unique(&mut used_fns, format!("{}{}", module_prefix(&hir.modules[f.module]), sanitize(&f.name)))).collect();
         let mut used_globals = HashSet::new();
@@ -168,6 +184,10 @@ impl<'a> Gen<'a> {
             used: HashSet::new(),
             pre: Vec::new(),
             loops: Vec::new(),
+            ctx_depth: 0,
+            sources: opts.sources,
+            abort_on_unwrap: opts.abort_on_unwrap,
+            pack_id: opts.pack_id.clone(),
         }
     }
 
@@ -463,7 +483,9 @@ impl<'a> Gen<'a> {
                     }
                 }
                 self.flush(out);
+                self.ctx_depth += 1;
                 let body = self.block(body);
+                self.ctx_depth -= 1;
                 out.push(ir::Stmt::Context { clauses: cs, args: holes.args, body });
             }
             h::Stmt::Block(b) => {
@@ -697,7 +719,8 @@ impl<'a> Gen<'a> {
                     }
                 }
             },
-            h::ExprKind::Method { kind, recv, .. } => match kind {
+            h::ExprKind::Method { kind, recv, args } => match kind {
+                h::MethodKind::Intrinsic(id) => self.method_intrinsic(id, recv, args, e.span),
                 h::MethodKind::ListLen | h::MethodKind::StrLen => {
                     let (var, path) = self.place_static(recv);
                     ir::Expr::Len(var, path)
@@ -851,6 +874,148 @@ impl<'a> Gen<'a> {
     }
 
     // ------------------------------------------------- builtins, selectors, context
+
+    // ------------------------------------------------ methods of Option and Result
+
+    /// A stored value as a variable: a variable or global as it is, anything else bound to a
+    /// temporary first.
+    fn data_var(&mut self, v: ir::Expr) -> ir::VarRef {
+        match v {
+            ir::Expr::Var(n) => ir::VarRef::Local(n),
+            ir::Expr::Global(n) => ir::VarRef::Global(n),
+            other => {
+                let t = self.fresh("recv");
+                self.pre.push(ir::Stmt::Let { name: t.clone(), kind: ir::Kind::Data, init: Some(other) });
+                ir::VarRef::Local(t)
+            }
+        }
+    }
+
+    fn tag_of(r: &ir::VarRef) -> ir::Expr {
+        ir::Expr::ToInt(Box::new(ir::Expr::Field(r.clone(), NbtPath::new().key("t"))))
+    }
+
+    fn is_variant(r: &ir::VarRef, index: i32) -> ir::Expr {
+        ir::Expr::bin(ir::BinOp::Eq, Self::tag_of(r), ir::Expr::Int(index))
+    }
+
+    fn payload_field(r: &ir::VarRef, i: usize) -> ir::Expr {
+        ir::Expr::Field(r.clone(), NbtPath::new().key(format!("f{i}")))
+    }
+
+    /// `file.slab:line` of a source position, for messages shown to the player.
+    fn location(&self, span: Span) -> String {
+        let module = self.hir.fns[self.cur_fn].module;
+        let name = format!("{}.slab", self.hir.modules[module].replace("::", "/"));
+        let line = self.sources.files.get(self.hir.files[module]).map(|f| f.line_col(span.start as usize).0);
+        match line {
+            Some(l) => format!("{name}:{l}"),
+            None => name,
+        }
+    }
+
+    /// The value a function returns after a failed `unwrap`: zero of its return type.
+    fn default_nbt(&self, ty: &Ty, depth: usize) -> Nbt {
+        match ty {
+            Ty::Str => Nbt::String(String::new()),
+            Ty::List(_) => Nbt::List(Vec::new()),
+            Ty::Struct(id) => {
+                let mut c = Compound::new();
+                for (name, t) in &self.hir.structs[id.0].fields {
+                    c.insert(name.clone(), self.default_nbt(t, depth + 1));
+                }
+                Nbt::Compound(c)
+            }
+            Ty::Enum(id, targs) if depth < 6 => {
+                let mut c = Compound::new();
+                c.insert("t".to_owned(), Nbt::Int(0));
+                for (i, f) in self.hir.enums[id.0].variants[0].fields.iter().enumerate() {
+                    let t = f.subst(targs);
+                    if t != Ty::Unit {
+                        c.insert(format!("f{i}"), self.default_nbt(&t, depth + 1));
+                    }
+                }
+                Nbt::Compound(c)
+            }
+            Ty::Enum(..) => Nbt::Compound(Compound::new().with("t", 0)),
+            _ => Nbt::Int(0),
+        }
+    }
+
+    fn default_ir(&self, ty: &Ty) -> ir::Expr {
+        match ty {
+            Ty::Bool => ir::Expr::Bool(false),
+            t if is_scalar(t) => ir::Expr::Int(0),
+            t => ir::Expr::Data(self.default_nbt(t, 0)),
+        }
+    }
+
+    /// `unwrap` / `expect` on a value that is not what it needs to be: tell the players, stop
+    /// the pack if asked to, and leave the function (not from inside a context block, which
+    /// cannot be left; the code after goes on with a zero value).
+    fn unwrap_check(&mut self, bad: ir::Expr, what: &str, message: Option<ir::Expr>, span: Span) {
+        let at = self.location(span);
+        let parts = match message {
+            None => vec![ir::PrintPart::Lit(format!("slab: unwrap on {what} ({at})"))],
+            Some(m) => vec![ir::PrintPart::Lit("slab: ".to_owned()), ir::PrintPart::Value(m), ir::PrintPart::Lit(format!(" ({at})"))],
+        };
+        let mut then = vec![ir::Stmt::PrintParts(parts)];
+        if self.abort_on_unwrap {
+            then.push(ir::Stmt::Command(Command::DatapackDisable(self.pack_id.clone())));
+        }
+        if self.ctx_depth == 0 {
+            let ret = self.hir.fns[self.cur_fn].ret.clone();
+            then.push(ir::Stmt::Return(if ret == Ty::Unit { None } else { Some(self.default_ir(&ret)) }));
+        }
+        self.pre.push(ir::Stmt::If { cond: bad, then, els: Vec::new() });
+    }
+
+    /// The methods of `Option` and `Result` that the standard library declares as intrinsics.
+    fn method_intrinsic(&mut self, id: &str, recv: &h::Expr, args: &[h::Expr], span: Span) -> ir::Expr {
+        let Ty::Enum(_, targs) = &recv.ty else {
+            self.err(span, "an Option or Result method needs an Option or a Result");
+            return ir::Expr::Int(0);
+        };
+        let targs = targs.clone();
+        let v = self.expr(recv);
+        let r = self.data_var(v);
+        // the variant that carries the value, and its name for messages: Some / Ok
+        let (good, what) = if id.starts_with("option.") { (1, "None") } else { (0, "Err") };
+        match id {
+            "option.is_some" | "result.is_err" => Self::is_variant(&r, 1),
+            "option.is_none" | "result.is_ok" => Self::is_variant(&r, 0),
+            "option.unwrap" | "result.unwrap" | "option.expect" | "result.expect" => {
+                let message = if id.ends_with("expect") { Some(self.expr(&args[0])) } else { None };
+                self.unwrap_check(ir::Expr::logical_not(Self::is_variant(&r, good)), what, message, span);
+                if targs[0] == Ty::Unit { ir::Expr::Int(0) } else { from_data(Self::payload_field(&r, 0), &targs[0]) }
+            }
+            "option.unwrap_or" | "result.unwrap_or" => {
+                let t = targs[0].clone();
+                let default = self.expr(&args[0]);
+                let out = self.fresh("or");
+                self.pre.push(ir::Stmt::Let { name: out.clone(), kind: kind_of(&t), init: Some(default) });
+                let take = ir::Stmt::Assign { target: ir::VarRef::Local(out.clone()), value: from_data(Self::payload_field(&r, 0), &t) };
+                self.pre.push(ir::Stmt::If { cond: Self::is_variant(&r, good), then: vec![take], els: Vec::new() });
+                ir::Expr::var(&out)
+            }
+            "result.ok" | "result.err" => {
+                // Ok(x).ok() is Some(x), Err(e).err() is Some(e); anything else is None
+                let (variant, t) = if id == "result.ok" { (0, targs[0].clone()) } else { (1, targs[1].clone()) };
+                let out = self.fresh("opt");
+                self.pre.push(ir::Stmt::Let { name: out.clone(), kind: ir::Kind::Data, init: Some(ir::Expr::Data(Nbt::Compound(Compound::new().with("t", 0)))) });
+                let mut then = vec![ir::Stmt::Assign { target: ir::VarRef::Local(out.clone()), value: ir::Expr::Data(Nbt::Compound(Compound::new().with("t", 1))) }];
+                if t != Ty::Unit {
+                    then.push(ir::Stmt::SetField { target: ir::VarRef::Local(out.clone()), path: NbtPath::new().key("f0"), value: Self::payload_field(&r, 0) });
+                }
+                self.pre.push(ir::Stmt::If { cond: Self::is_variant(&r, variant), then, els: Vec::new() });
+                ir::Expr::var(&out)
+            }
+            other => {
+                self.err(span, format!("the method `{other}` is not supported by the backend yet"));
+                ir::Expr::Int(0)
+            }
+        }
+    }
 
     /// A target for a command: a selector literal, or an entity handle, which selects the entity
     /// whose id is the handle's value (a hole filled at run time).

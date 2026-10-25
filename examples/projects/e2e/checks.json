@@ -437,6 +437,62 @@
   "matches": "^(?=.*t: 1)(?=.*f0: 7)"
  },
  {
+  "cmd": "scoreboard players get #g.r_impl_struct e2e",
+  "expect": "has 5 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_impl_str e2e",
+  "expect": "has 1 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_impl_enum e2e",
+  "expect": "has 1 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_impl_assoc e2e",
+  "expect": "has 5 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_impl_opt_is e2e",
+  "expect": "has 1 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_impl_opt_unwrap e2e",
+  "expect": "has 4 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_impl_opt_or e2e",
+  "expect": "has 11 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_impl_res_is e2e",
+  "expect": "has 1 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_impl_res_or e2e",
+  "expect": "has 2 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_impl_res_conv e2e",
+  "expect": "has 1 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_impl_unwrap_none e2e",
+  "expect": "has 0 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_impl_unwrap_some e2e",
+  "expect": "has 104 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_impl_unwrap_reached e2e",
+  "expect": "has 1 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_impl_expect e2e",
+  "expect": "has 3 [e2e]"
+ },
+ {
   "cmd": "scoreboard players get #g.r_ent_stale_tp e2e",
   "expect": "has 1 [e2e]"
  },

@@ -33,6 +33,7 @@ pub fn document_symbols(state: &ProjectState, module: usize, enc: Enc) -> Vec<Sy
             DefKind::Const => 14,
             DefKind::Struct => 23,
             DefKind::Enum => 10,
+            DefKind::Impl => 5,
             DefKind::Objective => 7,
             DefKind::Import => 2,
         };
@@ -52,6 +53,16 @@ pub fn document_symbols(state: &ProjectState, module: usize, enc: Enc) -> Vec<Sy
                 .map(|(p, (_n, t))| {
                     let r = span_range(p.name.span);
                     Symbol { name: p.name.name.clone(), kind: 7, detail: Some(t.clone()), range: r, selection: r, children: Vec::new() }
+                })
+                .collect();
+        }
+        if let ItemKind::Impl(i) = &item.kind {
+            sym.children = i
+                .methods
+                .iter()
+                .map(|m| {
+                    let range = span_range(m.span);
+                    Symbol { name: m.decl.name.name.clone(), kind: 6, detail: None, range, selection: span_range(m.decl.name.span), children: Vec::new() }
                 })
                 .collect();
         }

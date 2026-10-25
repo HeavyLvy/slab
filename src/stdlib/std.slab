@@ -23,3 +23,58 @@ pub enum Result<T, E> {
     Ok(T),
     Err(E),
 }
+
+impl<T> Option<T> {
+    /// Whether this is `Some`.
+    #[intrinsic("option.is_some")]
+    pub fn is_some(self) -> bool;
+
+    /// Whether this is `None`.
+    #[intrinsic("option.is_none")]
+    pub fn is_none(self) -> bool;
+
+    /// The value inside `Some`. On `None` there is nothing to give: the players are told
+    /// (`slab: unwrap on None (main.slab:12)` in chat), the pack is stopped when the program was
+    /// built with `--abort-on-unwrap`, and the function returns (inside a context block, which
+    /// cannot be left, it carries on with a zero value instead).
+    #[intrinsic("option.unwrap")]
+    pub fn unwrap(self) -> T;
+
+    /// The value inside `Some`, or `default` for `None`. `default` is always evaluated.
+    #[intrinsic("option.unwrap_or")]
+    pub fn unwrap_or(self, default: T) -> T;
+
+    /// Like `unwrap`, with your own message instead of "unwrap on None".
+    #[intrinsic("option.expect")]
+    pub fn expect(self, message: str) -> T;
+}
+
+impl<T, E> Result<T, E> {
+    /// Whether this is `Ok`.
+    #[intrinsic("result.is_ok")]
+    pub fn is_ok(self) -> bool;
+
+    /// Whether this is `Err`.
+    #[intrinsic("result.is_err")]
+    pub fn is_err(self) -> bool;
+
+    /// The value inside `Ok`. On `Err` it behaves like `Option::unwrap` on `None`.
+    #[intrinsic("result.unwrap")]
+    pub fn unwrap(self) -> T;
+
+    /// The value inside `Ok`, or `default` for `Err`. `default` is always evaluated.
+    #[intrinsic("result.unwrap_or")]
+    pub fn unwrap_or(self, default: T) -> T;
+
+    /// Like `unwrap`, with your own message instead of "unwrap on Err".
+    #[intrinsic("result.expect")]
+    pub fn expect(self, message: str) -> T;
+
+    /// `Some(value)` for `Ok(value)`, `None` for `Err`.
+    #[intrinsic("result.ok")]
+    pub fn ok(self) -> Option<T>;
+
+    /// `Some(error)` for `Err(error)`, `None` for `Ok`.
+    #[intrinsic("result.err")]
+    pub fn err(self) -> Option<E>;
+}

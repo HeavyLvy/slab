@@ -399,6 +399,123 @@ scoreboard objectives add demo dummy
 execute unless data storage demo:globals start run data modify storage demo:globals start set value {t:1,f0:3}
 ```
 
+## Methods
+
+A method is an ordinary function named after its type (`Point::sum` is `point__sum`) whose first parameter is `self`. `p.sum()` and `Point::sum(p)` are the same call: the receiver is copied into `self`, like any argument.
+
+```slab show=f,point__new,point__sum
+struct Point { x: int, y: int }
+
+impl Point {
+    fn new(x: int, y: int) -> Point { return Point { x: x, y: y }; }
+    fn sum(self) -> int { return self.x + self.y; }
+}
+
+fn f() -> int {
+    let p = Point::new(1, 2);
+    return p.sum();
+}
+```
+```mcfunction
+# function demo:f
+scoreboard players set #point__new.v_x demo 1
+scoreboard players set #point__new.v_y demo 2
+function demo:point__new
+data modify storage demo:vars f.t_0 set from storage demo:ret v
+data remove storage demo:ret v
+data modify storage demo:vars f.v_p set from storage demo:vars f.t_0
+data remove storage demo:vars f.t_0
+data modify storage demo:vars point__sum.v_self set from storage demo:vars f.v_p
+function demo:point__sum
+data remove storage demo:vars f.v_p
+return 1
+
+# function demo:point__new
+data modify storage demo:vars point__new.v_tmp set value {}
+execute store result storage demo:vars point__new.t_0 int 1 run scoreboard players get #point__new.v_x demo
+data modify storage demo:vars point__new.v_tmp.x set from storage demo:vars point__new.t_0
+data remove storage demo:vars point__new.t_0
+execute store result storage demo:vars point__new.t_0 int 1 run scoreboard players get #point__new.v_y demo
+data modify storage demo:vars point__new.v_tmp.y set from storage demo:vars point__new.t_0
+data remove storage demo:vars point__new.t_0
+data modify storage demo:ret v set from storage demo:vars point__new.v_tmp
+data remove storage demo:vars point__new.v_tmp
+return 1
+
+# function demo:point__sum
+execute store result score #point__sum.t_0 demo run data get storage demo:vars point__sum.v_self.x
+execute store result score #point__sum.t_1 demo run data get storage demo:vars point__sum.v_self.y
+scoreboard players operation #ret demo = #point__sum.t_0 demo
+scoreboard players operation #ret demo += #point__sum.t_1 demo
+data remove storage demo:vars point__sum.v_self
+return 1
+```
+
+### Option and Result
+
+`is_some`, `is_ok`, ... read the variant tag `t` into a score and compare it with the variant's index. `unwrap_or(d)` evaluates the default, then takes the stored value when there is one:
+
+```slab show=f,f/b0
+fn f(o: Option<int>) -> int {
+    return o.unwrap_or(9);
+}
+```
+```mcfunction
+# function demo:f
+scoreboard players set #f.v_or demo 9
+execute store result score #f.t_0 demo run data get storage demo:vars f.v_o.t
+execute if score #f.t_0 demo matches 1 run function demo:f/b0
+scoreboard players operation #ret demo = #f.v_or demo
+data remove storage demo:vars f.v_o
+return 1
+
+# function demo:f/b0
+execute store result score #f.v_or demo run data get storage demo:vars f.v_o.f0
+```
+
+`unwrap()` and `expect(msg)` check first. When the value is missing, the failure branch tells the players in chat (the line of your code is in the message), stops the pack if the program was built with `--abort-on-unwrap` (`datapack disable "file/<namespace>"`), and returns from the function with a zero value. Inside a context block, which cannot be left, it only reports.
+
+```slab show=f,f/b0
+fn f(o: Option<int>) -> int {
+    return o.unwrap();
+}
+```
+```mcfunction
+# function demo:f
+execute store result score #f.t_0 demo run data get storage demo:vars f.v_o.t
+execute unless score #f.t_0 demo matches 1 if function demo:f/b0 run return 1
+execute store result score #ret demo run data get storage demo:vars f.v_o.f0
+data remove storage demo:vars f.v_o
+return 1
+
+# function demo:f/b0
+tellraw @a {text:"",extra:["slab: unwrap on None (main.slab:2)"]}
+scoreboard players set #ret demo 0
+data remove storage demo:vars f.v_o
+return 1
+```
+
+`ok()` and `err()` turn a `Result` into an `Option`:
+
+```slab show=f,f/b0
+fn f(r: Result<int, str>) -> Option<int> {
+    return r.ok();
+}
+```
+```mcfunction
+# function demo:f
+data modify storage demo:vars f.v_opt set value {t:0}
+execute store result score #f.t_0 demo run data get storage demo:vars f.v_r.t
+execute if score #f.t_0 demo matches 0 run function demo:f/b0
+data modify storage demo:ret v set from storage demo:vars f.v_opt
+function demo:f/_drop
+return 1
+
+# function demo:f/b0
+data modify storage demo:vars f.v_opt set value {t:1}
+data modify storage demo:vars f.v_opt.f0 set from storage demo:vars f.v_r.f0
+```
+
 ## Minecraft commands
 
 A call whose arguments are constants is the plain command:

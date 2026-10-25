@@ -8,7 +8,7 @@ use std::fmt::{self, Write};
 use super::args::*;
 use super::error::{Check, Result, bail};
 use super::names::{Hole, IdOrTag, Objective, ResourceLocation, Word};
-use super::nbt::{Compound, NbtPath};
+use super::nbt::{Compound, NbtPath, write_quoted};
 use super::text::Text;
 
 // ---------------------------------------------------------------- shared bits
@@ -1089,6 +1089,8 @@ pub enum Command {
     Schedule(Schedule),
     Tag { targets: Selector, action: TagAction },
     Say(Arg<String>),
+    /// `datapack disable "file/<pack>"`: stops a pack (and reloads the data packs).
+    DatapackDisable(String),
     Tellraw { targets: Selector, message: Text },
     Kill(Option<Selector>),
     Summon { entity: Arg<ResourceLocation>, pos: Option<Pos>, nbt: Option<Compound> },
@@ -1287,6 +1289,12 @@ impl Check for Command {
             }
             Command::Schedule(Schedule::Clear(_)) => Ok(()),
             Command::Tag { targets, .. } => targets.check(),
+            Command::DatapackDisable(pack) => {
+                if pack.is_empty() || pack.contains(['"', '\\']) {
+                    bail!("a pack name is not empty and has no quotes or backslashes");
+                }
+                single_line("pack name", pack)
+            }
             Command::Say(Arg::Hole(_)) => Ok(()),
             Command::Say(Arg::Lit(m)) => {
                 single_line("say message", m)?;
@@ -1362,6 +1370,10 @@ impl fmt::Display for Command {
                 TagAction::List => write!(f, "tag {targets} list"),
             },
             Command::Say(m) => write!(f, "say {m}"),
+            Command::DatapackDisable(pack) => {
+                f.write_str("datapack disable ")?;
+                write_quoted(f, pack)
+            }
             Command::Tellraw { targets, message } => write!(f, "tellraw {targets} {message}"),
             Command::Kill(None) => f.write_str("kill"),
             Command::Kill(Some(s)) => write!(f, "kill {s}"),
@@ -1545,6 +1557,15 @@ mod tests {
         assert!(Command::Macro(MacroCommand::new().var("bad name")).check().is_err());
         assert!(Command::Macro(MacroCommand::new().text("say $(x)")).check().is_err());
         assert!(!Command::say("plain").is_macro());
+    }
+
+    #[test]
+    fn datapack_disable() {
+        let c = Command::DatapackDisable("file/my_pack".into());
+        assert_eq!(c.to_string(), "datapack disable \"file/my_pack\"");
+        assert!(c.check().is_ok());
+        assert!(Command::DatapackDisable("a\"b".into()).check().is_err());
+        assert!(Command::DatapackDisable(String::new()).check().is_err());
     }
 
     #[test]
