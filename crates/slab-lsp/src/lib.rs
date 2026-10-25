@@ -14,6 +14,7 @@ pub mod help;
 pub mod lines;
 pub mod signature;
 pub mod resolve;
+pub mod selector;
 pub mod server;
 pub mod state;
 pub mod symbols;

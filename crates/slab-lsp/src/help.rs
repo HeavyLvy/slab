@@ -84,3 +84,46 @@ pub fn selector_var(var: char) -> &'static str {
         _ => "entities",
     }
 }
+
+/// One option of a selector: `@e[key=value]`.
+pub struct SelKey {
+    pub name: &'static str,
+    /// What goes after the `=`, as a short description.
+    pub value: &'static str,
+    pub doc: &'static str,
+    /// Snippet inserted after the key is picked (the `=` included).
+    pub snippet: &'static str,
+    /// Whether the same key may appear more than once (`tag=a, tag=!b`).
+    pub repeatable: bool,
+}
+
+/// The selector options slab accepts (`sema/selector.rs`). `nbt=` and `advancements=` are not
+/// supported yet.
+pub const SELECTOR_KEYS: &[SelKey] = &[
+    SelKey { name: "type", value: "entity id, `#tag`, or `!` either", doc: "Only entities of this type: `type=minecraft:zombie`, a tag `type=#minecraft:skeletons`, or everything but it with `type=!minecraft:player`.", snippet: "type=${1:minecraft:zombie}", repeatable: true },
+    SelKey { name: "tag", value: "tag name, or `!name`", doc: "Only entities that have (`tag=boss`) or lack (`tag=!boss`) this tag. Repeat the option to require several.", snippet: "tag=${1:name}", repeatable: true },
+    SelKey { name: "team", value: "team name, or `!name`", doc: "Only entities on (`team=red`) or not on (`team=!red`) this team.", snippet: "team=${1:name}", repeatable: true },
+    SelKey { name: "name", value: "\"text\", or `!\"text\"`", doc: "Only entities with this exact custom name: `name=\"Bob\"`.", snippet: "name=\"${1:name}\"", repeatable: true },
+    SelKey { name: "distance", value: "range, like `..10`, `5..`, `3..8`", doc: "Distance from where the command runs, in blocks. `..10` is up to 10 blocks away, `5..` at least 5.", snippet: "distance=..${1:10}", repeatable: false },
+    SelKey { name: "limit", value: "a positive integer", doc: "At most this many entities. With `sort` unset, `@e` and `@a` pick in an arbitrary order; `@p`, `@n` and `@r` already imply their own limit of 1.", snippet: "limit=${1:1}", repeatable: false },
+    SelKey { name: "sort", value: "nearest | furthest | random | arbitrary", doc: "The order matches are taken in, which matters together with `limit`.", snippet: "sort=${1|nearest,furthest,random,arbitrary|}", repeatable: false },
+    SelKey { name: "scores", value: "{objective=range, ...}", doc: "Only entities whose scores are in range: `scores={kills=5.., deaths=..2}`. The objective is one you declared with `objective`.", snippet: "scores={${1:objective}=${2:1..}}", repeatable: false },
+    SelKey { name: "gamemode", value: "survival | creative | adventure | spectator, or `!` one", doc: "Only players in (`gamemode=creative`) or not in (`gamemode=!creative`) this game mode.", snippet: "gamemode=${1|survival,creative,adventure,spectator|}", repeatable: true },
+    SelKey { name: "level", value: "range, like `5..10`", doc: "Only players whose experience level is in the range.", snippet: "level=${1:1..}", repeatable: false },
+    SelKey { name: "predicate", value: "resource location, or `!` it", doc: "Only entities for which the predicate (a data pack `predicate/*.json`) is true: `predicate=mypack:is_burning`.", snippet: "predicate=${1:namespace:name}", repeatable: true },
+    SelKey { name: "x", value: "number", doc: "x of the search origin, instead of where the command runs. Use with `y`, `z`, `dx`, `dy`, `dz` to select entities inside a box.", snippet: "x=${1:0}", repeatable: false },
+    SelKey { name: "y", value: "number", doc: "y of the search origin.", snippet: "y=${1:64}", repeatable: false },
+    SelKey { name: "z", value: "number", doc: "z of the search origin.", snippet: "z=${1:0}", repeatable: false },
+    SelKey { name: "dx", value: "number", doc: "Size of a box along x, starting at the origin: entities touching the box match. Needs no `distance`.", snippet: "dx=${1:5}", repeatable: false },
+    SelKey { name: "dy", value: "number", doc: "Size of the box along y.", snippet: "dy=${1:5}", repeatable: false },
+    SelKey { name: "dz", value: "number", doc: "Size of the box along z.", snippet: "dz=${1:5}", repeatable: false },
+    SelKey { name: "x_rotation", value: "range of pitch, like `-30..30`", doc: "Only entities looking up or down within this range (degrees, -90 is straight up, 90 straight down).", snippet: "x_rotation=${1:-30..30}", repeatable: false },
+    SelKey { name: "y_rotation", value: "range of yaw, like `-45..45`", doc: "Only entities facing within this range of horizontal directions (degrees, -180 to 180).", snippet: "y_rotation=${1:-45..45}", repeatable: false },
+];
+
+/// A line about using variables, which every option but `sort`/`predicate` accepts.
+pub const SELECTOR_VARIABLES: &str = "Values can contain variables: `$name` or `${expr}` (`@e[tag=$t, distance=..${r * 2}]`). `sort` and `predicate` cannot. `nbt=` and `advancements=` are not supported yet.";
+
+pub fn selector_key(name: &str) -> Option<&'static SelKey> {
+    SELECTOR_KEYS.iter().find(|k| k.name == name)
+}

@@ -39,7 +39,7 @@ fn serve(connection: &Connection) -> Result<(), String> {
         "hoverProvider": true,
         "definitionProvider": true,
         "documentSymbolProvider": true,
-        "completionProvider": { "triggerCharacters": [".", ":"], "resolveProvider": false },
+        "completionProvider": { "triggerCharacters": [".", ":", "[", ",", "="], "resolveProvider": false },
         "signatureHelpProvider": { "triggerCharacters": ["(", ","] },
         "semanticTokensProvider": {
             "legend": {
@@ -215,6 +215,11 @@ fn completion_response(ws: &Workspace, params: &Value) -> Value {
     // The offset is built from the document the client has (== our overlay).
     let Some((_state, doc, _module)) = ws.locate(uri) else { return Value::Null };
     let Some(offset) = doc.lines.offset(&doc.text, pos, ws.enc) else { return Value::Null };
+    // `[`, `,` and `=` only open the popup inside a selector (`@e[` ...)
+    let trigger = params["context"]["triggerCharacter"].as_str();
+    if matches!(trigger, Some("[" | "," | "=")) && crate::selector::context(&doc.text, offset).is_none() {
+        return Value::Null;
+    }
     let Some(items) = completion::completions(ws, uri, offset) else { return Value::Null };
     let json_items: Vec<Value> = items
         .into_iter()

@@ -18,6 +18,9 @@ data packs (see `README.md` in the repository root).
 * **Hover** with types, function signatures and builtin documentation, plus explanations of
   keywords, attributes (`#[every]`), time literals (`2s` = 40 ticks), selectors (`@a`),
   `~`/`^` coordinates, and the values of constants and globals.
+* **Selector options**: inside `@e[`, completion lists the options (`type`, `distance`,
+  `scores`, `sort`, ...) with their value forms, offers values for `sort`/`gamemode` and your
+  objectives inside `scores={`; hovering an option or a bare `@e` explains them.
 * **Signature help** while typing a call: the parameter under the cursor is highlighted.
 * **Go to definition** for functions, globals, structs, fields, locals and imports —
   across module files.

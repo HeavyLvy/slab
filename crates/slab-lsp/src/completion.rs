@@ -21,6 +21,9 @@ pub fn completions(ws: &Workspace, uri: &str, offset: usize) -> Option<Vec<Item>
         return None;
     }
     let before = &doc.text[..offset.min(doc.text.len())];
+    if let Some(items) = crate::selector::completions(state, module, &doc.text, offset) {
+        return Some(items);
+    }
     if before.ends_with("::") {
         let chain = resolve_aliases(state, &doc.text, chain_before(before, before.len() - 2));
         return module_items(state, module, &chain);

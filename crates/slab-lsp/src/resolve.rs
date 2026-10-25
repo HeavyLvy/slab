@@ -311,8 +311,23 @@ impl ProjectState {
         let text = file.text.get(t.span.start as usize..t.span.end as usize)?;
         match &t.tok {
             Tok::Kw(k) => Some(crate::help::keyword(*k).to_owned()),
-            Tok::Selector { var, .. } => {
-                Some(format!("```slab\n{text}\n```\nselector: {}", crate::help::selector_var(*var)))
+            Tok::Selector { var, args } => {
+                if let Some((raw, span)) = args
+                    && let Some(h) = crate::selector::key_hover(raw, span.start as usize, offset)
+                {
+                    return Some(h);
+                }
+                let mut out = format!("```slab\n{text}\n```\nselector: {}", crate::help::selector_var(*var));
+                if args.is_none() {
+                    out.push_str("\n\nOptions go in brackets, e.g. `[type=zombie, distance=..10]`:\n\n");
+                    for k in crate::help::SELECTOR_KEYS {
+                        out.push_str(&format!("* `{}={}`\n", k.name, k.value));
+                    }
+                    out.push_str(&format!("\n{}", crate::help::SELECTOR_VARIABLES));
+                } else {
+                    out.push_str(&format!("\n\nHover an option for what it means. {}", crate::help::SELECTOR_VARIABLES));
+                }
+                Some(out)
             }
             tok => crate::help::literal(tok, text),
         }

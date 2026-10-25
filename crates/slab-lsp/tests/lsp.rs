@@ -488,3 +488,31 @@ fn signature_help_follows_the_argument_under_the_cursor() {
     assert_eq!((sig.params.len(), sig.active), (2, 1), "{} {}", sig.label, sig.active);
     assert!(slab_lsp::signature::signature_help(&ws, &uri, at("struct P")).is_none());
 }
+
+#[test]
+fn selectors_complete_and_explain_their_options() {
+    let d = Dir::new("selopts", &[("main.slab", "")]);
+    let mut ws = Workspace::default();
+    let uri = file_uri(&d.0.join("main.slab"));
+    let src = "import game::*;\nobjective kills = \"playerKillCount\";\nfn f() {\n    kill(@e[type=zombie, dis\n    kill(@a[sort=\n    kill(@a[scores={ki\n    kill(@e[distance=..10]);\n}\n";
+    ws.open(&uri, src, 1);
+    let at = |needle: &str| src.find(needle).unwrap() + needle.len();
+    let items = completion::completions(&ws, &uri, at("zombie, dis")).unwrap();
+    assert!(items.iter().any(|i| i.label == "distance" && i.insert.as_deref() == Some("distance=..${1:10}")), "{items:?}");
+    assert!(items.iter().any(|i| i.label == "tag"), "repeatable options stay");
+    assert!(!items.iter().any(|i| i.label == "fn" || i.label == "kill"), "only options are offered inside the brackets");
+    let items = completion::completions(&ws, &uri, at("@a[sort=")).unwrap();
+    assert!(items.iter().any(|i| i.label == "furthest"), "{items:?}");
+    let items = completion::completions(&ws, &uri, at("scores={ki")).unwrap();
+    assert!(items.iter().any(|i| i.label == "kills" && i.kind == 6), "{items:?}");
+
+    // hover, in a file whose selectors are closed
+    let src = "import game::*;\nfn f() {\n    kill(@e[distance=..10]);\n    kill(@e);\n}\n";
+    ws.change(&uri, src, 2);
+    let (_, doc, module) = ws.locate(&uri).unwrap();
+    let state = ws.project(&crate::state::root_for(&doc.path).0).unwrap();
+    let h = state.hover(module.unwrap(), src.find("distance=..10").unwrap() + 3).unwrap();
+    assert!(h.contains("Distance from where"), "{h}");
+    let h = state.hover(module.unwrap(), src.find("@e)").unwrap()).unwrap();
+    assert!(h.contains("all entities") && h.contains("`sort=") && h.contains("`scores="), "{h}");
+}
