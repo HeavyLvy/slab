@@ -222,11 +222,15 @@ fn build_project(key: PathBuf, root_file: &Path, standalone: bool, docs: &HashMa
                     },
                     program: m.program,
                 })
-                .collect();
+                .collect::<Vec<ModuleInfo>>();
+            // after a syntax error, the rest of that function is only partly known: problems the
+            // checker finds there are mostly consequences of the mistake, so they are not shown
+            let damaged = damaged_regions(&modules[..], &load_diags);
+            let outside = |d: &Diagnostic| !damaged.iter().any(|&(file, from, to)| d.file == file && d.span.start >= from && d.span.start < to);
             let mut errors = load_diags;
-            errors.extend(t.errors);
+            errors.extend(t.errors.into_iter().filter(|d| outside(d)));
             errors.sort_by_key(|d| (d.file, d.span.start));
-            let mut warnings = t.warnings;
+            let mut warnings: Vec<Diagnostic> = t.warnings.into_iter().filter(|d| outside(d)).collect();
             warnings.sort_by_key(|d| (d.file, d.span.start));
             let sources = project.sources;
             let root = project.root;
@@ -247,6 +251,25 @@ fn build_project(key: PathBuf, root_file: &Path, standalone: bool, docs: &HashMa
             io_error: Some(message),
         },
     }
+}
+
+/// For each file with a syntax error: from the first error to the end of the item (function,
+/// `impl`, ...) it is in, as `(file, start, end)`.
+fn damaged_regions(modules: &[ModuleInfo], syntax_and_load_errors: &[Diagnostic]) -> Vec<(usize, u32, u32)> {
+    let mut out: Vec<(usize, u32, u32)> = Vec::new();
+    for d in syntax_and_load_errors {
+        // problems with imports are not syntax errors
+        if d.message.starts_with("cannot find module") || d.message.contains("cannot be imported") {
+            continue;
+        }
+        let Some(m) = modules.iter().find(|m| m.file_idx == d.file) else { continue };
+        let end = m.program.items.iter().find(|i| i.span.start <= d.span.start && d.span.start < i.span.end).map_or(d.span.start + 1, |i| i.span.end);
+        match out.iter_mut().find(|r| r.0 == d.file && r.1 <= d.span.start && d.span.start < r.2) {
+            Some(r) => r.2 = r.2.max(end),
+            None => out.push((d.file, d.span.start, end)),
+        }
+    }
+    out
 }
 
 /// Diagnostics of a project grouped into one publish per open document, already converted

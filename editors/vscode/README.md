@@ -13,11 +13,17 @@ data packs (see `README.md` in the repository root).
 * **Documentation** written as `///` comment runs above functions, globals, structs and
   their fields, `const`s, parameters and `let` bindings (and `//!` at the top of a file for
   the module), shown on hover — also at use sites, other files, and completion lists.
-* **Hover** with types, function signatures and builtin documentation.
+* **Every syntax error at once**, not just the first: the parser recovers at the next
+  statement or item, and follow-on type errors inside a broken item are hidden.
+* **Hover** with types, function signatures and builtin documentation, plus explanations of
+  keywords, attributes (`#[every]`), time literals (`2s` = 40 ticks), selectors (`@a`),
+  `~`/`^` coordinates, and the values of constants and globals.
+* **Signature help** while typing a call: the parameter under the cursor is highlighted.
 * **Go to definition** for functions, globals, structs, fields, locals and imports —
   across module files.
-* **Completions**: keywords; builtins with argument snippets; struct fields and
-  list/string methods after `.`; module items after `import a::`; types after `: `.
+* **Completions** that keep working while the code is half-typed: keywords; local
+  variables and parameters with their types; builtins; struct fields and methods after `.`;
+  module items after `a::`; enum variants and functions after `Type::`; types after `: `.
 * **Outline** of every file: functions, structs, globals, consts, objectives.
 
 ## Setup

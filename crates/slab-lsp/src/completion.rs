@@ -36,7 +36,7 @@ pub fn completions(ws: &Workspace, uri: &str, offset: usize) -> Option<Vec<Item>
     if before.ends_with(':') {
         return type_items(state, module);
     }
-    plain_items(state, module)
+    plain_items(state, module, offset)
 }
 
 /// Which module chains to offer after `::`: deeper module names, plus the target module's items.
@@ -61,8 +61,33 @@ fn module_items(state: &ProjectState, module: usize, chain: &[String]) -> Option
             out.push(Item { label: def.name.clone(), kind: item_kind(def), detail: Some(def.detail.clone()), docs: def.docs.clone(), insert: None });
         }
     }
+    if chain.len() == 1 {
+        out.extend(type_members(state, module, &chain[0]));
+    }
     dedupe(&mut out);
     Some(out)
+}
+
+/// After `Type::`: the variants of an enum and the functions of its `impl` blocks.
+fn type_members(state: &ProjectState, module: usize, ty: &str) -> Vec<Item> {
+    let mut out = Vec::new();
+    let method_prefix = format!("{ty}::");
+    for m in &state.modules {
+        let visible = |d: &Def| m.name == state.modules[module].name || d.public;
+        for def in m.defs.defs() {
+            if def.kind == DefKind::Enum && def.name == ty && visible(def) {
+                for (name, written) in &def.variants {
+                    out.push(Item { label: name.clone(), kind: 20, detail: Some(format!("{ty}::{written}")), docs: None, insert: None });
+                }
+            }
+            if let Some(name) = def.name.strip_prefix(&method_prefix)
+                && def.kind == DefKind::Fn
+            {
+                out.push(Item { label: name.to_owned(), kind: 2, detail: Some(def.detail.clone()), docs: def.docs.clone(), insert: None });
+            }
+        }
+    }
+    out
 }
 
 /// Type names after ` : `.
@@ -87,7 +112,7 @@ fn type_items(state: &ProjectState, module: usize) -> Option<Vec<Item>> {
 }
 
 /// Keywords, builtins and the project's items (pub ones when they live in other modules).
-fn plain_items(state: &ProjectState, module: usize) -> Option<Vec<Item>> {
+fn plain_items(state: &ProjectState, module: usize, offset: usize) -> Option<Vec<Item>> {
     use slab::syntax::token::Kw;
     let mut out: Vec<Item> = Kw::ALL.iter().map(|k| Item { label: k.as_str().to_owned(), kind: 14, detail: None, docs: None, insert: None }).collect();
     // module heads; the functions themselves are offered after `std::` / `game::`
@@ -96,13 +121,20 @@ fn plain_items(state: &ProjectState, module: usize) -> Option<Vec<Item>> {
     }
     for m in &state.modules {
         for def in m.defs.defs().iter() {
-            if def.kind == DefKind::Import {
+            // methods (`Type::name`) are offered after `Type::` or a `.`, not on their own
+            if def.kind == DefKind::Import || def.name.contains("::") {
                 continue;
             }
             if m.name != state.modules[module].name && !def.public {
                 continue;
             }
             out.push(Item { label: def.name.clone(), kind: item_kind(def), detail: Some(def.detail.clone()), docs: def.docs.clone(), insert: None });
+        }
+    }
+    if let Some(hir) = &state.hir {
+        for (name, ty, mutable) in crate::analysis::locals_before(hir, module, offset) {
+            let detail = format!("{}{name}: {ty}", if mutable { "let mut " } else { "let " });
+            out.insert(0, Item { label: name, kind: 6, detail: Some(detail), docs: None, insert: None });
         }
     }
     dedupe(&mut out);
@@ -112,7 +144,7 @@ fn plain_items(state: &ProjectState, module: usize) -> Option<Vec<Item>> {
 /// Expands a module alias at the start of a `::` chain: after `import game::tag;` the chain
 /// `tag` stands for `game::tag`, and after `import game::*;` too. Reads the import lines from the
 /// text, because the file being typed in rarely parses.
-fn resolve_aliases(state: &ProjectState, text: &str, chain: Vec<String>) -> Vec<String> {
+pub(crate) fn resolve_aliases(state: &ProjectState, text: &str, chain: Vec<String>) -> Vec<String> {
     let Some(head) = chain.first() else { return chain };
     if module_index(state, &chain.join("::")).is_some() {
         return chain;
@@ -256,7 +288,7 @@ fn item_kind(def: &Def) -> u8 {
     }
 }
 
-fn module_index(state: &ProjectState, name: &str) -> Option<usize> {
+pub(crate) fn module_index(state: &ProjectState, name: &str) -> Option<usize> {
     state.modules.iter().position(|m| m.name == name)
 }
 
@@ -301,7 +333,7 @@ fn dedupe(items: &mut Vec<Item>) {
 }
 
 /// The identifier chain ending at `at`: `util::clamp` -> ["util", "clamp"].
-fn chain_before(text: &str, mut at: usize) -> Vec<String> {
+pub(crate) fn chain_before(text: &str, mut at: usize) -> Vec<String> {
     let mut out = Vec::new();
     while let Some(seg) = ident_before(text, at) {
         out.insert(0, seg.content);
@@ -334,8 +366,8 @@ fn ident_before(text: &str, at: usize) -> Option<Ident> {
 }
 
 /// Whether `offset` lies inside a string or f-string token (completion offers nothing there).
-fn inside_string(text: &str, offset: usize) -> bool {
-    crate::tokens::lex_lenient(text).iter().any(|t| {
+pub(crate) fn inside_string(text: &str, offset: usize) -> bool {
+    slab::syntax::lexer::lex_tolerant(text).0.iter().any(|t| {
         matches!(t.tok, Tok::Str(_) | Tok::FStr(_))
             && (t.span.start as usize..t.span.end as usize).contains(&offset.saturating_sub(1))
     })

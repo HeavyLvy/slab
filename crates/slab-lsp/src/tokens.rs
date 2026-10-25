@@ -160,7 +160,7 @@ fn collect_region(
     let base = region.start as usize;
     let end = (region.end as usize).min(src.len());
     let region_src = &src[base.min(end)..end];
-    for tok in lex_lenient(region_src) {
+    for tok in slab::syntax::lexer::lex_tolerant(region_src).0 {
         let span = Span::new(base + tok.span.start as usize, base + tok.span.end as usize);
         match &tok.tok {
             Tok::Kw(_) => emit(out, seen, span, ST::Keyword, 0),
@@ -261,40 +261,6 @@ fn emit(out: &mut Vec<SemTok>, seen: &mut HashSet<usize>, span: Span, ty: ST, mo
         return;
     }
     out.push(SemTok { start, len: (span.end - span.start) as usize, ty, mods });
-}
-
-/// A lex with error recovery: `lex` stops at the first bad character, so anything after it
-/// would lose highlighting. Retry from the end of the offending line.
-pub fn lex_lenient(src: &str) -> Vec<slab::syntax::token::Token> {
-    let mut out = Vec::new();
-    let mut pos = 0;
-    while pos <= src.len() {
-        match slab::syntax::lexer::lex(&src[pos..]) {
-            Ok(mut tokens) => {
-                tokens.pop(); // Eof
-                for t in &mut tokens {
-                    t.span.start += pos as u32;
-                    t.span.end += pos as u32;
-                }
-                out.extend(tokens);
-                break;
-            }
-            Err(d) => {
-                let bad = d.span.start as usize + pos;
-                if let Ok(mut ok) = slab::syntax::lexer::lex(&src[pos..bad.min(src.len())]) {
-                    ok.pop();
-                    for t in &mut ok {
-                        t.span.start += pos as u32;
-                        t.span.end += pos as u32;
-                    }
-                    out.extend(ok);
-                }
-                let next = src[bad.min(src.len())..].find('\n').map_or(src.len(), |i| bad.min(src.len()) + i + 1);
-                pos = next.max(bad + 1);
-            }
-        }
-    }
-    out
 }
 
 #[cfg(test)]

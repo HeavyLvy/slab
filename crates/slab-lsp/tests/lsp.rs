@@ -409,3 +409,82 @@ fn hover_shows_doc_comments() {
     let hover = state2.hover(module2.unwrap(), at).unwrap();
     assert!(hover.contains("A module of its own."), "{hover}");
 }
+#[test]
+fn several_syntax_errors_are_published_and_completion_survives_them() {
+    let d = Dir::new("manyerr", &[("main.slab", "")]);
+    let mut ws = Workspace::default();
+    let uri = file_uri(&d.0.join("main.slab"));
+    let src = "import std::print;\nstruct Point { x: int, y: int }\n\nfn first() {\n    let a = ;\n    print(1\n}\n\nfn second(p: Point) {\n    let q = 5\n    print(p.);\n    let z = (;\n}\n";
+    let publishes = ws.open(&uri, src, 1);
+    let msgs: Vec<&str> = publishes[0].diagnostics.iter().map(|x| x.message.as_str()).collect();
+    assert!(msgs.len() >= 3, "several errors at once, got {msgs:?}");
+
+    // completion after the dot still lists the fields of `p`
+    let at = src.find("p.)").unwrap() + 2;
+    let items = completion::completions(&ws, &uri, at).unwrap();
+    assert!(items.iter().any(|i| i.label == "x" && i.kind == 5) && items.iter().any(|i| i.label == "y"), "{items:?}");
+    // plain completion still offers keywords and the items of the file
+    let at = src.find("let q").unwrap();
+    let items = completion::completions(&ws, &uri, at).unwrap();
+    assert!(items.iter().any(|i| i.label == "let") && items.iter().any(|i| i.label == "Point"), "{items:?}");
+    // parameters and earlier lets are offered with their types, even in a function with errors
+    let at = src.find("let z").unwrap();
+    let items = completion::completions(&ws, &uri, at).unwrap();
+    assert!(items.iter().any(|i| i.label == "p" && i.kind == 6 && i.detail.as_deref().is_some_and(|d| d.ends_with("p: Point"))), "{items:?}");
+    assert!(items.iter().any(|i| i.label == "q" && i.kind == 6), "{items:?}");
+}
+
+#[test]
+fn hover_explains_keywords_attributes_and_literals() {
+    let d = Dir::new("helphover", &[("main.slab", "")]);
+    let mut ws = Workspace::default();
+    let uri = file_uri(&d.0.join("main.slab"));
+    let src = "import game::*;\n#[every(2s)]\nfn f() {\n    as @a at @s {\n        tp(@s, ~ ~1 ~);\n    }\n}\n";
+    ws.open(&uri, src, 1);
+    let (_, doc, module) = ws.locate(&uri).unwrap();
+    let state = ws.project(&crate::state::root_for(&doc.path).0).unwrap();
+    let hover = |needle: &str, extra: usize| state.hover(module.unwrap(), src.find(needle).unwrap() + extra).unwrap_or_default();
+    assert!(hover("fn f", 0).contains("Declares a function"));
+    assert!(hover("every", 0).contains("every N ticks"));
+    assert!(hover("2s", 0).contains("40 ticks"), "{}", hover("2s", 0));
+    assert!(hover("as @a", 0).contains("execute as"));
+    assert!(hover("@a", 0).contains("all players"));
+    assert!(hover("~ ~1", 0).contains("relative"));
+}
+
+#[test]
+fn completion_after_a_type_name_lists_variants_and_functions() {
+    let d = Dir::new("typecomp", &[("main.slab", "")]);
+    let mut ws = Workspace::default();
+    let uri = file_uri(&d.0.join("main.slab"));
+    let src = "enum Shape { Dot, Line(int, int) }\nimpl Shape {\n    fn origin() -> Shape { return Shape::Dot; }\n    fn len(self) -> int { return 0; }\n}\nfn f() {\n    let a = Shape::\n    let b = Option::\n}\n";
+    ws.open(&uri, src, 1);
+    let at = src.find("Shape::\n").unwrap() + "Shape::".len();
+    let items = completion::completions(&ws, &uri, at).unwrap();
+    assert!(items.iter().any(|i| i.label == "Dot" && i.kind == 20), "{items:?}");
+    assert!(items.iter().any(|i| i.label == "Line" && i.detail.as_deref() == Some("Shape::Line(int, int)")), "{items:?}");
+    assert!(items.iter().any(|i| i.label == "origin" && i.kind == 2) && items.iter().any(|i| i.label == "len"), "{items:?}");
+    let at = src.find("Option::").unwrap() + "Option::".len();
+    let items = completion::completions(&ws, &uri, at).unwrap();
+    assert!(items.iter().any(|i| i.label == "Some") && items.iter().any(|i| i.label == "unwrap"), "{items:?}");
+}
+
+#[test]
+fn signature_help_follows_the_argument_under_the_cursor() {
+    let d = Dir::new("sighelp", &[("main.slab", MAIN), ("util.slab", UTIL)]);
+    let mut ws = Workspace::default();
+    let uri = file_uri(&d.0.join("main.slab"));
+    let src = "import util;\nimport game::*;\nstruct P { x: int }\nimpl P {\n    fn add(self, k: int, m: int) -> int { return self.x + k; }\n}\nfn f(p: P) {\n    util::clamp(1, \n    summon(\"minecraft:cow\", ~, \n    p.add(1, (2 + 3), \n}\n";
+    ws.open(&uri, src, 1);
+    let at = |needle: &str| src.find(needle).unwrap() + needle.len();
+    let sig = slab_lsp::signature::signature_help(&ws, &uri, at("util::clamp(1, ")).expect("clamp");
+    assert!(sig.label.starts_with("fn clamp(x: int, lo: int, hi: int)"), "{}", sig.label);
+    assert_eq!(sig.active, 1);
+    assert_eq!(&sig.label[sig.params[1].0..sig.params[1].1], "lo: int");
+    let sig = slab_lsp::signature::signature_help(&ws, &uri, at("summon(\"minecraft:cow\", ~, ")).expect("summon");
+    assert!(sig.label.starts_with("fn summon(kind: str") && sig.active == 2, "{} {}", sig.label, sig.active);
+    // a method: `self` is not counted, nested parentheses do not add arguments
+    let sig = slab_lsp::signature::signature_help(&ws, &uri, at("p.add(1, (2 + 3), ")).expect("add");
+    assert_eq!((sig.params.len(), sig.active), (2, 1), "{} {}", sig.label, sig.active);
+    assert!(slab_lsp::signature::signature_help(&ws, &uri, at("struct P")).is_none());
+}

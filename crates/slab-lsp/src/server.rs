@@ -40,6 +40,7 @@ fn serve(connection: &Connection) -> Result<(), String> {
         "definitionProvider": true,
         "documentSymbolProvider": true,
         "completionProvider": { "triggerCharacters": [".", ":"], "resolveProvider": false },
+        "signatureHelpProvider": { "triggerCharacters": ["(", ","] },
         "semanticTokensProvider": {
             "legend": {
                 "tokenTypes": tokens::TOKEN_TYPES,
@@ -65,6 +66,7 @@ fn serve(connection: &Connection) -> Result<(), String> {
                     "textDocument/hover" => hover(&ws, params),
                     "textDocument/definition" => definition(&ws, params),
                     "textDocument/completion" => completion_response(&ws, params),
+                    "textDocument/signatureHelp" => signature_response(&ws, params),
                     "textDocument/documentSymbol" => document_symbols(&ws, params),
                     "textDocument/semanticTokens/full" => semantic_tokens(&ws, params),
                     other => {
@@ -184,6 +186,27 @@ fn definition(ws: &Workspace, params: &Value) -> Value {
     let range = state.lines[def.file_idx].range(text, def.span, ws.enc);
     let uri = path_to_uri(std::path::Path::new(state.sources.files[def.file_idx].name.as_str()));
     json!([{ "uri": uri, "range": range_value(range) }])
+}
+
+fn signature_response(ws: &Workspace, params: &Value) -> Value {
+    let Some(uri) = param_uri(params) else { return Value::Null };
+    let Some(pos) = param_position(params) else { return Value::Null };
+    let Some((_state, doc, _module)) = ws.locate(uri) else { return Value::Null };
+    let Some(offset) = doc.lines.offset(&doc.text, pos, ws.enc) else { return Value::Null };
+    let Some(sig) = crate::signature::signature_help(ws, uri, offset) else { return Value::Null };
+    // parameter labels are [start, end] offsets into the label, counted in the client's encoding
+    let units = |a: usize, b: usize| -> [usize; 2] {
+        match ws.enc {
+            crate::lines::Enc::Utf8 => [a, b],
+            crate::lines::Enc::Utf16 => [sig.label[..a].encode_utf16().count(), sig.label[..b].encode_utf16().count()],
+        }
+    };
+    let parameters: Vec<Value> = sig.params.iter().map(|&(a, b)| json!({ "label": units(a, b) })).collect();
+    let mut signature = json!({ "label": sig.label, "parameters": parameters, "activeParameter": sig.active });
+    if let Some(d) = &sig.docs {
+        signature["documentation"] = json!({ "kind": "markdown", "value": d });
+    }
+    json!({ "signatures": [signature], "activeSignature": 0, "activeParameter": sig.active })
 }
 
 fn completion_response(ws: &Workspace, params: &Value) -> Value {

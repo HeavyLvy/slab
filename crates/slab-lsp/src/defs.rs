@@ -35,6 +35,8 @@ pub struct Def {
     pub fields: Vec<(String, String)>,
     /// For structs: the field name spans, aligned with [`Def::fields`].
     pub field_spans: Vec<Span>,
+    /// For enums: variant (name, how it is written: `Some(T)`).
+    pub variants: Vec<(String, String)>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -59,6 +61,7 @@ impl DefIndex {
                 docs: None,
                 fields: Vec::new(),
                 field_spans: Vec::new(),
+                variants: Vec::new(),
             };
             match &item.kind {
                 ItemKind::Fn(f) => {
@@ -77,13 +80,13 @@ impl DefIndex {
                     def.kind = DefKind::Global;
                     def.name = v.name.name.clone();
                     def.name_span = v.name.span;
-                    def.detail = format!("global {}: {}", v.name.name, type_string(&v.ty));
+                    def.detail = format!("global {}: {}{}", v.name.name, type_string(&v.ty), literal_value(&v.init));
                 }
                 ItemKind::Const(v) => {
                     def.kind = DefKind::Const;
                     def.name = v.name.name.clone();
                     def.name_span = v.name.span;
-                    def.detail = format!("const {}: {}", v.name.name, type_string(&v.ty));
+                    def.detail = format!("const {}: {}{}", v.name.name, type_string(&v.ty), literal_value(&v.init));
                 }
                 ItemKind::Struct(s) => {
                     def.kind = DefKind::Struct;
@@ -108,6 +111,7 @@ impl DefIndex {
                         .map(|v| if v.fields.is_empty() { v.name.name.clone() } else { format!("{}({})", v.name.name, v.fields.iter().map(type_string).collect::<Vec<_>>().join(", ")) })
                         .collect();
                     def.detail = format!("enum {}{generics} {{ {} }}", e.name.name, variants.join(", "));
+                    def.variants = e.variants.iter().zip(variants).map(|(v, written)| (v.name.name.clone(), written)).collect();
                 }
                 ItemKind::Impl(i) => {
                     def.kind = DefKind::Impl;
@@ -189,6 +193,7 @@ fn method_def(type_name: &str, m: &ast::ImplFn) -> Def {
         docs: None,
         fields: Vec::new(),
         field_spans: Vec::new(),
+        variants: Vec::new(),
     }
 }
 
@@ -213,6 +218,14 @@ pub fn type_string(t: &ast::Type) -> String {
 }
 
 /// A short text form of an expression for details (`"dummy"`, `1`, ...) — literals only.
+/// ` = value` for a literal initialiser, nothing for anything else.
+fn literal_value(e: &ast::Expr) -> String {
+    match &e.kind {
+        ExprKind::Str(_) | ExprKind::Int(_) | ExprKind::Float(_) | ExprKind::Bool(_) => format!(" = {}", expr_string(e)),
+        _ => String::new(),
+    }
+}
+
 fn expr_string(e: &ast::Expr) -> String {
     match &e.kind {
         ExprKind::Str(s) => format!("\"{s}\""),

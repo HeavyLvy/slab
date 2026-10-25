@@ -296,7 +296,7 @@ impl Walker<'_> {
                     }
                 }
             }
-            ExprKind::Int(_) | ExprKind::Float(_) | ExprKind::Str(_) | ExprKind::Bool(_) | ExprKind::Unit | ExprKind::Rel { .. } => {}
+            ExprKind::Int(_) | ExprKind::Float(_) | ExprKind::Str(_) | ExprKind::Bool(_) | ExprKind::Unit | ExprKind::Error | ExprKind::Rel { .. } => {}
         }
     }
 
@@ -514,6 +514,19 @@ pub fn hir_local_at(hir: &shir::Hir, module: usize, offset: usize) -> Option<(us
         }
     }
     None
+}
+
+/// The parameters and `let` bindings of the function around `offset` that are declared before
+/// it (innermost shadowing wins; block scopes are not tracked, so a binding from a block that
+/// already ended can still be listed).
+pub fn locals_before(hir: &shir::Hir, module: usize, offset: usize) -> Vec<(String, String, bool)> {
+    let Some(f) = hir.fns.iter().find(|f| f.module == module && contains(f.span, offset)) else { return Vec::new() };
+    let mut out: Vec<(String, String, bool)> = Vec::new();
+    for l in f.locals.iter().filter(|l| (l.span.end as usize) <= offset && !l.name.is_empty()) {
+        out.retain(|(n, ..)| *n != l.name);
+        out.push((l.name.clone(), ty_string(&l.ty, hir), l.mutable));
+    }
+    out
 }
 
 fn visit_hir_stmt(s: &HirStmt, offset: usize, best: &mut Option<(u32, HirExpr)>) {

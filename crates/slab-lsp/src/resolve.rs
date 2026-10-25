@@ -299,11 +299,31 @@ impl ProjectState {
 
     /// Markdown hover text at a position.
     pub fn hover(&self, module: usize, offset: usize) -> Option<String> {
+        self.name_hover(module, offset).or_else(|| self.token_hover(module, offset))
+    }
+
+    /// Hover for what is not a name: keywords, literals, selectors, coordinates.
+    fn token_hover(&self, module: usize, offset: usize) -> Option<String> {
+        use slab::syntax::token::Tok;
+        let file = &self.sources.files[self.modules.get(module)?.file_idx];
+        let (tokens, _) = slab::syntax::lexer::lex_tolerant(&file.text);
+        let t = tokens.iter().find(|t| (t.span.start as usize) <= offset && offset < t.span.end as usize)?;
+        let text = file.text.get(t.span.start as usize..t.span.end as usize)?;
+        match &t.tok {
+            Tok::Kw(k) => Some(crate::help::keyword(*k).to_owned()),
+            Tok::Selector { var, .. } => {
+                Some(format!("```slab\n{text}\n```\nselector: {}", crate::help::selector_var(*var)))
+            }
+            tok => crate::help::literal(tok, text),
+        }
+    }
+
+    fn name_hover(&self, module: usize, offset: usize) -> Option<String> {
         let program = &self.modules.get(module)?.program;
         let hit = analysis::hit_at(program, offset)?;
         let module_name = &self.modules[module].name;
         match hit.role {
-            Role::AttrName => None,
+            Role::AttrName => crate::help::attribute(&hit.name).map(str::to_owned),
             Role::Decl(kind) => {
                 let def = self.modules[module].defs.by_name(&hit.name)?.clone();
                 Some(def_hover(&def, module_name, kind))
