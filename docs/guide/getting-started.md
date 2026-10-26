@@ -2,19 +2,41 @@
 
 ## Install
 
-slab is built with Rust. From a clone of the repository:
+There are two programs: `slab`, the compiler you run in a terminal, and `slab-lsp`, the language server that gives editors errors, hover and completion. Pick one way to get them.
+
+**Linux and macOS** (x86_64 Linux, Apple silicon): download the latest release.
 
 ```text
-./install.sh
+curl -fsSL https://raw.githubusercontent.com/HeavyLvy/slab/main/install.sh | sh
 ```
 
-This installs three things: the `slab` command (`cargo install --path .`), the `slab-lsp` language server, and the VS Code extension. It needs a Rust toolchain and, for the extension, Node.js and the `code` command. To install only the compiler:
+**Windows** (PowerShell):
 
 ```text
-cargo install --path . --locked
+irm https://raw.githubusercontent.com/HeavyLvy/slab/main/install.ps1 | iex
 ```
 
-Check it works with `slab --help`.
+Both put `slab` and `slab-lsp` in a per-user folder (`~/.local/bin`, or `%LOCALAPPDATA%\slab\bin`) and tell you if it is not on your `PATH`. Set `SLAB_VERSION` to install an older version and `SLAB_INSTALL_DIR` to choose the folder. The scripts are short; read them first if you like.
+
+**With Rust**, on any platform:
+
+```text
+cargo install slab-lang slab-lsp                   # builds from crates.io
+cargo binstall slab-lang slab-lsp                  # or download the prebuilt release (needs cargo-binstall)
+cargo install --git https://github.com/HeavyLvy/slab slab-lang slab-lsp   # the newest, unreleased code
+```
+
+(`slab-lang` is the crate that installs the `slab` command.) You can also download the archive for your platform from the [releases page](https://github.com/HeavyLvy/slab/releases) and unpack it anywhere on your `PATH`.
+
+Check it works with `slab --version`.
+
+### The editor extension
+
+For VS Code, install the **slab** extension (`heavylvy.slab-vscode`): search for it in the Extensions view, or run `code --install-extension heavylvy.slab-vscode`. VSCodium and other editors that use [Open VSX](https://open-vsx.org/) find it there too. It gives highlighting, errors and warnings as you type, hover, completion, go to definition, an outline and formatting.
+
+The version for your platform (Windows x64, macOS Apple silicon, Linux x64) already contains the language server. On other platforms it looks for `slab-lsp` in your `PATH` and in `~/.cargo/bin`, so install it as above, or set *slab: Server Path* in the settings. A `.vsix` file for each platform is also attached to every release (*Extensions: Install from VSIX...*).
+
+To remove slab again: delete the two programs (or `cargo uninstall slab-lang slab-lsp`) and uninstall the extension.
 
 ## Your first project
 
@@ -83,7 +105,7 @@ A pack creates scoreboard objectives, storage, and sometimes entities and tags. 
 
 ## The editor
 
-The VS Code extension (installed by `install.sh`) understands `.slab` files: errors are shown as you type (all of them, not just the first), completion works inside half-typed code, and hover shows types, signatures and documentation. Ctrl+click on `kill`, `tag::add`, `Entity`, … opens the real declaration in the standard library. Inside a selector, `@e[` completes the options (`type`, `distance`, `scores`, …).
+The VS Code extension (see [the editor extension](#the-editor-extension)) understands `.slab` files: errors are shown as you type (all of them, not just the first), completion works inside half-typed code, and hover shows types, signatures and documentation. Ctrl+click on `kill`, `tag::add`, `Entity`, … opens the real declaration in the standard library. Inside a selector, `@e[` completes the options (`type`, `distance`, `scores`, …).
 
 ## Next
 

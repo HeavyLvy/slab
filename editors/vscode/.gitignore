@@ -2,3 +2,6 @@
 node_modules/
 dist/
 *.vsix
+
+# the language server a platform package bundles (copied in by the release workflow)
+server/

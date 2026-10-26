@@ -54,10 +54,29 @@ tools/docs.sh                   # build it into target/book (static HTML, host i
 
 `.github/workflows/docs.yml` publishes it with GitHub Pages (Settings -> Pages -> Source: GitHub Actions).
 
+## Install
+
+Linux (x86_64) and macOS (Apple silicon):
+
+```
+curl -fsSL https://raw.githubusercontent.com/HeavyLvy/slab/main/install.sh | sh
+```
+
+Windows (PowerShell):
+
+```
+irm https://raw.githubusercontent.com/HeavyLvy/slab/main/install.ps1 | iex
+```
+
+Or, with Rust, on any platform: `cargo install slab-lang slab-lsp` (builds from crates.io; the crate `slab-lang` installs the `slab` command), `cargo binstall slab-lang slab-lsp` (prebuilt), or `cargo install --git https://github.com/HeavyLvy/slab slab-lang slab-lsp` (the newest code). Prebuilt archives are on the [releases page](https://github.com/HeavyLvy/slab/releases).
+
+For VS Code, install the **slab** extension (`code --install-extension heavylvy.slab-vscode`, or search the Extensions view; on VSCodium it comes from [Open VSX](https://open-vsx.org/)). It highlights `.slab` files immediately and, with the `slab-lsp` language server (bundled in the Windows, macOS and Linux versions), adds live errors and warnings from the real compiler, hover with types and builtin docs, go to definition, completion, an outline and formatting. The grammar is generated: `crates/slab-lsp` writes it from the compiler's own keyword/builtin lists, and a test fails if it goes stale.
+
+Working on slab itself: `tools/dev-install.sh` builds this checkout and installs the compiler, the server and the extension (see [CONTRIBUTING.md](CONTRIBUTING.md)).
+
 ## Use
 
 ```
-cargo build --release
 slab new my_project              # Slab.toml + src/main.slab
 cd my_project
 slab build                       # -> build/<name>/ (a data pack folder), like `cargo build`
@@ -80,34 +99,6 @@ Copy the folder (or zip) into `<world>/datapacks/` and `/reload`. To remove ever
 * `slab fmt` formats code, and names that break the naming conventions are warned about (see `docs/reference/style.md`).
 
 Limits worth knowing: no general `float` type yet, and one function call chain may run at most 65,536 commands per tick (Minecraft's limit; the compiler warns, and `task fn` spreads the work over ticks).
-
-## Install
-
-```
-./install.sh    # `slab` and `slab-lsp` with cargo install, and the VS Code extension
-```
-
-`--skip-cli` / `--skip-extension` do half of it, `--dry-run` prints the commands, `--uninstall` removes both.
-It needs cargo, and node + npm + the `code` command (or `codium`, or `CODE=<path>`) for the extension.
-
-## Editor support
-
-By hand, the same steps:
-
-```
-cargo install --path . --locked                # the compiler
-cargo install --path crates/slab-lsp --locked  # the language server
-cd editors/vscode && npm install && npm run package && code --install-extension slab-vscode-0.1.0.vsix
-```
-
-Alternatively build locally with `cargo build --release`; the extension looks for the server
-at `slab.server.path`, then `<workspace>/target/release/slab-lsp`, then PATH.
-
-The VS Code extension highlights `.slab` files immediately (TextMate grammar) and, with
-`slab-lsp` on hand, adds live errors and warnings from the real compiler, hover with types
-and builtin docs, go to definition, completion (builtins with snippets, struct fields,
-module items, import paths), and an outline. The grammar is generated: `crates/slab-lsp`
-writes it from the compiler's own keyword/builtin lists, and a test fails if it goes stale.
 
 ## Learn more
 

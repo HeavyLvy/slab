@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <rect width="256" height="256" rx="48" fill="#16213a"/>
+  <!-- a slab: top face, front face, side face -->
+  <polygon points="128,70 214,112 128,154 42,112" fill="#c9d3e3"/>
+  <polygon points="42,112 128,154 128,200 42,158" fill="#8794ab"/>
+  <polygon points="128,154 214,112 214,158 128,200" fill="#5d6a82"/>
+  <!-- a command-block green square on the top face -->
+  <polygon points="128,96 160,112 128,128 96,112" fill="#45c26b"/>
+</svg>

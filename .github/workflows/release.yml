@@ -1,6 +1,9 @@
 # Publishes a release when a version tag (v1.2.3, v1.2.3-rc.1) is pushed: checks that the tag
-# matches the versions in the repository, builds `slab` and `slab-lsp` for three platforms and the
-# VS Code extension, and creates the GitHub release with the changelog section as its notes.
+# matches the versions in the repository, builds `slab` and `slab-lsp` for three platforms, the
+# VS Code extension (one package per platform with the language server inside, and a universal
+# one without), and creates the GitHub release with the changelog section as its notes.
+# Then it publishes to the VS Code Marketplace, Open VSX and crates.io, each only if its token
+# is set as a repository secret (VSCE_PAT, OVSX_PAT, CARGO_REGISTRY_TOKEN; see CONTRIBUTING.md).
 name: release
 
 on:
@@ -40,9 +43,9 @@ jobs:
     strategy:
       matrix:
         include:
-          - { os: ubuntu-latest, name: linux-x86_64, exe: "" }
-          - { os: macos-latest, name: macos-arm64, exe: "" }
-          - { os: windows-latest, name: windows-x86_64, exe: ".exe" }
+          - { os: ubuntu-latest, name: linux-x86_64, exe: "", vsce_target: linux-x64 }
+          - { os: macos-latest, name: macos-arm64, exe: "", vsce_target: darwin-arm64 }
+          - { os: windows-latest, name: windows-x86_64, exe: ".exe", vsce_target: win32-x64 }
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -55,12 +58,28 @@ jobs:
           mkdir "$dir"
           cp "target/release/slab${{ matrix.exe }}" "target/release/slab-lsp${{ matrix.exe }}" LICENSE NOTICE README.md "$dir/"
           if [ "${{ matrix.exe }}" = ".exe" ]; then 7z a "$dir.zip" "$dir" >/dev/null; else tar czf "$dir.tar.gz" "$dir"; fi
+      # the extension for this platform, with the language server inside
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: editors/vscode/package-lock.json
+      - name: extension with the server bundled
+        shell: bash
+        working-directory: editors/vscode
+        run: |
+          npm ci
+          mkdir -p server
+          cp "../../target/release/slab-lsp${{ matrix.exe }}" server/
+          npm run package:target -- ${{ matrix.vsce_target }}
+          mv ./*.vsix ../../
       - uses: actions/upload-artifact@v4
         with:
           name: slab-${{ matrix.name }}
           path: |
             slab-*.tar.gz
             slab-*.zip
+            slab-vscode-*.vsix
 
   extension:
     needs: check
@@ -96,7 +115,35 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           version="${{ needs.check.outputs.version }}"
+          (cd dist && sha256sum * > SHA256SUMS)
           awk -v v="$version" '$0 ~ "^## \\[" v "\\]" {on=1; next} /^## \[/ {on=0} on' CHANGELOG.md > notes.md
           flag=""
           case "$version" in *-*) flag="--prerelease" ;; esac
           gh release create "$GITHUB_REF_NAME" dist/* --title "slab $version" --notes-file notes.md $flag
+
+  publish-extension:
+    needs: [check, release]
+    uses: ./.github/workflows/publish-extension.yml
+    with:
+      tag: ${{ github.ref_name }}
+    secrets: inherit
+
+  publish-crates:
+    needs: [check, release]
+    runs-on: ubuntu-latest
+    env:
+      CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: slab-lang (the compiler) and slab-lsp (the language server)
+        run: |
+          if [ -z "$CARGO_REGISTRY_TOKEN" ]; then echo "CARGO_REGISTRY_TOKEN is not set: not publishing to crates.io"; exit 0; fi
+          cargo publish -p slab-lang --locked
+          # slab-lsp needs the compiler crate in the index first
+          for attempt in 1 2 3 4 5 6 7 8 9 10; do
+            if cargo publish -p slab-lsp --locked; then exit 0; fi
+            echo "slab-lang is not in the index yet; waiting"
+            sleep 30
+          done
+          exit 1

@@ -31,26 +31,29 @@ data packs (see `README.md` in the repository root).
 
 ## Setup
 
-The extension needs the `slab-lsp` binary from this repository:
+The Windows (x64), macOS (Apple silicon) and Linux (x64) versions of the extension contain the
+language server, so there is nothing else to install for the editor features. To build and run
+programs you also need the `slab` command: see
+[Install](https://heavylvy.github.io/slab/guide/getting-started.html#install) (a one-line script, or
+`cargo install slab-lang slab-lsp`).
 
-```
-cargo build --release -p slab-lsp
-```
-
-The server is found automatically at `<workspace>/target/release/slab-lsp`, or set
-*slab: Server Path* (`slab.server.path`) to an explicit path (or put `slab-lsp` on PATH).
+On other platforms the extension looks for `slab-lsp` on your `PATH` and in `~/.cargo/bin`;
+install it with `cargo install slab-lsp`, or set *slab: Server Path* (`slab.server.path`) to
+an explicit path. In a folder you have not marked as trusted, only the bundled server and `PATH`
+are used.
 
 ## Building the extension
 
 ```
 cd editors/vscode
 npm install
-npm run install      # compile + package a .vsix + install it into VS Code
+npm run vsix         # compile + package a .vsix + install it into VS Code
 ```
 
-`npm run grammar` regenerates `syntaxes/slab.tmLanguage.json` from the compiler's own
-definitions (so a grammar never drifts from the language); the language server runs a test
-that fails if the committed grammar is stale.
+(`npm run package:target -- linux-x64` makes a platform package; it expects the server in
+`server/`, as the release workflow puts it.) `npm run grammar` regenerates
+`syntaxes/slab.tmLanguage.json` from the compiler's own definitions (so a grammar never drifts
+from the language); the language server runs a test that fails if the committed grammar is stale.
 
 ## Notes
 

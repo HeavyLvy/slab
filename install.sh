@@ -1,98 +1,72 @@
-#!/usr/bin/env bash
-# Installs slab on this machine:
-#   * the compiler (`slab`) and the language server (`slab-lsp`) with `cargo install`
-#   * the VS Code extension (highlighting + language server client)
+#!/bin/sh
+# Installs the slab compiler (`slab`) and language server (`slab-lsp`) from the latest GitHub
+# release, without a clone or a Rust toolchain:
 #
-# Usage: ./install.sh [--skip-cli] [--skip-extension] [--dry-run] [--uninstall]
-# Environment: CODE=<path>  the VS Code command to use (default: code, then codium)
-set -euo pipefail
-cd "$(dirname "$0")"
+#   curl -fsSL https://raw.githubusercontent.com/HeavyLvy/slab/main/install.sh | sh
+#
+# Linux (x86_64) and macOS (Apple silicon). On Windows use install.ps1; elsewhere
+# `cargo install slab-lang slab-lsp` builds it from source.
+#
+# Environment:
+#   SLAB_VERSION      install this version (0.1.0 or v0.1.0) instead of the latest
+#   SLAB_INSTALL_DIR  where to put the programs (default: ~/.local/bin)
+set -eu
 
-EXTENSION_ID="heavylvy.slab-vscode"
-cli=1
-extension=1
-dry=0
-uninstall=0
+repo="HeavyLvy/slab"
+dir="${SLAB_INSTALL_DIR:-$HOME/.local/bin}"
 
-for arg in "$@"; do
-    case "$arg" in
-        --skip-cli) cli=0 ;;
-        --skip-extension) extension=0 ;;
-        --dry-run) dry=1 ;;
-        --uninstall) uninstall=1 ;;
-        -h | --help)
-            sed -n '2,8p' "$0" | sed 's/^# \{0,1\}//'
-            exit 0
-            ;;
-        *)
-            echo "unknown option: $arg (try --help)" >&2
-            exit 2
-            ;;
-    esac
+say() { printf '%s\n' "$*"; }
+fail() { printf 'error: %s\n' "$*" >&2; exit 1; }
+
+command -v curl >/dev/null 2>&1 || fail "curl is required"
+command -v tar >/dev/null 2>&1 || fail "tar is required"
+
+os=$(uname -s)
+arch=$(uname -m)
+case "$os-$arch" in
+    Linux-x86_64 | Linux-amd64) platform="linux-x86_64" ;;
+    Darwin-arm64 | Darwin-aarch64) platform="macos-arm64" ;;
+    *) fail "no prebuilt binaries for $os $arch; build from source with: cargo install slab-lang slab-lsp" ;;
+esac
+
+if [ -n "${SLAB_VERSION:-}" ]; then
+    version="${SLAB_VERSION#v}"
+else
+    # the latest release is a redirect to .../releases/tag/vX.Y.Z (no API call, no rate limit)
+    url=$(curl -fsSL -o /dev/null -w '%{url_effective}' "https://github.com/$repo/releases/latest") || fail "could not look up the latest release"
+    version="${url##*/v}"
+fi
+[ -n "$version" ] || fail "could not work out the version to install"
+
+name="slab-$version-$platform"
+base="https://github.com/$repo/releases/download/v$version"
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
+
+say "Downloading slab $version for $platform..."
+curl -fsSL "$base/$name.tar.gz" -o "$tmp/$name.tar.gz" || fail "could not download $base/$name.tar.gz (is $version a release?)"
+
+# check the archive against the release's checksums when it has them
+if curl -fsSL "$base/SHA256SUMS" -o "$tmp/SHA256SUMS" 2>/dev/null; then
+    expected=$(grep " $name.tar.gz\$" "$tmp/SHA256SUMS" | cut -d' ' -f1)
+    if command -v sha256sum >/dev/null 2>&1; then actual=$(sha256sum "$tmp/$name.tar.gz" | cut -d' ' -f1)
+    elif command -v shasum >/dev/null 2>&1; then actual=$(shasum -a 256 "$tmp/$name.tar.gz" | cut -d' ' -f1)
+    else actual=""; fi
+    if [ -n "$expected" ] && [ -n "$actual" ] && [ "$expected" != "$actual" ]; then
+        fail "checksum mismatch for $name.tar.gz"
+    fi
+fi
+
+tar -xzf "$tmp/$name.tar.gz" -C "$tmp"
+mkdir -p "$dir"
+for bin in slab slab-lsp; do
+    install -m 755 "$tmp/$name/$bin" "$dir/$bin"
 done
+say "Installed slab $version to $dir (slab, slab-lsp)"
 
-run() {
-    echo "+ $*"
-    if [ "$dry" -eq 0 ]; then "$@"; fi
-}
-
-need() {
-    if ! command -v "$1" >/dev/null 2>&1; then
-        echo "error: '$1' not found. $2" >&2
-        exit 1
-    fi
-}
-
-find_code() {
-    if [ -n "${CODE:-}" ]; then echo "$CODE"; return; fi
-    for c in code codium; do
-        if command -v "$c" >/dev/null 2>&1; then echo "$c"; return; fi
-    done
-    return 1
-}
-
-if [ "$uninstall" -eq 1 ]; then
-    if [ "$cli" -eq 1 ]; then
-        need cargo "Install Rust from https://rustup.rs."
-        run cargo uninstall slab || true
-    fi
-    if [ "$extension" -eq 1 ] && code_bin=$(find_code); then
-        run "$code_bin" --uninstall-extension "$EXTENSION_ID" || true
-    fi
-    exit 0
-fi
-
-if [ "$cli" -eq 1 ]; then
-    need cargo "Install Rust from https://rustup.rs."
-    # the compiler (slab) is the root crate, the language server (slab-lsp) a workspace member
-    run cargo install --path . --locked --force
-    run cargo install --path crates/slab-lsp --locked --force
-    cargo_bin="${CARGO_HOME:-$HOME/.cargo}/bin"
-    case ":$PATH:" in
-        *":$cargo_bin:"*) ;;
-        *) echo "note: $cargo_bin is not on your PATH; add it so 'slab' and 'slab-lsp' can be found." ;;
-    esac
-fi
-
-if [ "$extension" -eq 1 ]; then
-    need node "Install Node.js (https://nodejs.org) to build the extension."
-    need npm "Install Node.js (https://nodejs.org) to build the extension."
-    if ! code_bin=$(find_code); then
-        echo "error: neither 'code' nor 'codium' found. Install the VS Code command ('Shell Command: Install code command in PATH'), or set CODE=<path>." >&2
-        exit 1
-    fi
-    (
-        cd editors/vscode
-        run npm install --no-audit --no-fund
-        run npm run package
-        if [ "$dry" -eq 0 ]; then
-            vsix=$(ls -t ./*.vsix | head -n 1)
-        else
-            vsix="./slab-vscode-<version>.vsix"
-        fi
-        run "$code_bin" --install-extension "$vsix" --force
-    )
-    echo "Reload VS Code windows that are already open (Developer: Reload Window)."
-fi
-
-echo "Done. Try: slab --help"
+case ":$PATH:" in
+    *":$dir:"*) ;;
+    *) say "note: $dir is not on your PATH. Add this to your shell profile:  export PATH=\"$dir:\$PATH\"" ;;
+esac
+say "Try: slab --version"
+say "Editor support: install the \"slab\" extension in VS Code (it finds slab-lsp there)."

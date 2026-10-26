@@ -25,6 +25,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
+      # the compiler crate must build from the files cargo publishes
+      - run: cargo package -p slab-lang --locked
       # the code examples in the repository must stay formatted
       - run: cargo run -q -- fmt --check examples src/stdlib
 
@@ -42,3 +44,5 @@ jobs:
           cache-dependency-path: editors/vscode/package-lock.json
       - run: npm ci
       - run: npm run compile
+      # the package must be accepted by the marketplace tooling (icon, manifest, ignore rules)
+      - run: npm run package

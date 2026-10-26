@@ -1,7 +1,18 @@
 {
   "name": "slab-vscode",
   "displayName": "slab",
-  "description": "slab language support: syntax highlighting and a language server (diagnostics, hover, go to definition, completion, outline) for .slab programs",
+  "description": "Language support for slab, the language that compiles to Minecraft data packs: highlighting, diagnostics, hover, completion, go to definition, formatting.",
+  "icon": "images/icon.png",
+  "galleryBanner": { "color": "#16213a", "theme": "dark" },
+  "preview": true,
+  "keywords": ["slab", "minecraft", "datapack", "data pack", "mcfunction", "language server"],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": "limited",
+      "description": "In an untrusted workspace the language server is only taken from the extension itself or your PATH, never from the workspace's build folder, and slab.server.path is ignored.",
+      "restrictedConfigurations": ["slab.server.path"]
+    }
+  },
   "version": "0.1.0",
   "author": "HeavyLvy",
   "publisher": "heavylvy",
@@ -13,7 +24,9 @@
     "vscode": "^1.84.0"
   },
   "categories": [
-    "Programming Languages"
+    "Programming Languages",
+    "Formatters",
+    "Snippets"
   ],
   "main": "./dist/extension.js",
   "activationEvents": [],
@@ -50,7 +63,7 @@
         "slab.server.path": {
           "type": "string",
           "default": "",
-          "description": "Path of the slab-lsp executable. Empty: uses target/release/slab-lsp in the workspace, then slab-lsp from PATH."
+          "description": "Path of the slab-lsp executable. Empty: the server bundled with the extension, then target/release/slab-lsp of a trusted workspace, then slab-lsp from ~/.cargo/bin and PATH."
         },
         "slab.trace.server": {
           "type": "string",
@@ -70,8 +83,9 @@
     "watch": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --platform=node --format=cjs --target=node18 --watch",
     "typecheck": "tsc -p . --noEmit",
     "grammar": "cargo run -q -p slab-lsp -- grammar syntaxes",
-    "package": "npm run compile && vsce package --no-dependencies --allow-missing-repository",
-    "vsix": "npm run package && code --install-extension slab-vscode-0.1.0.vsix"
+    "package": "npm run compile && vsce package --no-dependencies",
+    "package:target": "npm run compile && vsce package --no-dependencies --target",
+    "vsix": "npm run package && code --install-extension \"$(ls -t slab-vscode-*.vsix | head -n 1)\""
   },
   "devDependencies": {
     "@types/node": "^22",

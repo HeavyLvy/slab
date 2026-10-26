@@ -1,0 +1,48 @@
+# Publishes the VS Code extension packages of a GitHub release to the VS Code Marketplace
+# (secret VSCE_PAT) and to Open VSX (secret OVSX_PAT). A store whose secret is not set is skipped.
+# The release workflow calls this after creating a release; run it by hand to publish again, for
+# instance after fixing a token ("Run workflow" in the Actions tab).
+name: publish-extension
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: "the release to publish, such as v0.1.1"
+        type: string
+        required: true
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "the release to publish, such as v0.1.1"
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    # a pre-release (v1.0.0-rc.1) stays out of the stores
+    if: ${{ !contains(inputs.tag, '-') }}
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VSCE_PAT: ${{ secrets.VSCE_PAT }}
+      OVSX_PAT: ${{ secrets.OVSX_PAT }}
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: the packages of the release
+        run: gh release download "${{ inputs.tag }}" --repo "$GITHUB_REPOSITORY" --pattern '*.vsix' --dir vsix && ls -l vsix
+      - name: VS Code Marketplace
+        run: |
+          if [ -z "$VSCE_PAT" ]; then echo "VSCE_PAT is not set: not publishing to the VS Code Marketplace"; exit 0; fi
+          npx --yes @vscode/vsce@3 publish --packagePath vsix/*.vsix
+      - name: Open VSX
+        run: |
+          if [ -z "$OVSX_PAT" ]; then echo "OVSX_PAT is not set: not publishing to Open VSX"; exit 0; fi
+          for package in vsix/*.vsix; do
+            npx --yes ovsx@0 publish "$package"
+          done
