@@ -6,6 +6,7 @@ use crate::codegen;
 use crate::datapack::{DataPack, ResourceLocation, Word};
 use crate::diag::{Diagnostic, Severity, SourceMap};
 use crate::lower;
+use crate::manifest::{self, Manifest};
 use crate::project::{self, LoadError};
 use crate::sema::{self, ModuleInput};
 
@@ -24,6 +25,8 @@ pub struct Options {
 pub struct Compiled {
     pub pack: DataPack,
     pub namespace: String,
+    /// The project directory: the one with `Slab.toml`, or the one with `main.slab`.
+    pub project_dir: std::path::PathBuf,
     pub warnings: Vec<Diagnostic>,
     pub sources: SourceMap,
 }
@@ -83,34 +86,54 @@ pub struct Checked {
     pub modules: usize,
 }
 
-fn load_and_check(entry: &Path) -> Result<(project::Project, sema::Checked), CompileError> {
+type Loaded = (project::Project, sema::Checked, std::path::PathBuf, Option<Manifest>);
+
+fn load_and_check(entry: &Path) -> Result<Loaded, CompileError> {
     let root_file = project::find_root_file(entry).map_err(CompileError::Io)?;
     let project = match project::load(&root_file) {
         Ok(p) => p,
         Err(LoadError::Io(m)) => return Err(CompileError::Io(m)),
         Err(LoadError::Invalid { sources, diagnostics }) => return Err(CompileError::Source { sources, errors: diagnostics, warnings: Vec::new() }),
     };
+    // a mistake in Slab.toml is reported even when only checking
+    let (project_dir, manifest) = project_manifest(&project.root)?;
     let inputs: Vec<ModuleInput> = project.modules.iter().map(|m| ModuleInput { name: &m.name, file: m.file, program: &m.program, std: m.std }).collect();
     match sema::check_modules(&inputs) {
-        Ok(checked) => Ok((project, checked)),
+        Ok(checked) => Ok((project, checked, project_dir, manifest)),
         Err(report) => Err(CompileError::Source { sources: project.sources, errors: report.errors, warnings: report.warnings }),
     }
 }
 
 /// Parses and type-checks a project.
 pub fn check(entry: &Path) -> Result<Checked, CompileError> {
-    let (project, checked) = load_and_check(entry)?;
+    let (project, checked, ..) = load_and_check(entry)?;
     Ok(Checked { functions: checked.hir.fns.iter().filter(|f| !f.std).count(), modules: project.modules.iter().filter(|m| !m.std).count(), warnings: checked.warnings, sources: project.sources })
 }
 
-/// Compiles a project to a data pack.
-pub fn compile(entry: &Path, opts: &Options) -> Result<Compiled, CompileError> {
-    let (project, checked) = load_and_check(entry)?;
-    let namespace = opts.namespace.clone().unwrap_or_else(|| default_namespace(&project.root));
-    validate_namespace(&namespace).map_err(CompileError::Io)?;
-    let description = opts.description.clone().unwrap_or_else(|| format!("{namespace} (compiled by slab)"));
+/// The `Slab.toml` of the project whose source root is `root` (`<project>/src`), and the project's
+/// directory. A project without one is the source root itself.
+fn project_manifest(root: &Path) -> Result<(std::path::PathBuf, Option<Manifest>), CompileError> {
+    let root = &root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+    if root.file_name().is_some_and(|n| n == manifest::SOURCE_DIR)
+        && let Some(dir) = root.parent()
+        && dir.join(manifest::FILE).is_file()
+    {
+        return Ok((dir.to_path_buf(), Some(manifest::load(dir).map_err(CompileError::Io)?)));
+    }
+    Ok((root.to_path_buf(), None))
+}
 
-    let gen_opts = codegen::GenOptions { sources: &project.sources, abort_on_unwrap: opts.abort_on_unwrap, pack_id: opts.pack_id.clone().unwrap_or_else(|| format!("file/{namespace}")) };
+/// Compiles a project to a data pack. Settings come from the command line, then `Slab.toml`.
+pub fn compile(entry: &Path, opts: &Options) -> Result<Compiled, CompileError> {
+    let (project, checked, project_dir, manifest) = load_and_check(entry)?;
+    let namespace = opts.namespace.clone().or_else(|| manifest.as_ref().map(Manifest::namespace)).unwrap_or_else(|| default_namespace(&project_dir));
+    validate_namespace(&namespace).map_err(CompileError::Io)?;
+    let manifest_description = manifest.as_ref().and_then(|m| m.description.clone()).filter(|d| !d.trim().is_empty());
+    let description = opts.description.clone().or(manifest_description).unwrap_or_else(|| format!("{namespace} (compiled by slab)"));
+    let abort_on_unwrap = opts.abort_on_unwrap || manifest.as_ref().and_then(|m| m.abort_on_unwrap).unwrap_or(false);
+    let pack_id = opts.pack_id.clone().or_else(|| manifest.as_ref().and_then(|m| m.pack_id.clone())).unwrap_or_else(|| format!("file/{namespace}"));
+
+    let gen_opts = codegen::GenOptions { sources: &project.sources, abort_on_unwrap, pack_id };
     let program = match codegen::generate(&checked.hir, &namespace, &description, &gen_opts) {
         Ok(p) => p,
         Err(errors) => return Err(CompileError::Source { sources: project.sources, errors, warnings: checked.warnings }),
@@ -122,7 +145,7 @@ pub fn compile(entry: &Path, opts: &Options) -> Result<Compiled, CompileError> {
         return Err(CompileError::Backend(format!("the generated data pack is invalid (this is a bug or a backend limit):\n{}", list.join("\n"))));
     }
     let warnings = checked.warnings.into_iter().filter(|d| d.severity == Severity::Warning).collect();
-    Ok(Compiled { pack, namespace, warnings, sources: project.sources })
+    Ok(Compiled { pack, namespace, project_dir, warnings, sources: project.sources })
 }
 
 #[cfg(test)]

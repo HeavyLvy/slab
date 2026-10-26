@@ -7,17 +7,21 @@ use slab::diag::SourceFile;
 use slab::syntax::parse;
 
 const USAGE: &str = "usage:
+  slab new NAME                 create a project: NAME/Slab.toml and NAME/src/main.slab
+  slab init                     make the current directory a project (moves .slab files into src/)
   slab build [PATH] [options]   compile a project to a data pack
   slab check [PATH]             parse and type-check a project, reporting errors and warnings
   slab parse <file.slab>        parse one file and print its syntax tree
 
-PATH is a project directory containing main.slab, or the path of main.slab (default: .).
-Other .slab files are modules: `import a::b;` loads a/b.slab next to main.slab.
+A project is a directory with a Slab.toml and its code in src/, where src/main.slab is the root
+module. PATH is that directory, or any directory inside it (default: .), or the path of main.slab.
+Other .slab files are modules: `import a::b;` loads src/a/b.slab. (A bare directory with a
+main.slab and no Slab.toml also works.)
 
-build options:
-  -o, --out DIR          write the data pack folder here (default: PATH/build/<namespace>)
+build options (they override Slab.toml):
+  -o, --out DIR          write the data pack folder here (default: <project>/build/<namespace>)
   --zip                  also write DIR.zip
-  --namespace NAME       data pack namespace (default: the project directory's name)
+  --namespace NAME       data pack namespace (default: from Slab.toml, else the directory's name)
   --description TEXT     description shown by /datapack list
   --abort-on-unwrap      a failed unwrap()/expect() also runs `datapack disable` for the pack
   --pack-id ID           the pack id for that (default: file/<namespace>)";
@@ -29,6 +33,14 @@ fn main() -> ExitCode {
         return ExitCode::from(2);
     };
     match cmd.as_str() {
+        "new" => match rest {
+            [name] => new_project(Path::new(name)),
+            _ => usage_error("`slab new` takes the name of the project"),
+        },
+        "init" => match rest {
+            [] => init_project(Path::new(".")),
+            _ => usage_error("`slab init` takes no arguments"),
+        },
         "build" => build(rest),
         "check" => match rest {
             [] => check(Path::new(".")),
@@ -123,8 +135,7 @@ fn build(args: &[String]) -> ExitCode {
     };
     print_warnings(&compiled.sources, &compiled.warnings);
 
-    let root = if b.path.is_dir() { b.path.clone() } else { b.path.parent().map(Path::to_path_buf).unwrap_or_default() };
-    let out = b.out.clone().unwrap_or_else(|| root.join("build").join(&compiled.namespace));
+    let out = b.out.clone().unwrap_or_else(|| compiled.project_dir.join("build").join(&compiled.namespace));
     if let Err(e) = compiled.pack.write_dir(&out, true) {
         eprintln!("error: {e}");
         return ExitCode::from(1);
@@ -159,6 +170,99 @@ fn parse_file(path: &str) -> ExitCode {
         }
         Err(d) => {
             eprint!("{}", file.render(&d));
+            ExitCode::from(1)
+        }
+    }
+}
+
+const HELLO: &str = "import std::print;
+
+#[load]
+fn hello() {
+    print(\"hello from NAME\");
+}
+";
+
+fn write_new(dir: &Path, name: &str) -> Result<(), String> {
+    let write = |path: PathBuf, text: String| std::fs::write(&path, text).map_err(|e| format!("cannot write {}: {e}", path.display()));
+    std::fs::create_dir_all(dir.join(slab::manifest::SOURCE_DIR)).map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
+    write(dir.join(slab::manifest::FILE), slab::manifest::template(name))?;
+    let main = dir.join(slab::manifest::SOURCE_DIR).join(slab::project::ROOT_FILE);
+    if !main.exists() {
+        write(main, HELLO.replace("NAME", name))?;
+    }
+    let ignore = dir.join(".gitignore");
+    if !ignore.exists() {
+        write(ignore, "/build\n".to_owned())?;
+    }
+    Ok(())
+}
+
+fn new_project(dir: &Path) -> ExitCode {
+    let Some(name) = dir.file_name().map(|n| n.to_string_lossy().into_owned()) else { return usage_error("give the project a name: `slab new my_pack`") };
+    if dir.exists() {
+        eprintln!("error: {} already exists (use `slab init` inside it to make it a project)", dir.display());
+        return ExitCode::from(1);
+    }
+    match write_new(dir, &name) {
+        Ok(()) => {
+            println!("created project `{name}` in {}\nbuild it with: cd {} && slab build", dir.display(), dir.display());
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("error: {e}");
+            ExitCode::from(1)
+        }
+    }
+}
+
+/// Whether the directory (or something below it) holds a `.slab` file.
+fn has_slab_files(dir: &Path) -> bool {
+    std::fs::read_dir(dir).into_iter().flatten().flatten().any(|e| {
+        let p = e.path();
+        if p.is_dir() { has_slab_files(&p) } else { p.extension().is_some_and(|x| x == "slab") }
+    })
+}
+
+fn init_project(dir: &Path) -> ExitCode {
+    if dir.join(slab::manifest::FILE).exists() {
+        eprintln!("error: {} already has a {}", dir.display(), slab::manifest::FILE);
+        return ExitCode::from(1);
+    }
+    let canonical = dir.canonicalize().unwrap_or_else(|_| dir.to_path_buf());
+    let name = canonical.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "slab".to_owned());
+    // an existing flat project: its .slab files and the folders of modules move into src/
+    let src = dir.join(slab::manifest::SOURCE_DIR);
+    let mut moved = Vec::new();
+    if dir.join(slab::project::ROOT_FILE).is_file() {
+        if let Err(e) = std::fs::create_dir_all(&src) {
+            eprintln!("error: cannot create {}: {e}", src.display());
+            return ExitCode::from(1);
+        }
+        for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+            let p = entry.path();
+            let file_name = entry.file_name().to_string_lossy().into_owned();
+            let is_module = if p.is_dir() { !matches!(file_name.as_str(), "src" | "build" | "target") && !file_name.starts_with('.') && has_slab_files(&p) } else { p.extension().is_some_and(|x| x == "slab") };
+            if is_module {
+                if let Err(e) = std::fs::rename(&p, src.join(&file_name)) {
+                    eprintln!("error: cannot move {}: {e}", p.display());
+                    return ExitCode::from(1);
+                }
+                moved.push(file_name);
+            }
+        }
+    }
+    match write_new(dir, &name) {
+        Ok(()) => {
+            println!("created {} for `{name}`", slab::manifest::FILE);
+            if !moved.is_empty() {
+                moved.sort();
+                println!("moved into {}/: {}", slab::manifest::SOURCE_DIR, moved.join(", "));
+            }
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("error: {e}");
             ExitCode::from(1)
         }
     }

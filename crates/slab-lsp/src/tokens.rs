@@ -291,7 +291,7 @@ mod tests {
     fn tokens_never_overlap() {
         valid("import util;\n\n#[load]\nfn boot() {\n    let s = \"a\\\"b\";\n    print(f\"x {s} y\");\n    as @a at @s {\n        effect.give(@s, \"minecraft:speed\", 10s);\n    }\n}");
         // the e2e project for good measure
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/projects/e2e/main.slab");
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/projects/e2e/src/main.slab");
         let text = std::fs::read_to_string(path).unwrap();
         valid(&text);
     }

@@ -26,7 +26,7 @@ Rules for the docs:
 ## The pipeline
 
 ```text
-main.slab + modules --project.rs--> parsed modules --syntax--> --sema--> HIR --codegen--> IR --lower--> datapack --> pack folder/zip
+Slab.toml + src/main.slab + modules --project.rs--> parsed modules --syntax--> --sema--> HIR --codegen--> IR --lower--> datapack --> pack folder/zip
                       (load)         (lexer, parser)        (types)      (typed)  (HIR->IR)  (IR->commands)  (typed commands)
 ```
 
@@ -53,7 +53,7 @@ The frontend, `codegen` and `lower` must never `format!` a command, SNBT, JSON o
 ## Working on the compiler
 
 - `cargo test` (unit + integration), `cargo clippy --all-targets` (kept at zero warnings).
-- `slab build [PATH] [-o DIR] [--zip] [--namespace NS]`, `slab check [PATH]`, `slab parse FILE`. Examples: `examples/slab/*.slab` (single files, must parse + check), `examples/projects/hello` (small multi-file project), `examples/projects/e2e` (the end-to-end test project).
+- `slab new NAME`, `slab init`, `slab build [PATH] [-o DIR] [--zip] [--namespace NS]`, `slab check [PATH]`, `slab parse FILE`. A project is a `Slab.toml` plus `src/main.slab` (`docs/lang/modules.md`, `src/manifest.rs`); a bare directory with a `main.slab` still works. Examples: `examples/slab/*.slab` (single files, must parse + check), `examples/projects/hello` (small multi-file project), `examples/projects/e2e` (the end-to-end test project).
 - A language feature touches several places: grammar doc -> parser (+ tests) -> checker rules (+ `docs/lang/semantics.md`, + tests in `src/sema/tests.rs`) -> `codegen` (+ `docs/lang/codegen.md`, + tests in `src/compile.rs`) -> IR/lowering if it needs a runtime construct -> **a case in `examples/projects/e2e` with an expected value in `checks.json`**.
 - Adding a keyword, operator, builtin or selector letter is visible to the editor tooling: run `cargo run -p slab-lsp -- grammar` to regenerate the extension's TextMate grammar (a drift test in `crates/slab-lsp` fails until you do).
 

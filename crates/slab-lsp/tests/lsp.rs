@@ -334,7 +334,7 @@ fn standalone_files_check_without_main_slab() {
 
 #[test]
 fn line_positions_round_trip_on_the_examples() {
-    for file in [examples().join("projects/e2e/main.slab"), examples().join("projects/e2e/mathx.slab")] {
+    for file in [examples().join("projects/e2e/src/main.slab"), examples().join("projects/e2e/src/mathx.slab")] {
         let text = std::fs::read_to_string(&file).unwrap();
         let idx = LineIndex::new(&text);
         let p = idx.position(&text, text.len() / 2, Enc::Utf8);
@@ -345,7 +345,7 @@ fn line_positions_round_trip_on_the_examples() {
 
 #[test]
 fn the_examples_parse_and_the_e2e_project_checks() {
-    let e2e = examples().join("projects/e2e/main.slab");
+    let e2e = examples().join("projects/e2e/src/main.slab");
     let mut ws = Workspace::default();
     let uri = file_uri(&e2e);
     let text = std::fs::read_to_string(&e2e).unwrap();

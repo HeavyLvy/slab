@@ -1,0 +1,4 @@
+[project]
+name = "hello"
+version = "0.1.0"
+description = "a small multi-file project"

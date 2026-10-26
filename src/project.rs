@@ -1,12 +1,16 @@
 //! Loading a multi-file project: `main.slab` is the root module, every other `.slab` file is a
 //! module that is loaded when something imports it. `import a::b;` means the file `a/b.slab`
-//! relative to the directory of `main.slab` (always from the project root, never relative to the
+//! relative to the directory of `main.slab` (always from the source root, never relative to the
 //! importing file).
+//!
+//! A project has a `Slab.toml` (`manifest.rs`) and keeps its code in `src/`, with `src/main.slab`
+//! as the root. A bare directory with a `main.slab` and no `Slab.toml` still works.
 
 use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 
 use crate::diag::{Diagnostic, SourceFile, SourceMap};
+use crate::manifest;
 use crate::syntax::ast::{self, ItemKind};
 use crate::syntax::parse_tolerant;
 
@@ -23,7 +27,7 @@ pub struct Module {
 }
 
 pub struct Project {
-    /// The directory containing `main.slab`.
+    /// The directory containing `main.slab` (`src/` in a project with a `Slab.toml`).
     pub root: PathBuf,
     pub sources: SourceMap,
     /// `modules[0]` is `main`.
@@ -37,16 +41,30 @@ pub enum LoadError {
     Invalid { sources: SourceMap, diagnostics: Vec<Diagnostic> },
 }
 
-/// Resolves what the user passed to `slab build`: a directory containing `main.slab`, or the
-/// path of a `main.slab` itself.
+/// Resolves what the user passed to `slab build`: a project directory (the one with `Slab.toml`,
+/// or inside it, like Cargo; a bare directory with a `main.slab` also works), or the path of a
+/// `main.slab` itself.
 pub fn find_root_file(path: &Path) -> Result<PathBuf, String> {
-    let file = if path.is_dir() { path.join(ROOT_FILE) } else { path.to_path_buf() };
-    if !file.is_file() {
-        return Err(if path.is_dir() {
-            format!("no `{ROOT_FILE}` in {}", path.display())
+    if path.is_dir() {
+        let dir = if path.join(manifest::FILE).is_file() {
+            Some(path.to_path_buf())
+        } else if path.join(ROOT_FILE).is_file() {
+            return Ok(path.join(ROOT_FILE));
         } else {
-            format!("cannot read {}", path.display())
-        });
+            manifest::find_dir(path)
+        };
+        let Some(dir) = dir else {
+            return Err(format!("no `{}` in {} or any directory above it (create a project with `slab new NAME`)", manifest::FILE, path.display()));
+        };
+        let file = dir.join(manifest::SOURCE_DIR).join(ROOT_FILE);
+        if !file.is_file() {
+            return Err(format!("{} expects the root module at {} (create `{}/{ROOT_FILE}`)", manifest::FILE, file.display(), manifest::SOURCE_DIR));
+        }
+        return Ok(file);
+    }
+    let file = path.to_path_buf();
+    if !file.is_file() {
+        return Err(format!("cannot read {}", path.display()));
     }
     if file.file_name().is_none_or(|n| n != ROOT_FILE) {
         return Err(format!("the project entry point must be named `{ROOT_FILE}`, not {}", file.display()));
@@ -130,7 +148,7 @@ fn load_inner(root_file: &Path, overlay: &Overlay, tolerant: bool) -> Result<(Pr
             let target = module_file(&root, &segs);
             if !target.is_file() {
                 let rel = format!("{}.slab", segs.join("/"));
-                diagnostics.push(Diagnostic::new(format!("cannot find module `{key}`"), span).hint(format!("create the file `{rel}` next to `{ROOT_FILE}`")).in_file(file));
+                diagnostics.push(Diagnostic::new(format!("cannot find module `{key}`"), span).hint(format!("create the file `{rel}` next to `{ROOT_FILE}` (in the same directory)")).in_file(file));
                 continue;
             }
             // module numbers follow discovery order: main first, then in order of first import
@@ -261,6 +279,20 @@ mod tests {
         assert!(find_root_file(&d.0.join("other.slab")).unwrap_err().contains("must be named `main.slab`"));
         assert!(find_root_file(&d.0.join("sub")).unwrap_err().contains("cannot read"));
         let empty = Dir::new("empty", &[("x/readme.txt", "")]);
-        assert!(find_root_file(&empty.0.join("x")).unwrap_err().contains("no `main.slab`"));
+        assert!(find_root_file(&empty.0.join("x")).unwrap_err().contains("no `Slab.toml`"));
+    }
+
+    #[test]
+    fn a_manifest_puts_the_root_module_in_src() {
+        let d = Dir::new("manifest", &[("Slab.toml", "[project]\nname = \"p\"\n"), ("src/main.slab", "import util;"), ("src/util.slab", ""), ("src/deep/readme.txt", "")]);
+        let want = d.0.join("src/main.slab");
+        assert_eq!(find_root_file(&d.0).unwrap(), want);
+        assert_eq!(find_root_file(&d.0.join("src")).unwrap(), want, "from inside the project, like Cargo");
+        assert_eq!(find_root_file(&d.0.join("src/deep")).unwrap(), want);
+        assert_eq!(find_root_file(&want).unwrap(), want);
+        let p = load(&want).ok().expect("loads");
+        assert_eq!(p.root, d.0.join("src"), "modules are found next to src/main.slab");
+        let bare = Dir::new("nosrc", &[("Slab.toml", "[project]\nname = \"p\"\n")]);
+        assert!(find_root_file(&bare.0).unwrap_err().contains("expects the root module at"));
     }
 }

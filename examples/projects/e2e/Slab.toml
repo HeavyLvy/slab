@@ -1,0 +1,4 @@
+[project]
+name = "e2e"
+version = "0.1.0"
+description = "end-to-end test project (tools/verify_all.sh)"

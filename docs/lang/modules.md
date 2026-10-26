@@ -1,16 +1,37 @@
 # Projects and modules
 
-A slab project is a directory with a `main.slab` at its root. `main.slab` is the entry module (like `main.rs` or `main.c`). Every other `.slab` file is a **module** that is loaded when something imports it. Implemented in `src/project.rs` (loading) and `src/sema/check.rs` (scopes, visibility).
+A slab project is a directory with a `Slab.toml` and its code in `src/`, where `src/main.slab` is the entry module (like `main.rs`). Every other `.slab` file is a **module** that is loaded when something imports it. Implemented in `src/manifest.rs` (`Slab.toml`), `src/project.rs` (loading) and `src/sema/check.rs` (scopes, visibility).
 
 ```
 my_game/
-  main.slab          # root module, always "main"
-  util.slab          # module `util`
-  game/
-    arena.slab       # module `maps::arena`
+  Slab.toml          # the project's description
+  src/
+    main.slab        # root module, always "main"
+    util.slab        # module `util`
+    maps/
+      arena.slab     # module `maps::arena`
+  build/             # slab build writes the data pack here (ignore it in git)
 ```
 
-`slab build my_game` compiles the whole project to one data pack.
+`slab build` (in the project, or any folder inside it, like Cargo) compiles the whole project to one data pack, `slab new NAME` creates a project, and `slab init` turns a flat folder with a `main.slab` into one by moving its `.slab` files into `src/`.
+
+## `Slab.toml`
+
+```toml
+[project]
+name = "my_game"                 # required; the namespace unless `namespace` says otherwise
+version = "0.1.0"
+description = "Shown by /datapack list"
+namespace = "my_game"            # optional: lowercase, letters, digits and _ - . +
+
+[build]
+abort-on-unwrap = false          # a failed unwrap() also runs `datapack disable`
+pack-id = "file/my_game"         # the pack that command disables
+```
+
+Only this part of TOML is read (tables, `key = "text" | true | false | 123`, `#` comments). A key the compiler does not know is an error with its line, so a typo cannot be ignored silently. The namespace is `namespace`, else `name` with every character that is not a letter or digit turned into `_` and lowercased (`My-Game` is `my_game`). The command line wins over the file (`--namespace`, `--description`, `--abort-on-unwrap`, `--pack-id`).
+
+A bare directory with a `main.slab` and no `Slab.toml` still builds (its modules sit next to it, and its name is the namespace), which is handy for a quick experiment; `slab init` upgrades it.
 
 ## Importing
 
@@ -22,7 +43,7 @@ import util::{clamp, Point};    // items brought in unqualified: clamp(x), Point
 import util::*;                 // every pub item of util, unqualified (an explicit import or own item wins)
 ```
 
-* `import a::b;` always means the file `a/b.slab` **relative to the directory containing `main.slab`**, never relative to the importing file. There is no `super`/`self`, so a path means the same thing everywhere.
+* `import a::b;` always means the file `a/b.slab` **relative to the directory containing `main.slab`** (`src/`), never relative to the importing file. There is no `super`/`self`, so a path means the same thing everywhere.
 * The module name bound by `import a::b;` is its last segment (`b`) unless renamed with `as`. A braced list imports items instead and binds no module name.
 * Imports are top-level only, and a file's imports are private to it (no re-exporting; `pub import` is an error).
 * `main.slab` cannot be imported. A module cannot import itself.

@@ -9,6 +9,7 @@ pub mod datapack;
 pub mod diag;
 pub mod ir;
 pub mod lower;
+pub mod manifest;
 pub mod project;
 pub mod sema;
 pub mod stdlib;

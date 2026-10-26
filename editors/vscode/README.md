@@ -54,8 +54,8 @@ that fails if the committed grammar is stale.
 
 ## Notes
 
-* A project is a directory with a `main.slab`; the server finds it by walking up from every
-  opened file. A `.slab` file under no project gets checked by itself.
+* A project is a `Slab.toml` with its code in `src/main.slab`; the server finds the `main.slab` by
+  walking up from every opened file. A `.slab` file under no project gets checked by itself.
 * Unsaved edits are checked with the in-buffer text.
 * Only syntax errors show one at a time (the parser stops at its first); type errors are
   all reported together.

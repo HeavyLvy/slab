@@ -1,3 +1,5 @@
 /target
+# slab build output (slab build writes <project>/build/<namespace>)
+build/
 
 # editors/vscode has its own .gitignore (node_modules, dist, *.vsix)
