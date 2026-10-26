@@ -79,6 +79,10 @@ tools/verify_all.sh          # builds and checks all three packs below; prints z
 3. **Doubles (done, `docs/lang/doubles.md`)**: `NearDouble` (4 decimals, read directly, ±21,474 blocks) and `FarDouble` (6 decimals, read through a scratch marker, whole world) in `std.slab`, written in slab with operators calling methods. **Floats (next)**: type `float` = a float tag in storage; arithmetic by `data modify .. set compute default float {provider}` (providers compose, so one command per expression), `int(f)` truncates toward zero, comparisons via `floor`/`ceil` of the difference. Float coordinates work through macro holes. No truncation happens implicitly. See `docs/mc/02-commands-core.md` section 8.1 and `docs/mc/04-data-formats.md` section 3.9.
 4. **Tasks for long loops (done, `docs/lang/tasks.md`)**: `task fn name(..) { .. }` may take many ticks; its loops are time-sliced (about N iterations per tick) and the code after a loop runs when it finishes (the task body becomes a state machine over static slots); `start name(args)` launches it, one running instance per task. Normal functions stay unchanged and keep the 65536-commands-per-tick limit.
 
+## Documentation site
+
+`docs/` is an mdBook (`book.toml`, `docs/SUMMARY.md`; `tools/docs.sh serve|build`, output in `target/book`). Written pages: `docs/introduction.md`, `docs/guide/` (every ```slab block there is compiled by `tests/docs_examples.rs`, so keep examples complete or self-contained; use ```text for snippets that are not programs), `docs/reference/cli.md` and `slab-toml.md` (update them with any new option). `docs/reference/std.md` is **generated** from the `///` comments of `src/stdlib/*.slab` by `src/stdref.rs`: after changing the library run `UPDATE_DOCS=1 cargo test --test stdref`. `docs/lang/` and `docs/mc/` are the design and Minecraft notes, included as they are. A new page must be added to `docs/SUMMARY.md`. A new keyword needs adding to `docs/theme/slab-highlight.js` (a test checks).
+
 ## Project layout
 
 - `src/lib.rs` + modules above; `src/main.rs` the CLI.

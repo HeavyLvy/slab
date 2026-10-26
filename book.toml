@@ -1,0 +1,16 @@
+[book]
+title = "slab"
+authors = ["HeavyLvy"]
+description = "A statically typed language that compiles to Minecraft data packs"
+language = "en"
+src = "docs"
+
+[build]
+# `target/` is already ignored by git
+build-dir = "target/book"
+
+[output.html]
+default-theme = "navy"
+preferred-dark-theme = "navy"
+git-repository-url = ""
+additional-js = ["docs/theme/slab-highlight.js"]

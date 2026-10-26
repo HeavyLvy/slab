@@ -110,7 +110,7 @@ Each entry has optional `namespace` and `path` **regular expressions** (omitted 
 "features": { "enabled": ["minecraft:example_flag"] }
 ```
 
-A pack that needs a flag not enabled cannot be loaded via `/datapack enable` ("Pack <name> requires enabling a feature flag that is not enabled via data pack when creating world"). Feature flags can only be enabled through a data pack when **creating** the world. Packs using experimental settings can't be played on Realms and need a world re-open rather than `/reload` (experimental features use dynamic registries). Not relevant to a basic slab pack.
+A pack that needs a flag not enabled cannot be loaded via `/datapack enable` ("Pack `<name>` requires enabling a feature flag that is not enabled via data pack when creating world"). Feature flags can only be enabled through a data pack when **creating** the world. Packs using experimental settings can't be played on Realms and need a world re-open rather than `/reload` (experimental features use dynamic registries). Not relevant to a basic slab pack.
 
 ### 1.7 Other
 

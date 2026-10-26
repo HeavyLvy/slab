@@ -35,6 +35,18 @@ pub fn clamp(x: int, lo: int, hi: int) -> int {
 }
 ```
 
+## Documentation
+
+The documentation is a book in `docs/` (a guide, the command line and `Slab.toml` references, a standard library reference written from the library's own sources, how the compiler works, and notes on Minecraft 26.3):
+
+```
+cargo install mdbook --locked   # once
+tools/docs.sh serve             # read it at http://localhost:3000, updated as you edit
+tools/docs.sh                   # build it into target/book (static HTML, host it anywhere)
+```
+
+`.github/workflows/docs.yml` publishes it with GitHub Pages (Settings -> Pages -> Source: GitHub Actions).
+
 ## Use
 
 ```

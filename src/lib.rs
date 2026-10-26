@@ -14,4 +14,5 @@ pub mod manifest;
 pub mod project;
 pub mod sema;
 pub mod stdlib;
+pub mod stdref;
 pub mod syntax;
