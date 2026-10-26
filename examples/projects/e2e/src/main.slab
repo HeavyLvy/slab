@@ -386,7 +386,11 @@ fn overrun() {
     if r_overrun_armed == 1 {
         r_overrun_armed = 0;
         let mut n = 0;
-        while n < 100000 { n += 1; }
+        // a `loop` with a `break`: the compiler cannot tell how long it runs, so it does not warn
+        loop {
+            n += 1;
+            if n > 100000 { break; }
+        }
         r_overrun_done = 1;   // never reached
     }
 }

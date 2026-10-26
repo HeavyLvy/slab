@@ -5,6 +5,7 @@
 
 pub mod codegen;
 pub mod compile;
+pub mod cost;
 pub mod datapack;
 pub mod diag;
 pub mod ir;

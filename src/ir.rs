@@ -10,6 +10,7 @@
 //! only verifies the scoreboard/storage class of every operation.
 
 use crate::datapack::{Clause, Command, Hole, Nbt, NbtPath, ScoreHolder, Selector};
+use crate::diag::Span;
 
 /// Where a value lives at runtime.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -139,6 +140,9 @@ pub enum Stmt {
     /// Appends a Data value to the list at `target.path`.
     Append { target: VarRef, path: NbtPath, value: Expr },
     If { cond: Expr, then: Vec<Stmt>, els: Vec<Stmt> },
+    /// Describes the `While` that follows it (the lowering records it for the cost estimate);
+    /// generates nothing.
+    LoopInfo(LoopInfo),
     /// Loops are tail-recursive functions, so one tick can run at most about
     /// `max_command_sequence_length` (default 65536) commands in total.
     While { cond: Expr, body: Vec<Stmt> },
@@ -172,6 +176,15 @@ pub enum Stmt {
     StoreResult { success: String, result: String, command: Command, args: Vec<(Hole, Expr)> },
     /// A typed command from the datapack module, for builtins the IR doesn't model.
     Command(Command),
+}
+
+/// What the compiler knows about a loop before running it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct LoopInfo {
+    /// How many times the body runs, when it can be told from the source (`for i in 0..20`).
+    pub trips: Option<u64>,
+    /// The source file and span of the loop's head, for messages.
+    pub origin: Option<(usize, Span)>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -269,11 +282,13 @@ pub struct Program {
     pub uninstall: Vec<Command>,
     pub globals: Vec<Global>,
     pub functions: Vec<Function>,
+    /// Where an entry point was written: `function name -> (file, span of its name)`.
+    pub origins: std::collections::HashMap<String, (usize, Span)>,
 }
 
 impl Program {
     pub fn new(namespace: &str) -> Self {
-        Program { namespace: namespace.to_owned(), description: format!("{namespace} (compiled by slab)"), objectives: Vec::new(), entities: None, uninstall: Vec::new(), globals: Vec::new(), functions: Vec::new() }
+        Program { namespace: namespace.to_owned(), description: format!("{namespace} (compiled by slab)"), objectives: Vec::new(), entities: None, uninstall: Vec::new(), globals: Vec::new(), functions: Vec::new(), origins: std::collections::HashMap::new() }
     }
 
     pub fn global(mut self, name: &str, kind: Kind, init: Expr) -> Self {

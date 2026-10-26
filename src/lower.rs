@@ -143,10 +143,26 @@ struct Lower<'a> {
     pack: DataPack,
     f: FnState,
     out: Vec<Command>,
+    /// The `LoopInfo` seen just before the `While` being lowered.
+    pending_loop: Option<ir::LoopInfo>,
+    info: LowerInfo,
+}
+
+/// What lowering learned besides the pack.
+#[derive(Default)]
+pub struct LowerInfo {
+    /// The function holding each loop's body (the loop is that function calling itself), with
+    /// what the front end knew about the loop.
+    pub loops: HashMap<ResourceLocation, ir::LoopInfo>,
 }
 
 /// Compiles an IR program into a validated-on-write data pack.
 pub fn lower(program: &Program) -> R<DataPack> {
+    lower_with_info(program).map(|(pack, _)| pack)
+}
+
+/// [`lower`], and the loops it made (for `cost`).
+pub fn lower_with_info(program: &Program) -> R<(DataPack, LowerInfo)> {
     let ns = program.namespace.clone();
     let obj = Objective::new(&ns)?;
     let mut funcs = HashMap::new();
@@ -178,13 +194,15 @@ pub fn lower(program: &Program) -> R<DataPack> {
         pack: DataPack::new(program.description.clone()),
         f: FnState::new(""),
         out: Vec::new(),
+        pending_loop: None,
+        info: LowerInfo::default(),
     };
     for f in &program.functions {
         l.lower_function(f)?;
     }
     l.emit_init()?;
     l.emit_uninstall()?;
-    Ok(l.pack)
+    Ok((l.pack, l.info))
 }
 
 fn check_ident(what: &str, name: &str) -> R<()> {
@@ -282,7 +300,7 @@ fn collect_calls(stmts: &[Stmt], out: &mut Vec<String>) {
                 collect_calls_expr(value, out);
                 args.iter().for_each(|(_, e)| collect_calls_expr(e, out));
             }
-            Stmt::Return(None) | Stmt::Command(_) | Stmt::Remove { .. } => {}
+            Stmt::Return(None) | Stmt::Command(_) | Stmt::Remove { .. } | Stmt::LoopInfo(_) => {}
         }
     }
 }
@@ -1473,6 +1491,7 @@ impl<'a> Lower<'a> {
             Stmt::Command(c) => self.emit(c.clone()),
             Stmt::Return(value) => self.lower_return(value.as_ref())?,
             Stmt::If { cond, then, els } => self.lower_if(cond, then, els)?,
+            Stmt::LoopInfo(info) => self.pending_loop = Some(info.clone()),
             Stmt::While { cond, body } => self.lower_while(cond, body)?,
         }
         Ok(())
@@ -1790,6 +1809,7 @@ impl<'a> Lower<'a> {
     }
 
     fn lower_while(&mut self, cond: &Expr, body: &[Stmt]) -> R<()> {
+        let info = self.pending_loop.take();
         // A constantly-false loop never runs; check up front without emitting anything.
         let blk = self.block(|s, me| {
             let c = s.cond(cond, false)?;
@@ -1821,6 +1841,9 @@ impl<'a> Lower<'a> {
             s.emit(Command::Return(datapack::Return::Run(Box::new(Command::call(me.clone())))));
             Ok(())
         })?;
+        if let Some(info) = info {
+            self.info.loops.insert(blk.clone(), info);
+        }
         self.call_block(&[], &blk, may_return(body))
     }
 

@@ -13,7 +13,7 @@
 //!   would need macros;
 //! * `#[every(N)]` becomes a counter global and a tick function.
 
-use std::collections::{BTreeSet, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 use crate::datapack::{self, Anchor, Axes, Clause, Command, Compound, Coord, Effect, HolderName, Hole, Nbt, NbtPath, Num, Pos, ResourceLocation, Rotation, ScoreHolder, Selector, TagAction, Word};
 use crate::diag::{Diagnostic, SourceMap, Span};
@@ -57,6 +57,7 @@ pub fn generate(hir: &h::Hir, namespace: &str, description: &str, opts: &GenOpti
         g.function(i, &mut program.functions);
     }
     g.watchdog();
+    program.origins = std::mem::take(&mut g.origins);
     program.functions.append(&mut g.extra_fns);
     program.globals.append(&mut g.extra_globals);
     program.uninstall = g.uninstall_commands();
@@ -174,8 +175,13 @@ struct Gen<'a> {
     extra_fns: Vec<ir::Function>,
     extra_globals: Vec<ir::Global>,
     used_fns: HashSet<String>,
+    /// How often the `while` about to be generated runs, when the source says (`while_trips`).
+    trips_hint: Option<u64>,
+    assigned_globals: HashSet<h::GlobalId>,
     /// Entry points and the global that says whether a run reached its end (`_watchdog`).
     watched: Vec<(String, String)>,
+    /// Where each entry point was written, for messages about it.
+    origins: HashMap<String, (usize, Span)>,
     used_globals: HashSet<String>,
     // --- per function
     cur_fn: usize,
@@ -215,7 +221,10 @@ impl<'a> Gen<'a> {
             extra_fns: Vec::new(),
             extra_globals: Vec::new(),
             used_fns,
+            trips_hint: None,
+            assigned_globals: assigned_globals(hir),
             watched: Vec::new(),
+            origins: HashMap::new(),
             used_globals,
             cur_fn: 0,
             local_names: Vec::new(),
@@ -407,6 +416,7 @@ impl<'a> Gen<'a> {
             out.push(ir::Function { name: run.clone(), params: Vec::new(), ret: None, body, entry: None });
             out.push(ir::Function { name: name.clone(), params, ret: None, body: vec![set(1), ir::Stmt::Expr(ir::Expr::call(&run, vec![])), set(0)], entry });
             self.watched.push((f.name.clone(), flag));
+            self.origins.insert(name.clone(), (self.hir.files[f.module], f.span));
         } else {
             out.push(ir::Function { name: name.clone(), params, ret: (f.ret != Ty::Unit).then(|| kind_of(&f.ret)), body, entry });
         }
@@ -451,6 +461,9 @@ impl<'a> Gen<'a> {
     fn stmts(&mut self, stmts: &[h::Stmt]) -> Vec<ir::Stmt> {
         let mut out = Vec::new();
         for (i, s) in stmts.iter().enumerate() {
+            if let h::Stmt::While { cond, body } = s {
+                self.trips_hint = self.while_trips(&stmts[..i], cond, body);
+            }
             self.stmt(s, &mut out);
             let (brk, cont) = jumps(s);
             if (brk || cont) && i + 1 < stmts.len() {
@@ -506,11 +519,14 @@ impl<'a> Gen<'a> {
                 let end_name = self.fresh("end");
                 out.push(ir::Stmt::Let { name: var_name.clone(), kind: ir::Kind::Int, init: Some(s) });
                 out.push(ir::Stmt::Let { name: end_name.clone(), kind: ir::Kind::Int, init: Some(e) });
+                let trips = range_trips(start, end, *inclusive).filter(|_| !jumps_block(body).0);
+                let info = self.loop_info(trips, start.span);
                 let ctx = self.begin_loop(body, out);
                 let mut body_ir = self.block(body);
                 self.loops.pop();
                 body_ir.push(ir::Stmt::Assign { target: ir::VarRef::Local(var_name.clone()), value: ir::Expr::bin(ir::BinOp::Add, ir::Expr::var(&var_name), ir::Expr::Int(1)) });
                 let cmp = ir::Expr::bin(if *inclusive { ir::BinOp::Le } else { ir::BinOp::Lt }, ir::Expr::var(&var_name), ir::Expr::var(&end_name));
+                out.push(info);
                 out.push(ir::Stmt::While { cond: self.with_break_guard(&ctx, cmp), body: self.with_reset(&ctx, body_ir) });
             }
             h::Stmt::ForList { var, list, body } => {
@@ -599,14 +615,74 @@ impl<'a> Gen<'a> {
         }
     }
 
+    /// How many times `while i < N { ...; i += k; }` runs, when everything in it is known from the
+    /// source: `i` is a local set to a number just before (and not assigned in between), `N` a
+    /// number or a global nobody assigns, and the body adds a constant to `i` once, at its top
+    /// level, and has no `break`, `continue` or `return`. A guess would make the warning about
+    /// loops that are too long wrong, so anything else is `None`.
+    fn while_trips(&self, before: &[h::Stmt], cond: &h::Expr, body: &h::Block) -> Option<u64> {
+        let h::ExprKind::Binary { op, lhs, rhs } = &cond.kind else { return None };
+        let inclusive = match op {
+            crate::syntax::ast::BinOp::Lt => false,
+            crate::syntax::ast::BinOp::Le => true,
+            _ => return None,
+        };
+        let h::ExprKind::Local(counter) = &lhs.kind else { return None };
+        let bound = match &rhs.kind {
+            h::ExprKind::Int(n) => i64::from(*n),
+            h::ExprKind::Global(g) => {
+                if self.assigned_globals.contains(g) {
+                    return None;
+                }
+                match &self.hir.globals[g.0].init {
+                    h::ConstVal::Int(n) => i64::from(*n),
+                    _ => return None,
+                }
+            }
+            _ => return None,
+        };
+        // the counter starts at a number and is not touched between that and the loop
+        let at = before.iter().rposition(|s| matches!(s, h::Stmt::Let { local, .. } if local == counter))?;
+        let h::Stmt::Let { init: h::Expr { kind: h::ExprKind::Int(start), .. }, .. } = &before[at] else { return None };
+        if before[at + 1..].iter().any(|s| assigns_local(s, *counter)) {
+            return None;
+        }
+        // one `i += k` at the top level of the body, nothing else touching `i`
+        let mut step = None;
+        for s in &body.stmts {
+            match s {
+                h::Stmt::Assign { target: h::Expr { kind: h::ExprKind::Local(l), .. }, op: AssignOp::Add, value: h::Expr { kind: h::ExprKind::Int(k), .. } } if l == counter && step.is_none() && *k > 0 => step = Some(i64::from(*k)),
+                other if assigns_local(other, *counter) => return None,
+                _ => {}
+            }
+        }
+        if jumps_block(body) != (false, false) || block_returns(body) {
+            return None;
+        }
+        let (step, start) = (step?, i64::from(*start));
+        let span = bound - start + i64::from(inclusive);
+        Some(if span <= 0 { 0 } else { (span as u64).div_ceil(step as u64) })
+    }
+
+    /// The marker the lowering attaches to the `While` that follows it.
+    fn loop_info(&self, trips: Option<u64>, head: Span) -> ir::Stmt {
+        let file = self.hir.files[self.hir.fns[self.cur_fn].module];
+        ir::Stmt::LoopInfo(ir::LoopInfo { trips, origin: Some((file, head)) })
+    }
+
     fn while_loop(&mut self, cond: &h::Expr, body: &h::Block, out: &mut Vec<ir::Stmt>) {
+        let trips = self.trips_hint.take();
+        let info = self.loop_info(trips, cond.span);
         let ctx = self.begin_loop(body, out);
         let body_ir = self.block(body);
         self.loops.pop();
         let body_ir = self.with_reset(&ctx, body_ir);
         let (pre, c) = self.expr_pre(cond);
         match &ctx.brk {
-            None if pre.is_empty() => out.push(ir::Stmt::While { cond: c, body: body_ir }),
+            None if pre.is_empty() => {
+                out.push(info);
+                out.push(ir::Stmt::While { cond: c, body: body_ir });
+            }
             None => {
                 // the condition needs statements (a temporary), so it is recomputed at the end of
                 // every iteration into a flag
@@ -617,12 +693,14 @@ impl<'a> Gen<'a> {
                 let mut body = body_ir;
                 body.extend(pre2);
                 body.push(ir::Stmt::Assign { target: ir::VarRef::Local(flag.clone()), value: c2 });
+                out.push(info);
                 out.push(ir::Stmt::While { cond: ir::Expr::var(&flag), body });
             }
             Some(b) => {
                 // evaluate the condition inside the loop, so a call in it is not re-run after a break
                 let mut inner = pre;
                 inner.push(ir::Stmt::If { cond: c, then: body_ir, els: vec![self.set_flag(b, 1)] });
+                out.push(info);
                 out.push(ir::Stmt::While { cond: ir::Expr::bin(ir::BinOp::Eq, ir::Expr::var(b), ir::Expr::Int(0)), body: inner });
             }
         }
@@ -1595,6 +1673,68 @@ fn to_data(e: ir::Expr, ty: &Ty) -> ir::Expr {
 /// Reads a scalar back out of an NBT container.
 fn from_data(e: ir::Expr, ty: &Ty) -> ir::Expr {
     if is_scalar(ty) { ir::Expr::ToInt(Box::new(e)) } else { e }
+}
+
+/// How many times `for i in a..b` runs, when both ends are numbers.
+fn range_trips(start: &h::Expr, end: &h::Expr, inclusive: bool) -> Option<u64> {
+    let (h::ExprKind::Int(a), h::ExprKind::Int(b)) = (&start.kind, &end.kind) else { return None };
+    let n = i64::from(*b) - i64::from(*a) + i64::from(inclusive);
+    Some(n.max(0) as u64)
+}
+
+/// Whether the statement (or anything inside it) assigns the local.
+fn assigns_local(s: &h::Stmt, local: h::LocalId) -> bool {
+    let block = |b: &h::Block| b.stmts.iter().any(|s| assigns_local(s, local));
+    match s {
+        h::Stmt::Assign { target: h::Expr { kind: h::ExprKind::Local(l), .. }, .. } => *l == local,
+        h::Stmt::Let { local: l, .. } => *l == local,
+        h::Stmt::If { then, els, .. } => block(then) || block(els),
+        h::Stmt::While { body, .. } | h::Stmt::Loop { body } | h::Stmt::ForRange { body, .. } | h::Stmt::ForList { body, .. } | h::Stmt::Context { body, .. } => block(body),
+        h::Stmt::Block(b) => block(b),
+        h::Stmt::Expr(h::Expr { kind: h::ExprKind::Match { arms, .. }, .. }) => arms.iter().any(|a| block(&a.body)),
+        _ => false,
+    }
+}
+
+/// Whether the block contains a `return`.
+fn block_returns(b: &h::Block) -> bool {
+    fn stmt(s: &h::Stmt) -> bool {
+        match s {
+            h::Stmt::Return(_) => true,
+            h::Stmt::If { then, els, .. } => block_returns(then) || block_returns(els),
+            h::Stmt::While { body, .. } | h::Stmt::Loop { body } | h::Stmt::ForRange { body, .. } | h::Stmt::ForList { body, .. } | h::Stmt::Context { body, .. } => block_returns(body),
+            h::Stmt::Block(b) => block_returns(b),
+            h::Stmt::Expr(h::Expr { kind: h::ExprKind::Match { arms, .. }, .. }) => arms.iter().any(|a| block_returns(&a.body)),
+            _ => false,
+        }
+    }
+    b.stmts.iter().any(stmt)
+}
+
+/// Every global some statement of the program assigns.
+fn assigned_globals(hir: &h::Hir) -> HashSet<h::GlobalId> {
+    fn walk(b: &h::Block, out: &mut HashSet<h::GlobalId>) {
+        for s in &b.stmts {
+            match s {
+                h::Stmt::Assign { target: h::Expr { kind: h::ExprKind::Global(g), .. }, .. } => {
+                    out.insert(*g);
+                }
+                h::Stmt::If { then, els, .. } => {
+                    walk(then, out);
+                    walk(els, out);
+                }
+                h::Stmt::While { body, .. } | h::Stmt::Loop { body } | h::Stmt::ForRange { body, .. } | h::Stmt::ForList { body, .. } | h::Stmt::Context { body, .. } => walk(body, out),
+                h::Stmt::Block(b) => walk(b, out),
+                h::Stmt::Expr(h::Expr { kind: h::ExprKind::Match { arms, .. }, .. }) => arms.iter().for_each(|a| walk(&a.body, out)),
+                _ => {}
+            }
+        }
+    }
+    let mut out = HashSet::new();
+    for f in &hir.fns {
+        walk(&f.body, &mut out);
+    }
+    out
 }
 
 /// Whether the statement contains a `break` / `continue` that targets the enclosing loop

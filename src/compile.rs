@@ -3,6 +3,7 @@
 use std::path::Path;
 
 use crate::codegen;
+use crate::cost;
 use crate::datapack::{DataPack, ResourceLocation, Target, Word};
 use crate::diag::{Diagnostic, Severity, SourceMap};
 use crate::lower;
@@ -128,6 +129,45 @@ fn project_manifest(root: &Path) -> Result<(std::path::PathBuf, Option<Manifest>
     Ok((root.to_path_buf(), None))
 }
 
+/// A warning for every entry point that is estimated to run more commands in one tick than the
+/// game allows (`cost.rs`): the game would stop it halfway without a message.
+fn limit_warnings(pack: &DataPack, info: &lower::LowerInfo, program: &crate::ir::Program, namespace: &str, sources: &SourceMap) -> Vec<Diagnostic> {
+    let mut out = Vec::new();
+    let mut entries: Vec<_> = program.origins.iter().collect();
+    entries.sort_by_key(|(name, _)| name.as_str());
+    for (name, (file, span)) in entries {
+        let Ok(id) = ResourceLocation::new(namespace, name) else { continue };
+        let est = cost::estimate(pack, &info.loops, &id);
+        // only what always runs is counted, so the warning is never about code that merely might be long
+        if est.low <= cost::LIMIT {
+            continue;
+        }
+        let mut d = Diagnostic::warning(format!("`{name}` runs at least {} commands in one tick, and the game stops a function after {} without saying so", with_commas(est.low), with_commas(cost::LIMIT)), *span)
+            .in_file(*file);
+        d = match est.heaviest.as_ref().filter(|h| h.total > cost::LIMIT / 2) {
+            Some(h) => {
+                let at = h.origin.and_then(|(f, s)| sources.files.get(f).map(|sf| format!(" at {}:{}", sf.name, sf.line_col(s.start as usize).0)));
+                d.hint(format!("the loop{} runs {} times at about {} commands each; do less per iteration, or spread the work over several ticks", at.unwrap_or_default(), h.trips, with_commas(h.per_trip)))
+            }
+            None => d.hint("do less in one call, or spread the work over several ticks"),
+        };
+        out.push(d);
+    }
+    out
+}
+
+fn with_commas(n: u64) -> String {
+    let digits = n.to_string();
+    let mut out = String::new();
+    for (i, c) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(c);
+    }
+    out
+}
+
 /// Compiles a project to a data pack. Settings come from the command line, then `Slab.toml`.
 pub fn compile(entry: &Path, opts: &Options) -> Result<Compiled, CompileError> {
     let (project, checked, project_dir, manifest) = load_and_check(entry)?;
@@ -147,14 +187,16 @@ pub fn compile(entry: &Path, opts: &Options) -> Result<Compiled, CompileError> {
         Ok(p) => p,
         Err(errors) => return Err(CompileError::Source { sources: project.sources, errors, warnings: checked.warnings }),
     };
-    let mut pack = lower::lower(&program).map_err(|e| CompileError::Backend(format!("the backend rejected the program: {e}")))?;
+    let (mut pack, info) = lower::lower_with_info(&program).map_err(|e| CompileError::Backend(format!("the backend rejected the program: {e}")))?;
     pack.set_target(target);
+    let mut too_long = limit_warnings(&pack, &info, &program, &namespace, &project.sources);
     let problems = pack.validate();
     if !problems.is_empty() {
         let list: Vec<String> = problems.iter().map(|d| format!("  {d}")).collect();
         return Err(CompileError::Backend(format!("the generated data pack is invalid (this is a bug or a backend limit):\n{}", list.join("\n"))));
     }
-    let warnings = checked.warnings.into_iter().filter(|d| d.severity == Severity::Warning).collect();
+    let mut warnings: Vec<Diagnostic> = checked.warnings.into_iter().filter(|d| d.severity == Severity::Warning).collect();
+    warnings.append(&mut too_long);
     Ok(Compiled { pack, namespace, project_dir, target, notices: target.caveat().into_iter().collect(), warnings, sources: project.sources })
 }
 
@@ -645,6 +687,44 @@ mod tests {
             assert!(c.pack.function(&ResourceLocation::parse(&format!("t:{used}")).unwrap()).is_some(), "{used}");
         }
         assert!(c.pack.function(&ResourceLocation::parse("t:game__entity__set_velocity").unwrap()).is_none());
+    }
+
+    fn limit_warnings_of(src: &str) -> Vec<String> {
+        build_main(src).warnings.into_iter().filter(|w| w.message.contains("commands in one tick")).map(|w| format!("{} | {}", w.message, w.hint.unwrap_or_default())).collect()
+    }
+
+    #[test]
+    fn an_entry_point_that_surely_runs_too_many_commands_is_warned_about() {
+        // 30,000 trips of a body of several commands: far past 65,536
+        let w = limit_warnings_of("#[load] fn boot() { for i in 0..30000 { say(\"x\"); } }");
+        assert_eq!(w.len(), 1, "{w:?}");
+        assert!(w[0].contains("`boot` runs at least") && w[0].contains("30000 times"), "{w:?}");
+        // a loop that fits, or one whose length the compiler cannot tell, says nothing
+        assert!(limit_warnings_of("#[load] fn boot() { for i in 0..100 { say(\"x\"); } }").is_empty());
+        assert!(limit_warnings_of("global n: int = 5; #[load] fn boot() { n = 40000; let mut i = 0; while i < n { say(\"x\"); i += 1; } }").is_empty(), "the bound can change");
+        assert!(limit_warnings_of("#[load] fn boot() { loop { say(\"x\"); break; } }").is_empty());
+        // the same size through a called function still counts
+        let w = limit_warnings_of("fn work() { for i in 0..30000 { say(\"x\"); } } #[tick] fn each() { work(); }");
+        assert_eq!(w.len(), 1, "{w:?}");
+    }
+
+    #[test]
+    fn counting_while_loops_are_understood_only_when_nothing_can_change_the_count() {
+        let big = "say(\"x\");";
+        // `while i < N { ...; i += k; }`, with a literal or an unassigned global as the bound
+        for (src, expect) in [
+            (format!("#[load] fn boot() {{ let mut i = 0; while i < 30000 {{ {big} i += 1; }} }}"), true),
+            (format!("global n: int = 30000; #[load] fn boot() {{ let mut i = 0; while i < n {{ {big} i += 1; }} }}"), true),
+            (format!("#[load] fn boot() {{ let mut i = 0; while i <= 29999 {{ {big} i += 1; }} }}"), true),
+            (format!("#[load] fn boot() {{ let mut i = 0; while i < 60000 {{ {big} i += 2; }} }}"), true),
+            // a `break`, a second change of the counter, a counter set from something unknown
+            (format!("#[load] fn boot() {{ let mut i = 0; while i < 30000 {{ {big} if i == 7 {{ break; }} i += 1; }} }}"), false),
+            (format!("#[load] fn boot() {{ let mut i = 0; while i < 30000 {{ {big} i += 1; i += 1; }} }}"), false),
+            (format!("#[load] fn boot() {{ let mut i = 0; while i < 30000 {{ {big} if i > 3 {{ i = 0; }} i += 1; }} }}"), false),
+            (format!("fn start() -> int {{ return 0; }} #[load] fn boot() {{ let mut i = start(); while i < 30000 {{ {big} i += 1; }} }}"), false),
+        ] {
+            assert_eq!(!limit_warnings_of(&src).is_empty(), expect, "{src}");
+        }
     }
 
     #[test]
