@@ -31,6 +31,8 @@ pub struct GenOptions<'a> {
     pub abort_on_unwrap: bool,
     /// The pack id for `datapack disable`, such as `file/my_pack`.
     pub pack_id: String,
+    /// Set `max_command_sequence_length` to this when the pack loads (`[build] command-limit`).
+    pub command_limit: Option<i32>,
 }
 
 /// Translates a checked program. Errors are things the language accepts but the backend cannot
@@ -57,6 +59,7 @@ pub fn generate(hir: &h::Hir, namespace: &str, description: &str, opts: &GenOpti
         g.function(i, &mut program.functions);
     }
     g.watchdog();
+    g.command_limit(&mut program);
     program.origins = std::mem::take(&mut g.origins);
     program.functions.append(&mut g.extra_fns);
     program.globals.append(&mut g.extra_globals);
@@ -177,6 +180,9 @@ struct Gen<'a> {
     used_fns: HashSet<String>,
     /// How often the `while` about to be generated runs, when the source says (`while_trips`).
     trips_hint: Option<u64>,
+    /// The command that puts the old command limit back, for `_uninstall`.
+    limit_restore: Option<Command>,
+    command_limit: Option<i32>,
     assigned_globals: HashSet<h::GlobalId>,
     /// Entry points and the global that says whether a run reached its end (`_watchdog`).
     watched: Vec<(String, String)>,
@@ -199,7 +205,7 @@ struct Gen<'a> {
 
 impl<'a> Gen<'a> {
     fn new(hir: &'a h::Hir, namespace: &str, opts: &GenOptions<'a>) -> Self {
-        let mut used_fns = HashSet::from(["_init", "_uninstall", "_alloc_id", "_new_entity", "_ensure_id", "_watchdog"].map(str::to_owned));
+        let mut used_fns = HashSet::from(["_init", "_uninstall", "_alloc_id", "_new_entity", "_ensure_id", "_watchdog", "_limit_setup", "_limit_restore"].map(str::to_owned));
         let fn_names = hir.fns.iter().map(|f| unique(&mut used_fns, format!("{}{}", module_prefix(&hir.modules[f.module]), sanitize(&f.name)))).collect();
         let mut used_globals = HashSet::new();
         let global_names = hir.globals.iter().map(|g| unique(&mut used_globals, format!("{}{}", module_prefix(&hir.modules[g.module]), sanitize(&g.name)))).collect();
@@ -222,6 +228,8 @@ impl<'a> Gen<'a> {
             extra_globals: Vec::new(),
             used_fns,
             trips_hint: None,
+            limit_restore: None,
+            command_limit: opts.command_limit,
             assigned_globals: assigned_globals(hir),
             watched: Vec::new(),
             origins: HashMap::new(),
@@ -293,6 +301,7 @@ impl<'a> Gen<'a> {
                 cmds.push(Command::Tag { targets: Selector::e().tag(tag.clone()), action: TagAction::Remove(tag.into()) });
             }
         }
+        cmds.extend(self.limit_restore.clone());
         cmds
     }
 
@@ -376,7 +385,7 @@ impl<'a> Gen<'a> {
         self.extra_globals.push(ir::Global { name: counter.clone(), kind: ir::Kind::Int, init: ir::Expr::Int(0) });
         let mut body = Vec::new();
         for (name, flag) in self.watched.clone() {
-            let message = format!("slab: `{name}` was cut off: the game stops a function after 65536 commands in one tick. Split the work over several ticks or do less per call.");
+            let message = format!("slab: `{name}` was cut off: the game stops a function after {} commands in one tick. Split the work over several ticks or do less per call.", self.command_limit.unwrap_or(65536));
             body.push(ir::Stmt::If {
                 cond: ir::Expr::bin(ir::BinOp::Eq, ir::Expr::Global(flag.clone()), ir::Expr::Int(1)),
                 then: vec![
@@ -388,6 +397,42 @@ impl<'a> Gen<'a> {
             });
         }
         self.extra_fns.push(ir::Function { name: "_watchdog".to_owned(), params: Vec::new(), ret: None, body, entry: Some(ir::Entry::Tick) });
+    }
+
+    /// `[build] command-limit`: the game reads `max_command_sequence_length` when a function chain
+    /// starts, so raising it takes effect for the chains after the one that raised it. The
+    /// setting is made by the first function of the load tag, and the others of the load tag
+    /// (including the user's own `#[load]` functions) run as chains of their own after it. The
+    /// old value is remembered once and put back by `_uninstall`.
+    fn command_limit(&mut self, program: &mut ir::Program) {
+        let Some(limit) = self.command_limit else { return };
+        let rule = ResourceLocation::new("minecraft", "max_command_sequence_length").expect("a valid id");
+        let saved = unique(&mut self.used_globals, "_limit_saved".to_owned());
+        let original = unique(&mut self.used_globals, "_limit_original".to_owned());
+        for name in [&saved, &original] {
+            program.globals.push(ir::Global { name: name.clone(), kind: ir::Kind::Int, init: ir::Expr::Int(0) });
+        }
+        let global = |n: &str| ir::VarRef::Global(n.to_owned());
+        let remember = vec![
+            ir::Stmt::Let { name: "ok".to_owned(), kind: ir::Kind::Int, init: None },
+            ir::Stmt::Let { name: "old".to_owned(), kind: ir::Kind::Int, init: None },
+            ir::Stmt::StoreResult { success: "ok".to_owned(), result: "old".to_owned(), command: Command::Gamerule { rule: rule.clone(), value: None }, args: Vec::new() },
+            ir::Stmt::Assign { target: global(&original), value: ir::Expr::var("old") },
+            ir::Stmt::Assign { target: global(&saved), value: ir::Expr::Int(1) },
+        ];
+        let setup = vec![
+            ir::Stmt::If { cond: ir::Expr::bin(ir::BinOp::Eq, ir::Expr::Global(saved), ir::Expr::Int(0)), then: remember, els: Vec::new() },
+            ir::Stmt::Command(Command::Gamerule { rule: rule.clone(), value: Some(datapack::GameRuleValue::Int(limit)) }),
+        ];
+        // first, so the load functions after it run under the new limit
+        program.functions.insert(0, ir::Function { name: "_limit_setup".to_owned(), params: Vec::new(), ret: None, body: setup, entry: Some(ir::Entry::Load) });
+        let hole = datapack::Hole(0);
+        let restore = vec![ir::Stmt::MacroCommand { command: Command::Gamerule { rule, value: Some(datapack::GameRuleValue::Hole(hole)) }, args: vec![(hole, ir::Expr::Global(original))] }];
+        program.functions.push(ir::Function { name: "_limit_restore".to_owned(), params: Vec::new(), ret: None, body: restore, entry: None });
+        if let Ok(id) = ResourceLocation::new(&self.namespace, "_limit_restore") {
+            self.limit_restore = Some(Command::call(id));
+        }
+        program.load_in_own_chains = true;
     }
 
     fn function(&mut self, idx: usize, out: &mut Vec<ir::Function>) {

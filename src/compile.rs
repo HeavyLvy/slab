@@ -23,6 +23,9 @@ pub struct Options {
     pub pack_id: Option<String>,
     /// The Minecraft version to build for, such as `26.3` (`--minecraft`; default: `Slab.toml`, then the newest).
     pub minecraft: Option<String>,
+    /// Set the game's `max_command_sequence_length` to this when the pack loads (`--command-limit`;
+    /// default: `Slab.toml`, else leave it alone).
+    pub command_limit: Option<i32>,
 }
 
 pub struct Compiled {
@@ -131,7 +134,7 @@ fn project_manifest(root: &Path) -> Result<(std::path::PathBuf, Option<Manifest>
 
 /// A warning for every entry point that is estimated to run more commands in one tick than the
 /// game allows (`cost.rs`): the game would stop it halfway without a message.
-fn limit_warnings(pack: &DataPack, info: &lower::LowerInfo, program: &crate::ir::Program, namespace: &str, sources: &SourceMap) -> Vec<Diagnostic> {
+fn limit_warnings(pack: &DataPack, info: &lower::LowerInfo, program: &crate::ir::Program, namespace: &str, sources: &SourceMap, limit: u64) -> Vec<Diagnostic> {
     let mut out = Vec::new();
     let mut entries: Vec<_> = program.origins.iter().collect();
     entries.sort_by_key(|(name, _)| name.as_str());
@@ -139,12 +142,12 @@ fn limit_warnings(pack: &DataPack, info: &lower::LowerInfo, program: &crate::ir:
         let Ok(id) = ResourceLocation::new(namespace, name) else { continue };
         let est = cost::estimate(pack, &info.loops, &id);
         // only what always runs is counted, so the warning is never about code that merely might be long
-        if est.low <= cost::LIMIT {
+        if est.low <= limit {
             continue;
         }
-        let mut d = Diagnostic::warning(format!("`{name}` runs at least {} commands in one tick, and the game stops a function after {} without saying so", with_commas(est.low), with_commas(cost::LIMIT)), *span)
+        let mut d = Diagnostic::warning(format!("`{name}` runs at least {} commands in one tick, and the game stops a function after {} without saying so", with_commas(est.low), with_commas(limit)), *span)
             .in_file(*file);
-        d = match est.heaviest.as_ref().filter(|h| h.total > cost::LIMIT / 2) {
+        d = match est.heaviest.as_ref().filter(|h| h.total > limit / 2) {
             Some(h) => {
                 let at = h.origin.and_then(|(f, s)| sources.files.get(f).map(|sf| format!(" at {}:{}", sf.name, sf.line_col(s.start as usize).0)));
                 d.hint(format!("the loop{} runs {} times at about {} commands each; do less per iteration, or spread the work over several ticks", at.unwrap_or_default(), h.trips, with_commas(h.per_trip)))
@@ -182,14 +185,15 @@ pub fn compile(entry: &Path, opts: &Options) -> Result<Compiled, CompileError> {
     let abort_on_unwrap = opts.abort_on_unwrap || manifest.as_ref().and_then(|m| m.abort_on_unwrap).unwrap_or(false);
     let pack_id = opts.pack_id.clone().or_else(|| manifest.as_ref().and_then(|m| m.pack_id.clone())).unwrap_or_else(|| format!("file/{namespace}"));
 
-    let gen_opts = codegen::GenOptions { sources: &project.sources, abort_on_unwrap, pack_id };
+    let command_limit = opts.command_limit.or(manifest.as_ref().and_then(|m| m.command_limit));
+    let gen_opts = codegen::GenOptions { sources: &project.sources, abort_on_unwrap, pack_id, command_limit };
     let program = match codegen::generate(&checked.hir, &namespace, &description, &gen_opts) {
         Ok(p) => p,
         Err(errors) => return Err(CompileError::Source { sources: project.sources, errors, warnings: checked.warnings }),
     };
     let (mut pack, info) = lower::lower_with_info(&program).map_err(|e| CompileError::Backend(format!("the backend rejected the program: {e}")))?;
     pack.set_target(target);
-    let mut too_long = limit_warnings(&pack, &info, &program, &namespace, &project.sources);
+    let mut too_long = limit_warnings(&pack, &info, &program, &namespace, &project.sources, command_limit.map_or(cost::LIMIT, |l| l.max(0) as u64));
     let problems = pack.validate();
     if !problems.is_empty() {
         let list: Vec<String> = problems.iter().map(|d| format!("  {d}")).collect();
@@ -725,6 +729,32 @@ mod tests {
         ] {
             assert_eq!(!limit_warnings_of(&src).is_empty(), expect, "{src}");
         }
+    }
+
+    #[test]
+    fn a_command_limit_is_set_by_the_first_load_function_and_put_back_by_uninstall() {
+        let d = Dir::new("limit", &[("main.slab", &format!("{PRELUDE}#[load] fn boot() {{ say(\"hi\"); }}"))]);
+        let c = match compile(&d.0, &Options { namespace: Some("t".into()), command_limit: Some(900000), ..Options::default() }) {
+            Ok(c) => c,
+            Err(e) => panic!("{}", e.render()),
+        };
+        let setup = fn_text(&c, "t:_limit_setup");
+        // the old value is read once (a stored query), then the rule is set
+        let remember = fn_text(&c, "t:_limit_setup/b0");
+        assert!(remember.contains("store result score") && remember.contains("run gamerule minecraft:max_command_sequence_length\n"), "{remember}");
+        assert!(setup.contains("gamerule minecraft:max_command_sequence_length 900000"), "{setup}");
+        assert!(fn_text(&c, "t:_limit_restore").contains("$gamerule minecraft:max_command_sequence_length $(h0)"));
+        assert!(fn_text(&c, "t:_uninstall").contains("function t:_limit_restore"));
+        // `_init` no longer calls the load functions: each is its own entry of the load tag, after the setup
+        assert!(!fn_text(&c, "t:_init").contains("function t:boot"));
+        let files = c.pack.files().unwrap();
+        let tag = String::from_utf8_lossy(&files["data/minecraft/tags/function/load.json"]).into_owned();
+        let order: Vec<usize> = ["t:_init", "t:_limit_setup", "t:boot"].iter().map(|n| tag.find(n).unwrap_or_else(|| panic!("{n} in {tag}"))).collect();
+        assert!(order.windows(2).all(|w| w[0] < w[1]), "{tag}");
+        // not asked for: nothing of it
+        let c = build_main("#[load] fn boot() { say(\"hi\"); }");
+        assert!(c.pack.function(&ResourceLocation::parse("t:_limit_setup").unwrap()).is_none());
+        assert!(fn_text(&c, "t:_init").contains("function t:boot"));
     }
 
     #[test]

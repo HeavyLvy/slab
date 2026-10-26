@@ -28,9 +28,12 @@ minecraft = "26.3"               # the game version the pack is for (default: th
 [build]
 abort-on-unwrap = false          # a failed unwrap() also runs `datapack disable`
 pack-id = "file/my_game"         # the pack that command disables
+command-limit = 1000000          # raise the game's commands-per-tick limit (default: leave it at 65536)
 ```
 
 Only this part of TOML is read (tables, `key = "text" | true | false | 123`, `#` comments). A key the compiler does not know is an error with its line, so a typo cannot be ignored silently. The namespace is `namespace`, else `name` with every character that is not a letter or digit turned into `_` and lowercased (`My-Game` is `my_game`). The command line wins over the file (`--namespace`, `--description`, `--abort-on-unwrap`, `--pack-id`).
+
+`command-limit` sets the game rule `max_command_sequence_length` when the pack loads, for packs that do a lot of work in one go (`--command-limit N` on the command line). The game reads the limit when a function chain **starts**, so the rule applies to chains after the one that changes it: slab changes it in the first function of the `#minecraft:load` tag and runs every `#[load]` function (and `_init`'s successors) as a chain of its own after it, so they all run under the new limit; the first `/reload` after installing is already covered. The old value is remembered once and `_uninstall` puts it back. It is a rule of the whole world, and the limit is also what stops a runaway loop from freezing the server, so the right value is the smallest one that fits (the warning slab prints for a long loop says how many commands it needs). `examples/projects/limit` is checked on a real server: without the setting its load function is cut off after 13,105 trips; with it, all 60,000 run.
 
 `minecraft` is the version the pack targets: it sets the data pack format in `pack.mcmeta` (`min_format` / `max_format`: 26.1 is 101.1, 26.2 is 107.1, 26.3 is 121.0, from `docs/mc/01-datapack-structure.md`), and a patch release such as `26.1.2` reads as its family. Only 26.3 has been run against a real server, so building for 26.1 or 26.2 prints a warning saying the commands were not tried there; versions before 26.1 are refused, because their `pack.mcmeta` and many commands differ. Language features that need a newer game (the planned `float` uses 26.x's `/compute`) will be errors for older targets. The command line has `--minecraft VERSION`.
 

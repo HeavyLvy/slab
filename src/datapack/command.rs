@@ -858,6 +858,8 @@ pub enum SetblockMode {
 pub enum GameRuleValue {
     Bool(bool),
     Int(i32),
+    /// An integer filled in at run time (a macro hole).
+    Hole(Hole),
 }
 
 // --------------------------------------------------------------------- effect
@@ -1427,6 +1429,7 @@ impl fmt::Display for Command {
                 match value {
                     Some(GameRuleValue::Bool(b)) => write!(f, " {b}"),
                     Some(GameRuleValue::Int(i)) => write!(f, " {i}"),
+                    Some(GameRuleValue::Hole(h)) => write!(f, " {h}"),
                     None => Ok(()),
                 }
             }
@@ -1725,6 +1728,8 @@ mod tests {
             mode: Some(SetblockMode::Replace),
         };
         assert_eq!(sb.to_string(), "setblock 0 64 0 minecraft:oak_stairs[facing=north] replace");
+        let limit = Command::Gamerule { rule: rl("max_command_sequence_length"), value: Some(GameRuleValue::Hole(Hole(0))) };
+        assert_eq!(limit.render_line(), "$gamerule minecraft:max_command_sequence_length $(h0)");
         let gr = Command::Gamerule { rule: rl("advance_time"), value: Some(GameRuleValue::Bool(false)) };
         assert_eq!(gr.to_string(), "gamerule minecraft:advance_time false");
         assert!(Command::Raw("/say hi".into()).check().is_err());

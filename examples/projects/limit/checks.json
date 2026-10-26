@@ -1,0 +1,25 @@
+[
+ {
+  "cmd": "scoreboard players get #g.done limit",
+  "expect": "has 1 [limit]"
+ },
+ {
+  "cmd": "scoreboard players get #g.trips limit",
+  "expect": "has 60000 [limit]"
+ },
+ {
+  "cmd": "gamerule max_command_sequence_length",
+  "expect": "500000"
+ },
+ {
+  "cmd": "scoreboard players get #g._cutoffs limit",
+  "expect": "has 0 [limit]"
+ },
+ {
+  "cmd": "function limit:_uninstall"
+ },
+ {
+  "cmd": "gamerule max_command_sequence_length",
+  "expect": "65536"
+ }
+]

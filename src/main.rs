@@ -25,6 +25,7 @@ build options (they override Slab.toml):
   --description TEXT     description shown by /datapack list
   --abort-on-unwrap      a failed unwrap()/expect() also runs `datapack disable` for the pack
   --pack-id ID           the pack id for that (default: file/<namespace>)
+  --command-limit N      set the game's commands-per-tick limit to N when the pack loads (see docs)
   --minecraft VERSION    the game version to build for: 26.1, 26.2 or 26.3 (default: Slab.toml, else 26.3)";
 
 fn main() -> ExitCode {
@@ -110,6 +111,7 @@ fn parse_build_args(args: &[String]) -> Result<BuildArgs, String> {
             "--abort-on-unwrap" => b.opts.abort_on_unwrap = true,
             "--pack-id" => b.opts.pack_id = Some(value(a)?),
             "--minecraft" => b.opts.minecraft = Some(value(a)?),
+            "--command-limit" => b.opts.command_limit = Some(value(a)?.parse::<i32>().ok().filter(|n| *n >= 1).ok_or("`--command-limit` needs a number from 1 to 2147483647")?),
             flag if flag.starts_with('-') => return Err(format!("unknown option `{flag}`")),
             p => {
                 if path_set {

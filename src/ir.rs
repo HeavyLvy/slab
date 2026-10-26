@@ -284,11 +284,15 @@ pub struct Program {
     pub functions: Vec<Function>,
     /// Where an entry point was written: `function name -> (file, span of its name)`.
     pub origins: std::collections::HashMap<String, (usize, Span)>,
+    /// Run every `Entry::Load` function as its own entry of the load tag, in order, instead of
+    /// from `_init`: the game reads the command limit when a chain starts, so a rule changed by the
+    /// first function applies to the ones after it.
+    pub load_in_own_chains: bool,
 }
 
 impl Program {
     pub fn new(namespace: &str) -> Self {
-        Program { namespace: namespace.to_owned(), description: format!("{namespace} (compiled by slab)"), objectives: Vec::new(), entities: None, uninstall: Vec::new(), globals: Vec::new(), functions: Vec::new(), origins: std::collections::HashMap::new() }
+        Program { namespace: namespace.to_owned(), description: format!("{namespace} (compiled by slab)"), objectives: Vec::new(), entities: None, uninstall: Vec::new(), globals: Vec::new(), functions: Vec::new(), origins: std::collections::HashMap::new(), load_in_own_chains: false }
     }
 
     pub fn global(mut self, name: &str, kind: Kind, init: Expr) -> Self {

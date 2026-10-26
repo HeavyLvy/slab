@@ -11,6 +11,7 @@
 //! [build]
 //! abort-on-unwrap = false     # a failed unwrap() also runs `datapack disable`
 //! pack-id = "file/my_pack"    # the pack that command disables
+//! command-limit = 1000000     # raise the game's limit of commands per tick (see docs/lang/codegen.md)
 //! ```
 //!
 //! The source code lives in `src/`, and `src/main.slab` is the root module. Only the part of TOML
@@ -32,6 +33,7 @@ pub struct Manifest {
     pub minecraft: Option<String>,
     pub abort_on_unwrap: Option<bool>,
     pub pack_id: Option<String>,
+    pub command_limit: Option<i32>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -93,6 +95,14 @@ impl Manifest {
                         ("project", "minecraft") => m.minecraft = Some(s),
                         _ => m.pack_id = Some(s),
                     }
+                }
+                ("build", "command-limit") => {
+                    let Value::Int(n) = value else { return Err(at(format!("`command-limit` must be a number, not {}", value.kind()))) };
+                    // the game's own range for the rule is 0 and up; 0 would stop everything
+                    if !(1..=i64::from(i32::MAX)).contains(&n) {
+                        return Err(at("`command-limit` must be between 1 and 2147483647".into()));
+                    }
+                    m.command_limit = Some(n as i32);
                 }
                 ("build", "abort-on-unwrap") => {
                     want(value.clone(), "true or false")?;
@@ -212,6 +222,8 @@ mod tests {
         assert_eq!(m.version.as_deref(), Some("1.2.3"));
         assert_eq!(m.description.as_deref(), Some("say \"hi\" # not a comment"));
         assert_eq!((m.abort_on_unwrap, m.pack_id.as_deref()), (Some(true), Some("file/x")));
+        let m = Manifest::parse("[project]\nname = \"a\"\n[build]\ncommand-limit = 1000000\n").unwrap();
+        assert_eq!(m.command_limit, Some(1_000_000));
         let m = Manifest::parse("[project]\nname = \"a\"\nnamespace = \"custom\"\nminecraft = \"26.2\"\n").unwrap();
         assert_eq!(m.namespace(), "custom");
         assert_eq!(m.minecraft.as_deref(), Some("26.2"));
@@ -229,5 +241,7 @@ mod tests {
         assert!(err("[project]\nname = \"a\n").contains("not closed"));
         assert!(err("[project]\nname = [\"a\"]\n").contains("arrays and tables are not supported"));
         assert!(err("[project\n").contains("ends with `]`"));
+        assert!(err("[build]\ncommand-limit = 0\n[project]\nname=\"a\"").contains("between 1 and 2147483647"));
+        assert!(err("[build]\ncommand-limit = \"big\"\n[project]\nname=\"a\"").contains("must be a number"));
     }
 }

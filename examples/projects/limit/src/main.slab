@@ -1,0 +1,18 @@
+// `command-limit` in Slab.toml raises the game's limit of commands per tick when the pack loads.
+// The loop below costs far more than 65,536 commands; it only finishes because `_limit_setup` ran
+// first and the load functions after it start new chains under the new limit.
+import std;
+
+global done: int = 0;
+global trips: int = 0;
+
+#[load]
+fn heavy() {
+    let mut i = 0;
+    loop {
+        i += 1;
+        trips = i;
+        if i >= 60000 { break; }
+    }
+    done = 1;
+}

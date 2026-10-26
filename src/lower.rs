@@ -1915,9 +1915,11 @@ impl<'a> Lower<'a> {
         for g in &prog.globals {
             self.emit_global_init(g)?;
         }
-        for f in &prog.functions {
-            if f.entry == Some(Entry::Load) {
-                self.emit(Command::call(self.fn_id(&f.name)?));
+        if !prog.load_in_own_chains {
+            for f in &prog.functions {
+                if f.entry == Some(Entry::Load) {
+                    self.emit(Command::call(self.fn_id(&f.name)?));
+                }
             }
         }
         let mut func = datapack::Function::new();
@@ -1926,6 +1928,13 @@ impl<'a> Lower<'a> {
         let id = self.fn_id("_init")?;
         self.pack.add_function(id.clone(), func)?;
         self.pack.on_load(id);
+        if prog.load_in_own_chains {
+            for f in &prog.functions {
+                if f.entry == Some(Entry::Load) {
+                    self.pack.on_load(self.fn_id(&f.name)?);
+                }
+            }
+        }
         Ok(())
     }
 

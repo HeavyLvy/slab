@@ -1,0 +1,8 @@
+[project]
+name = "limit"
+version = "0.1.0"
+minecraft = "26.3"
+description = "raises the game's command limit and runs a loop that needs it"
+
+[build]
+command-limit = 500000
