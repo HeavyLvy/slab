@@ -122,6 +122,23 @@ fn check_reports_warnings_but_succeeds() {
 }
 
 #[test]
+fn naming_conventions_are_warnings_that_slab_toml_can_turn_off() {
+    let dir = scratch("naming");
+    fs::create_dir_all(dir.join("src")).unwrap();
+    fs::write(dir.join("src/main.slab"), "import std::print; #[load] fn bootNow() { let myValue = 1; print(myValue); }").unwrap();
+    fs::write(dir.join("Slab.toml"), "[project]\nname = \"naming\"\n").unwrap();
+    let o = slab(&["check", dir.to_str().unwrap()]);
+    let text = String::from_utf8_lossy(&o.stderr).to_string() + &String::from_utf8_lossy(&o.stdout);
+    assert!(o.status.success(), "{text}");
+    assert!(text.contains("function `bootNow` should be snake_case") && text.contains("rename it to `my_value`"), "{text}");
+    fs::write(dir.join("Slab.toml"), "[project]\nname = \"naming\"\n[lint]\nnaming = \"off\"\n").unwrap();
+    let o = slab(&["check", dir.to_str().unwrap()]);
+    let text = String::from_utf8_lossy(&o.stderr).to_string() + &String::from_utf8_lossy(&o.stdout);
+    assert!(!text.contains("should be") && text.contains("0 warnings"), "{text}");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn new_creates_a_project_with_a_manifest_and_src() {
     let base = scratch("new");
     fs::create_dir_all(&base).unwrap();

@@ -7,6 +7,7 @@ use crate::codegen;
 use crate::cost;
 use crate::datapack::{DataPack, ResourceLocation, Target, Word};
 use crate::diag::{Diagnostic, Severity, SourceMap};
+use crate::lint;
 use crate::lower;
 use crate::manifest::{self, Manifest};
 use crate::project::{self, LoadError};
@@ -110,10 +111,27 @@ fn load_and_check(entry: &Path) -> Result<Loaded, CompileError> {
     // a mistake in Slab.toml is reported even when only checking
     let (project_dir, manifest) = project_manifest(&project.root)?;
     let inputs: Vec<ModuleInput> = project.modules.iter().map(|m| ModuleInput { name: &m.name, file: m.file, program: &m.program, std: m.std }).collect();
+    let mut naming = if manifest.as_ref().and_then(|m| m.naming).unwrap_or(true) { naming_warnings(&project) } else { Vec::new() };
     match sema::check_modules(&inputs) {
-        Ok(checked) => Ok((project, checked, project_dir, manifest)),
-        Err(report) => Err(CompileError::Source { sources: project.sources, errors: report.errors, warnings: report.warnings }),
+        Ok(mut checked) => {
+            checked.warnings.append(&mut naming);
+            Ok((project, checked, project_dir, manifest))
+        }
+        Err(mut report) => {
+            report.warnings.append(&mut naming);
+            Err(CompileError::Source { sources: project.sources, errors: report.errors, warnings: report.warnings })
+        }
     }
+}
+
+/// The naming warnings of the project's own modules (not the library's).
+pub fn naming_warnings(project: &project::Project) -> Vec<Diagnostic> {
+    project.modules.iter().filter(|m| !m.std).flat_map(|m| lint::naming(&m.program, m.file)).collect()
+}
+
+/// Whether `Slab.toml` (looked for from the source root `root`) leaves the naming warnings on.
+pub fn naming_enabled(root: &Path) -> bool {
+    project_manifest(root).ok().and_then(|(_, m)| m).and_then(|m| m.naming).unwrap_or(true)
 }
 
 /// Parses and type-checks a project.

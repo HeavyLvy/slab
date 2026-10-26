@@ -235,6 +235,7 @@ fn build_project(key: PathBuf, root_file: &Path, standalone: bool, docs: &HashMa
             let inputs: Vec<ModuleInput> =
                 project.modules.iter().map(|m| ModuleInput { name: &m.name, file: m.file, program: &m.program, std: m.std }).collect();
             let t = sema::check_modules_tolerant(&inputs);
+            let naming = if slab::compile::naming_enabled(&project.root) { slab::compile::naming_warnings(&project) } else { Vec::new() };
             let modules = project
                 .modules
                 .into_iter()
@@ -257,6 +258,7 @@ fn build_project(key: PathBuf, root_file: &Path, standalone: bool, docs: &HashMa
             errors.extend(t.errors.into_iter().filter(|d| outside(d)));
             errors.sort_by_key(|d| (d.file, d.span.start));
             let mut warnings: Vec<Diagnostic> = t.warnings.into_iter().filter(|d| outside(d)).collect();
+            warnings.extend(naming.into_iter().filter(|d| outside(d)));
             warnings.sort_by_key(|d| (d.file, d.span.start));
             let sources = project.sources;
             let root = project.root;

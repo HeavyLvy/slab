@@ -20,6 +20,7 @@
 
 - [The command line](reference/cli.md)
 - [Slab.toml](reference/slab-toml.md)
+- [Style and naming](reference/style.md)
 - [Standard library reference](reference/std.md)
 - [Grammar](lang/syntax.md)
 - [Rules of the language](lang/semantics.md)

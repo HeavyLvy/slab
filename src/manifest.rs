@@ -13,6 +13,9 @@
 //! pack-id = "file/my_pack"    # the pack that command disables
 //! task-budget = 30000         # commands a `task fn` may use per tick before it waits for the next
 //! command-limit = 1000000     # raise the game's limit of commands per tick (see docs/lang/codegen.md)
+//!
+//! [lint]
+//! naming = "warn"             # "warn" (default) or "off": warn about names that break the conventions
 //! ```
 //!
 //! The source code lives in `src/`, and `src/main.slab` is the root module. Only the part of TOML
@@ -36,6 +39,8 @@ pub struct Manifest {
     pub pack_id: Option<String>,
     pub command_limit: Option<i32>,
     pub task_budget: Option<i32>,
+    /// `[lint] naming`: warn about names that break the conventions (default on).
+    pub naming: Option<bool>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -70,8 +75,8 @@ impl Manifest {
             if let Some(rest) = line.strip_prefix('[') {
                 let Some(t) = rest.strip_suffix(']') else { return Err(at("a table header ends with `]`".into())) };
                 let t = t.trim();
-                if !matches!(t, "project" | "build") {
-                    return Err(at(format!("unknown table `[{t}]` (the tables are `[project]` and `[build]`)")));
+                if !matches!(t, "project" | "build" | "lint") {
+                    return Err(at(format!("unknown table `[{t}]` (the tables are `[project]`, `[build]` and `[lint]`)")));
                 }
                 table = t.to_owned();
                 continue;
@@ -117,6 +122,15 @@ impl Manifest {
                     want(value.clone(), "true or false")?;
                     let Value::Bool(b) = value else { unreachable!() };
                     m.abort_on_unwrap = Some(b);
+                }
+                ("lint", "naming") => {
+                    want(value.clone(), "a string")?;
+                    let Value::Str(s) = value else { unreachable!() };
+                    m.naming = Some(match s.as_str() {
+                        "warn" => true,
+                        "off" => false,
+                        _ => return Err(at(format!("`naming` must be \"warn\" or \"off\", not \"{s}\""))),
+                    });
                 }
                 ("", _) => return Err(at(format!("`{key}` must be inside a table such as `[project]`"))),
                 (t, k) => return Err(at(format!("unknown key `{k}` in `[{t}]`"))),
@@ -231,6 +245,7 @@ mod tests {
         assert_eq!(m.version.as_deref(), Some("1.2.3"));
         assert_eq!(m.description.as_deref(), Some("say \"hi\" # not a comment"));
         assert_eq!((m.abort_on_unwrap, m.pack_id.as_deref()), (Some(true), Some("file/x")));
+        assert_eq!(Manifest::parse("[project]\nname = \"a\"\n[lint]\nnaming = \"off\"\n").unwrap().naming, Some(false));
         let m = Manifest::parse("[project]\nname = \"a\"\n[build]\ncommand-limit = 1000000\n").unwrap();
         assert_eq!(m.command_limit, Some(1_000_000));
         let m = Manifest::parse("[project]\nname = \"a\"\nnamespace = \"custom\"\nminecraft = \"26.2\"\n").unwrap();
@@ -250,6 +265,7 @@ mod tests {
         assert!(err("[project]\nname = \"a\n").contains("not closed"));
         assert!(err("[project]\nname = [\"a\"]\n").contains("arrays and tables are not supported"));
         assert!(err("[project\n").contains("ends with `]`"));
+        assert!(err("[lint]\nnaming = \"loud\"\n[project]\nname=\"a\"").contains("must be \"warn\" or \"off\""));
         assert!(err("[build]\ncommand-limit = 0\n[project]\nname=\"a\"").contains("between 1 and 2147483647"));
         assert!(err("[build]\ncommand-limit = \"big\"\n[project]\nname=\"a\"").contains("must be a number"));
     }
