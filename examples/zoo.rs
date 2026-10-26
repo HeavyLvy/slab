@@ -289,8 +289,21 @@ fn holes() -> Function {
     f.push(Command::Effect(Effect::Clear { targets: Some(Selector::a()), effect: Some(s(0)) }));
     f.push(Command::execute().clause(Clause::Summon(s(0))).run(Command::say("summoned")));
     f.push(Command::Say(s(0)));
-    f.push(Command::Particle { name: rl("campfire_signal_smoke").into(), pos: None });
-    f.push(Command::Particle { name: rl("end_rod").into(), pos: Some(Pos::local(0.0, 1.0, 0.0)) });
+    f.push(Command::Particle { name: rl("campfire_signal_smoke").into(), options: None, pos: None, spread: None });
+    f.push(Command::Particle { name: rl("end_rod").into(), options: None, pos: Some(Pos::local(0.0, 1.0, 0.0)), spread: None });
+    f.push(Command::Particle {
+        name: rl("item").into(),
+        options: Some("{item:{id:\"minecraft:diamond\",count:1}}".into()),
+        pos: Some(Pos::new(Coord::Rel(0.0), Coord::Rel(1.0), Coord::Rel(0.0))),
+        spread: Some(ParticleSpread { delta: [0.2, 0.2, 0.2], speed: 0.1, count: Num::Lit(20), mode: Some(ParticleMode::Force), viewers: Some(Selector::a()) }),
+    });
+    f.push(Command::Particle {
+        name: rl("dust").into(),
+        options: Some("{color:[1.0f,0.0f,0.0f],scale:1.5f}".into()),
+        pos: Some(Pos::here()),
+        spread: Some(ParticleSpread { delta: [0.0, 0.0, 0.0], speed: 0.0, count: Num::Lit(0), mode: Some(ParticleMode::Normal), viewers: None }),
+    });
+    f.push(Command::Particle { name: rl("block").into(), options: Some("{block_state:\"minecraft:stone\"}".into()), pos: None, spread: None });
     f.push(Command::Run(Arg::Lit("list".into())));
     f.push(Command::Data(Data::Modify {
         target: DataTarget::Storage(rl("zoo:vars")),

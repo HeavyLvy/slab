@@ -910,7 +910,7 @@ impl<'a> Checker<'a> {
             match BParam::from_type(&p.ty.name.name, p.ty.constant).filter(|_| p.ty.module.is_none() && p.ty.args.is_empty()) {
                 Some(k) => params.push(k),
                 None => {
-                    self.error_hint(p.ty.span, format!("`{}` is not a type an intrinsic can take", p.ty.name.name), "use Target, Coord, any, str, int, const str or const int");
+                    self.error_hint(p.ty.span, format!("`{}` is not a type an intrinsic can take", p.ty.name.name), "use Target, Coord, Num, any, str, int, const str or const int");
                     return;
                 }
             }
@@ -3199,6 +3199,13 @@ impl<'a> Checker<'a> {
             self.args_for_errors(args);
             return Expr { kind: ExprKind::Error, ty: ret, span };
         }
+        // `particle` takes its arguments in groups: the name, the position, the spread (delta,
+        // speed, count), then the mode and the viewers
+        if b.id == "particle" && !matches!(args.len(), 1 | 4 | 9 | 10 | 11) {
+            self.error_hint(span, format!("`particle` takes 1, 4, 9, 10 or 11 arguments, found {}", args.len()), "(kind), (kind, x, y, z), (kind, x, y, z, dx, dy, dz, speed, count), then a mode `\"force\"`/`\"normal\"`, then the viewers");
+            self.args_for_errors(args);
+            return Expr { kind: ExprKind::Error, ty: ret, span };
+        }
         let mut hargs = Vec::new();
         let mut ok = true;
         for (a, p) in args.iter().zip(&b.params) {
@@ -3231,6 +3238,14 @@ impl<'a> Checker<'a> {
                     self.mismatch(h.span, &Ty::Int, &h.ty);
                     h
                 }
+                BParam::ConstNum => match self.number_text(a) {
+                    // carried as its text: it goes into the command as written
+                    Some(text) => Expr { kind: ExprKind::Str(text), ty: Ty::Str, span: a.span },
+                    None => {
+                        self.error_hint(a.span, "expected a number written out", "like `0.2`, `-1.5` or `3` (a constant, not a variable: the game reads it as a plain number)");
+                        Expr::error(a.span)
+                    }
+                },
                 BParam::ConstInt => match self.const_expr(a, Some(&Ty::Int)) {
                     Some((ConstVal::Int(n), _)) => Expr { kind: ExprKind::Int(n), ty: Ty::Int, span: a.span },
                     Some((_, t)) => {
@@ -3247,6 +3262,23 @@ impl<'a> Checker<'a> {
             self.builtin_semantics(b.id, &hargs);
         }
         Expr { kind: ExprKind::Builtin { name: b.id, args: hargs }, ty: ret, span }
+    }
+
+    /// The text of a number written in the source: an integer (or constant), or a decimal literal,
+    /// possibly negated.
+    fn number_text(&mut self, e: &'a ast::Expr) -> Option<String> {
+        use ast::ExprKind as K;
+        match &e.kind {
+            K::Float(t) => {
+                let clean: String = t.chars().filter(|c| *c != '_').collect();
+                (clean.chars().all(|c| c.is_ascii_digit() || c == '.') && clean.matches('.').count() == 1).then_some(clean)
+            }
+            K::Unary { op: ast::UnOp::Neg, expr } => self.number_text(expr).map(|t| format!("-{t}")),
+            _ => match self.const_expr(e, Some(&Ty::Int)) {
+                Some((ConstVal::Int(n), _)) => Some(n.to_string()),
+                _ => None,
+            },
+        }
     }
 
     /// Extra checks on constant arguments (valid ids, ranges).
@@ -3275,7 +3307,8 @@ impl<'a> Checker<'a> {
             "effect.give" | "summon" | "setblock" | "particle" => {
                 let idx = if name == "effect.give" { 1 } else if name == "summon" || name == "particle" { 0 } else { 3 };
                 if let Some((id, sp)) = s(idx)
-                    && let Err(e) = ResourceLocation::parse(&id) {
+                    // a particle's id may be followed by its options in braces
+                    && let Err(e) = ResourceLocation::parse(if name == "particle" { id.split('{').next().unwrap_or(&id) } else { &id }) {
                         self.error(sp, format!("invalid id: {}", e.message()));
                     }
                 if name == "effect.give" {

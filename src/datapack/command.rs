@@ -906,6 +906,24 @@ impl From<&str> for Arg<String> {
     }
 }
 
+/// Who sees a particle from how far (`force`: within 512 blocks, `normal`: 32).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ParticleMode {
+    Normal,
+    Force,
+}
+
+/// The last arguments of `particle`: with `count` 0 one particle moves with the velocity
+/// `delta * speed`; with more, `count` particles spread over `delta` (a gaussian) at `speed`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ParticleSpread {
+    pub delta: [f64; 3],
+    pub speed: f64,
+    pub count: Num,
+    pub mode: Option<ParticleMode>,
+    pub viewers: Option<Selector>,
+}
+
 /// A non-negative number argument: a literal, or a run-time hole (macro argument).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Num {
@@ -1096,8 +1114,9 @@ pub enum Command {
     Tellraw { targets: Selector, message: Text },
     Kill(Option<Selector>),
     Summon { entity: Arg<ResourceLocation>, pos: Option<Pos>, nbt: Option<Compound> },
-    /// `particle <name> [<pos>]`: a particle without options (`campfire_signal_smoke`, not `dust{..}`).
-    Particle { name: Arg<ResourceLocation>, pos: Option<Pos> },
+    /// `particle <name>[{options}] [<pos> [<delta> <speed> <count> [force|normal] [<viewers>]]]`.
+    /// `options` is the SNBT of a particle that takes data (`item{item:{id:"minecraft:diamond",count:1}}`), braces included.
+    Particle { name: Arg<ResourceLocation>, options: Option<String>, pos: Option<Pos>, spread: Option<ParticleSpread> },
     Setblock { pos: Pos, block: BlockState, mode: Option<SetblockMode> },
     /// `gamerule <rule> [<value>]`; no value queries.
     Gamerule { rule: ResourceLocation, value: Option<GameRuleValue> },
@@ -1333,7 +1352,30 @@ impl Check for Command {
                 pos.check()?;
                 nbt.check()
             }
-            Command::Particle { pos, .. } => pos.check(),
+            Command::Particle { name, options, pos, spread } => {
+                if let Some(o) = options {
+                    if matches!(name, Arg::Hole(_)) {
+                        bail!("a particle chosen at run time carries its options in the same text");
+                    }
+                    check_snbt_braces("particle options", o)?;
+                }
+                pos.check()?;
+                if let Some(s) = spread {
+                    if pos.is_none() {
+                        bail!("a particle's delta, speed and count need a position");
+                    }
+                    if s.delta.iter().chain([&s.speed]).any(|v| !v.is_finite()) {
+                        bail!("a particle's delta and speed must be finite numbers");
+                    }
+                    if s.speed < 0.0 {
+                        bail!("a particle's speed cannot be negative");
+                    }
+                    if let Some(v) = &s.viewers {
+                        v.check()?;
+                    }
+                }
+                Ok(())
+            }
             Command::Setblock { pos, block, .. } => {
                 pos.check_block()?;
                 block.check()
@@ -1354,6 +1396,44 @@ impl Check for Command {
             }
         }
     }
+}
+
+/// `{ ... }` on one line with balanced braces and brackets outside strings: the shape of an SNBT
+/// compound (what is inside is the game's to check). A `$(` would be read as a macro placeholder.
+fn check_snbt_braces(what: &str, text: &str) -> Result<()> {
+    single_line(what, text)?;
+    if text.contains("$(") {
+        bail!("{what} cannot contain `$(` (it would be read as a macro placeholder)");
+    }
+    if !text.starts_with('{') || !text.ends_with('}') {
+        bail!("{what} must be a compound in braces, such as `{{item:{{id:\"minecraft:stone\",count:1}}}}`, found {text:?}");
+    }
+    let (mut depth, mut quote, mut escaped) = (0i32, None::<char>, false);
+    for c in text.chars() {
+        match quote {
+            Some(q) => match c {
+                _ if escaped => escaped = false,
+                '\\' => escaped = true,
+                c if c == q => quote = None,
+                _ => {}
+            },
+            None => match c {
+                '"' | '\'' => quote = Some(c),
+                '{' | '[' => depth += 1,
+                '}' | ']' => {
+                    depth -= 1;
+                    if depth < 0 {
+                        bail!("{what} has a closing bracket with no opening one: {text:?}");
+                    }
+                }
+                _ => {}
+            },
+        }
+    }
+    if depth != 0 || quote.is_some() {
+        bail!("{what} has an unclosed bracket or quote: {text:?}");
+    }
+    Ok(())
 }
 
 impl fmt::Display for Command {
@@ -1407,12 +1487,26 @@ impl fmt::Display for Command {
                 }
                 Ok(())
             }
-            Command::Particle { name, pos } => {
+            Command::Particle { name, options, pos, spread } => {
                 write!(f, "particle {name}")?;
-                match pos {
-                    Some(p) => write!(f, " {p}"),
-                    None => Ok(()),
+                if let Some(o) = options {
+                    f.write_str(o)?;
                 }
+                if let Some(p) = pos {
+                    write!(f, " {p}")?;
+                    if let Some(s) = spread {
+                        write!(f, " {} {} {} {} {}", s.delta[0], s.delta[1], s.delta[2], s.speed, s.count)?;
+                        match s.mode {
+                            Some(ParticleMode::Normal) => f.write_str(" normal")?,
+                            Some(ParticleMode::Force) => f.write_str(" force")?,
+                            None => {}
+                        }
+                        if let Some(v) = &s.viewers {
+                            write!(f, " {v}")?;
+                        }
+                    }
+                }
+                Ok(())
             }
             Command::Setblock { pos, block, mode } => {
                 write!(f, "setblock {pos} {block}")?;
@@ -1670,10 +1764,34 @@ mod tests {
         let in_exec = Command::execute().clause(Clause::Summon(h(0))).run(Command::say("x"));
         assert_eq!(in_exec.render_line(), "$execute summon $(h0) run say x");
         assert_eq!(Command::Say(h(0)).render_line(), "$say $(h0)");
-        let spark = Command::Particle { name: rl("campfire_signal_smoke").into(), pos: None };
+        let spark = Command::Particle { name: rl("campfire_signal_smoke").into(), options: None, pos: None, spread: None };
         assert_eq!(spark.to_string(), "particle minecraft:campfire_signal_smoke");
-        let at = Command::Particle { name: Arg::Hole(Hole(0)), pos: Some(Pos::local(0.0, 1.0, 0.0)) };
+        let at = Command::Particle { name: Arg::Hole(Hole(0)), options: None, pos: Some(Pos::local(0.0, 1.0, 0.0)), spread: None };
         assert_eq!(at.render_line(), "$particle $(h0) ^ ^1 ^");
+        // a particle with data, a spread and a mode (the example from the wiki)
+        let item = Command::Particle {
+            name: rl("item").into(),
+            options: Some("{item:{id:\"minecraft:diamond\",count:1}}".into()),
+            pos: Some(Pos::new(Coord::Rel(0.0), Coord::Rel(1.0), Coord::Rel(0.0))),
+            spread: Some(ParticleSpread { delta: [0.2, 0.2, 0.2], speed: 0.1, count: Num::Lit(20), mode: Some(ParticleMode::Force), viewers: Some(Selector::a()) }),
+        };
+        assert_eq!(item.to_string(), "particle minecraft:item{item:{id:\"minecraft:diamond\",count:1}} ~ ~1 ~ 0.2 0.2 0.2 0.1 20 force @a");
+        assert!(item.check().is_ok());
+        let mut bad = item.clone();
+        if let Command::Particle { options, .. } = &mut bad {
+            *options = Some("{item:{id:\"x\"}".into());
+        }
+        assert!(bad.check().unwrap_err().to_string().contains("unclosed"));
+        let mut no_pos = item.clone();
+        if let Command::Particle { pos, .. } = &mut no_pos {
+            *pos = None;
+        }
+        assert!(no_pos.check().is_err());
+        let mut fast = item.clone();
+        if let Command::Particle { spread: Some(s), .. } = &mut fast {
+            s.speed = -1.0;
+        }
+        assert!(fast.check().unwrap_err().to_string().contains("negative"));
         assert!(Command::Say(h(0)).check().is_ok());
         assert_eq!(Command::Run(h(0)).render_line(), "$$(h0)");
         assert_eq!(Command::Run(Arg::Lit("time set day".into())).render_line(), "time set day");

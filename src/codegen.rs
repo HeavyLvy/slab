@@ -1719,9 +1719,57 @@ impl<'a> Gen<'a> {
                 Command::Setblock { pos, block: datapack::BlockState::new(block), mode: None }
             }
             "particle" => {
-                let name = self.str_arg(&args[0], holes, ResourceLocation::parse)?;
-                let pos = if args.len() == 4 { Some(self.pos(&args[1..4], holes)?) } else { None };
-                Command::Particle { name, pos }
+                // the name may carry options: `item{item:{id:"minecraft:diamond",count:1}}`
+                let (name, options) = match const_str(&args[0]) {
+                    Some(text) => {
+                        let (id, options) = match text.find('{') {
+                            Some(i) => (text[..i].to_owned(), Some(text[i..].to_owned())),
+                            None => (text.clone(), None),
+                        };
+                        match ResourceLocation::parse(&id) {
+                            Ok(id) => (datapack::Arg::Lit(id), options),
+                            Err(e) => {
+                                self.err(args[0].span, e.message().to_owned());
+                                return None;
+                            }
+                        }
+                    }
+                    None => (self.str_arg(&args[0], holes, ResourceLocation::parse)?, None),
+                };
+                let pos = if args.len() >= 4 { Some(self.pos(&args[1..4], holes)?) } else { None };
+                let spread = if args.len() >= 9 {
+                    let number = |this: &mut Self, e: &h::Expr| -> Option<f64> {
+                        let text = const_str(e)?;
+                        text.parse::<f64>().map_err(|_| this.err(e.span, format!("`{text}` is not a number"))).ok()
+                    };
+                    let delta = [number(self, &args[4])?, number(self, &args[5])?, number(self, &args[6])?];
+                    let speed = number(self, &args[7])?;
+                    let count = match &args[8].kind {
+                        h::ExprKind::Int(n) if *n >= 0 => Num::Lit(*n as u32),
+                        h::ExprKind::Int(_) => {
+                            self.err(args[8].span, "a particle count cannot be negative");
+                            return None;
+                        }
+                        _ => Num::Hole(self.hole(holes, &args[8])),
+                    };
+                    let mode = match args.get(9).and_then(const_str).as_deref() {
+                        None => None,
+                        Some("force") => Some(datapack::ParticleMode::Force),
+                        Some("normal") => Some(datapack::ParticleMode::Normal),
+                        Some(other) => {
+                            self.err(args[9].span, format!("the particle mode is `\"force\"` or `\"normal\"`, not `{other}`"));
+                            return None;
+                        }
+                    };
+                    let viewers = match args.get(10) {
+                        Some(v) => Some(self.target(v, holes)?),
+                        None => None,
+                    };
+                    Some(datapack::ParticleSpread { delta, speed, count, mode, viewers })
+                } else {
+                    None
+                };
+                Command::Particle { name, options, pos, spread }
             }
             "summon" => {
                 let id = self.str_arg(&args[0], holes, ResourceLocation::parse)?;

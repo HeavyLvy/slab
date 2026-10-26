@@ -19,6 +19,8 @@ pub enum BParam {
     Str,
     /// An integer literal or constant, known at compile time.
     ConstInt,
+    /// A number written out in the source, with or without a decimal point (`0.2`, `-1`).
+    ConstNum,
     /// Any integer expression; a variable is passed to the command at run time (a macro).
     Int,
     Selector,
@@ -124,6 +126,7 @@ impl BParam {
             BParam::ConstStr => "const str",
             BParam::Str => "str",
             BParam::ConstInt => "const int",
+            BParam::ConstNum => "number",
             BParam::Int => "int",
             BParam::Selector => "target",
             BParam::Coord => "coord",
@@ -141,6 +144,7 @@ impl BParam {
             ("str", true) => BParam::ConstStr,
             ("int", false) => BParam::Int,
             ("int", true) => BParam::ConstInt,
+            ("Num", false) => BParam::ConstNum,
             _ => return None,
         })
     }

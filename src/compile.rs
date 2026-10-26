@@ -699,6 +699,23 @@ mod tests {
     }
 
     #[test]
+    fn particles_take_data_a_spread_a_mode_and_viewers() {
+        let c = build_main("fn f(n: int) { particle(\"minecraft:item{item:{id:\\\"minecraft:diamond\\\",count:1}}\", ~, ~1, ~, 0.2, 0.2, 0.2, 0.1, 20, \"force\"); particle(\"dust{color:[1.0f,0.0f,0.0f],scale:1.5f}\", ~, ~, ~, 0, 0, 0, 0, n, \"normal\", @a[distance=..20]); particle(\"block{block_state:\\\"minecraft:stone\\\"}\", ^, ^, ^2, -0.5, 0.25, 1, 0.01, 5); }");
+        let f = fn_text(&c, "t:f");
+        assert!(f.contains("particle minecraft:item{item:{id:\"minecraft:diamond\",count:1}} ~ ~1 ~ 0.2 0.2 0.2 0.1 20 force\n"), "{f}");
+        assert!(f.contains("particle minecraft:block{block_state:\"minecraft:stone\"} ^ ^ ^2 -0.5 0.25 1 0.01 5\n"), "{f}");
+        // a count chosen at run time is a macro argument
+        assert!(fn_text(&c, "t:f/m0").contains("$particle minecraft:dust{color:[1.0f,0.0f,0.0f],scale:1.5f} ~ ~ ~ 0 0 0 0 $(h0) normal @a[distance=..20]"));
+        // mistakes: wrong group of arguments, a variable where a number is written out, bad options, a bad mode
+        assert!(build_err("fn f() { particle(\"end_rod\", ~, ~, ~, 1, 2); }").contains("takes 1, 4, 9, 10 or 11 arguments"));
+        assert!(build_err("fn f(d: int) { particle(\"end_rod\", ~, ~, ~, d, 0, 0, 0, 1); }").contains("expected a number written out"));
+        assert!(build_err("fn f() { particle(\"item{item:{id:\\\"x\\\"}\", ~, ~, ~); }").contains("unclosed"));
+        assert!(build_err("fn f() { particle(\"end_rod\", ~, ~, ~, 0, 0, 0, 0, 1, \"loud\"); }").contains("`\"force\"` or `\"normal\"`"));
+        assert!(build_err("fn f() { particle(\"end_rod\", ~, ~, ~, 0, 0, 0, -1, 1); }").contains("negative"));
+        assert!(build_err("fn f() { particle(\"end_rod\", ~, ~, ~, 0, 0, 0, 0, -3); }").contains("negative"));
+    }
+
+    #[test]
     fn entity_movement_methods_are_slab_code_over_run_command() {
         let c = build_main("fn f(e: Entity) { e.move_local(0, 0, 5); e.set_rotation(90, 0); }");
         // the library functions are generated because they are called, and nothing else of Entity is

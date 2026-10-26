@@ -78,6 +78,7 @@ Builtins that act on the world return `bool`: **did the command work?** `if !tp(
 | `game::effect::clear(sel)` | `bool` | |
 | `game::tp(sel, x, y, z)` | `bool` | each coordinate is any `int` expression or `~`/`^` |
 | `game::setblock(x, y, z, id)` | `bool` | `id` is any `str` |
+| `game::particle(kind [, x, y, z [, dx, dy, dz, speed, count [, mode [, viewers]]]])` | `bool` | `kind` is the id plus the data of a particle that takes some, in braces: `"minecraft:item{item:{id:\"minecraft:diamond\",count:1}}"`; `dx dy dz speed` are numbers written out (`0.2`), `count` any `int`, `mode` `"force"`/`"normal"`; 1, 4, 9, 10 or 11 arguments |
 | `game::summon(id [, x, y, z])` | `game::Entity` | `id` is any `str` |
 
 Methods: `list.push(x)` (needs a mutable place), `list.len()`, `str.len()`. Whether the *backend* can lower each builtin yet is separate from this table; a builtin the backend lacks is reported by the lowering, not here.
