@@ -207,7 +207,7 @@ mod tests {
             ("main.slab", "import util; global answer: int = 0; #[load] fn boot() { answer = util::double(21); }"),
             ("util.slab", "pub fn double(x: int) -> int { return x * 2; }"),
         ]);
-        let boot = fn_text(&c, "t:boot");
+        let boot = fn_text(&c, "t:boot__run");
         assert!(boot.contains("function t:util__double"), "{boot}");
         assert!(fn_text(&c, "t:util__double").contains("scoreboard players operation #ret t"));
         assert!(fn_text(&c, "t:_init").contains("function t:boot"));
@@ -645,6 +645,23 @@ mod tests {
             assert!(c.pack.function(&ResourceLocation::parse(&format!("t:{used}")).unwrap()).is_some(), "{used}");
         }
         assert!(c.pack.function(&ResourceLocation::parse("t:game__entity__set_velocity").unwrap()).is_none());
+    }
+
+    #[test]
+    fn entry_points_are_guarded_against_a_silent_cut_off() {
+        let c = build_main("#[load] fn boot() { say(\"hi\"); } #[tick] fn each() { say(\"t\"); } fn plain() { say(\"p\"); }");
+        // the entry point sets a flag, runs the body, and clears the flag: a body cut short leaves it set
+        assert_eq!(fn_text(&c, "t:boot").lines().filter(|l| !l.starts_with('#')).collect::<Vec<_>>(), ["scoreboard players set #g.boot__cut t 1", "function t:boot__run", "scoreboard players set #g.boot__cut t 0"]);
+        assert!(fn_text(&c, "t:boot__run").contains("say hi"));
+        // a function nobody enters is not guarded, and `_watchdog` (a tick function) reports flags still set
+        assert!(c.pack.function(&ResourceLocation::parse("t:plain__run").unwrap()).is_none());
+        let w = fn_text(&c, "t:_watchdog");
+        assert!(w.contains("execute if score #g.boot__cut t matches 1") && w.contains("execute if score #g.each__cut t matches 1"), "{w}");
+        let b = (0..4).map(|i| c.pack.function(&ResourceLocation::parse(&format!("t:_watchdog/b{i}")).unwrap()).map(|f| f.render()).unwrap_or_default()).collect::<String>();
+        assert!(b.contains("was cut off") && b.contains("#g._cutoffs t"), "{b}");
+        // no entry points, no watchdog
+        let c = build_main("fn plain() { say(\"p\"); }");
+        assert!(c.pack.function(&ResourceLocation::parse("t:_watchdog").unwrap()).is_none());
     }
 
     #[test]

@@ -190,6 +190,8 @@ global r_vel_y: int = 0;
 global r_vel_z: int = 0;
 global r_push_x: int = 0;
 global r_push_z: int = 0;
+global r_overrun_armed: int = 1;
+global r_overrun_done: int = 0;
 global r_cmd_value: int = 0;
 global r_cmd_ok: int = 0;
 global r_cmd_err: int = 0;
@@ -376,6 +378,17 @@ fn first_square_over(limit: int) -> int {
         if i * i > limit { return i; }
     }
     return -1;
+}
+
+// An entry point that runs into the 65,536 commands per tick limit once: `_watchdog` must say so.
+#[tick]
+fn overrun() {
+    if r_overrun_armed == 1 {
+        r_overrun_armed = 0;
+        let mut n = 0;
+        while n < 100000 { n += 1; }
+        r_overrun_done = 1;   // never reached
+    }
 }
 
 #[tick]

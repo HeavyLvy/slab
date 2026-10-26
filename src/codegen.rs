@@ -56,6 +56,7 @@ pub fn generate(hir: &h::Hir, namespace: &str, description: &str, opts: &GenOpti
     for i in (0..hir.fns.len()).filter(|&i| reached[i]) {
         g.function(i, &mut program.functions);
     }
+    g.watchdog();
     program.functions.append(&mut g.extra_fns);
     program.globals.append(&mut g.extra_globals);
     program.uninstall = g.uninstall_commands();
@@ -173,6 +174,8 @@ struct Gen<'a> {
     extra_fns: Vec<ir::Function>,
     extra_globals: Vec<ir::Global>,
     used_fns: HashSet<String>,
+    /// Entry points and the global that says whether a run reached its end (`_watchdog`).
+    watched: Vec<(String, String)>,
     used_globals: HashSet<String>,
     // --- per function
     cur_fn: usize,
@@ -190,7 +193,7 @@ struct Gen<'a> {
 
 impl<'a> Gen<'a> {
     fn new(hir: &'a h::Hir, namespace: &str, opts: &GenOptions<'a>) -> Self {
-        let mut used_fns = HashSet::from(["_init", "_uninstall", "_alloc_id", "_new_entity", "_ensure_id"].map(str::to_owned));
+        let mut used_fns = HashSet::from(["_init", "_uninstall", "_alloc_id", "_new_entity", "_ensure_id", "_watchdog"].map(str::to_owned));
         let fn_names = hir.fns.iter().map(|f| unique(&mut used_fns, format!("{}{}", module_prefix(&hir.modules[f.module]), sanitize(&f.name)))).collect();
         let mut used_globals = HashSet::new();
         let global_names = hir.globals.iter().map(|g| unique(&mut used_globals, format!("{}{}", module_prefix(&hir.modules[g.module]), sanitize(&g.name)))).collect();
@@ -212,6 +215,7 @@ impl<'a> Gen<'a> {
             extra_fns: Vec::new(),
             extra_globals: Vec::new(),
             used_fns,
+            watched: Vec::new(),
             used_globals,
             cur_fn: 0,
             local_names: Vec::new(),
@@ -353,6 +357,30 @@ impl<'a> Gen<'a> {
         }
     }
 
+    /// `_watchdog`, run every tick: tells the players when an entry point was cut off by the
+    /// command limit (its flag is still set) and counts the reports in `_cutoffs`.
+    fn watchdog(&mut self) {
+        if self.watched.is_empty() {
+            return;
+        }
+        let counter = unique(&mut self.used_globals, "_cutoffs".to_owned());
+        self.extra_globals.push(ir::Global { name: counter.clone(), kind: ir::Kind::Int, init: ir::Expr::Int(0) });
+        let mut body = Vec::new();
+        for (name, flag) in self.watched.clone() {
+            let message = format!("slab: `{name}` was cut off: the game stops a function after 65536 commands in one tick. Split the work over several ticks or do less per call.");
+            body.push(ir::Stmt::If {
+                cond: ir::Expr::bin(ir::BinOp::Eq, ir::Expr::Global(flag.clone()), ir::Expr::Int(1)),
+                then: vec![
+                    ir::Stmt::Assign { target: ir::VarRef::Global(flag), value: ir::Expr::Int(0) },
+                    ir::Stmt::Assign { target: ir::VarRef::Global(counter.clone()), value: ir::Expr::bin(ir::BinOp::Add, ir::Expr::Global(counter.clone()), ir::Expr::Int(1)) },
+                    ir::Stmt::PrintParts(vec![ir::PrintPart::Lit(message)]),
+                ],
+                els: Vec::new(),
+            });
+        }
+        self.extra_fns.push(ir::Function { name: "_watchdog".to_owned(), params: Vec::new(), ret: None, body, entry: Some(ir::Entry::Tick) });
+    }
+
     fn function(&mut self, idx: usize, out: &mut Vec<ir::Function>) {
         let f = &self.hir.fns[idx];
         self.cur_fn = idx;
@@ -368,7 +396,20 @@ impl<'a> Gen<'a> {
             Some(h::EntryKind::Tick) | Some(h::EntryKind::Every(1)) => Some(ir::Entry::Tick),
             _ => None,
         };
-        out.push(ir::Function { name: name.clone(), params, ret: (f.ret != Ty::Unit).then(|| kind_of(&f.ret)), body, entry });
+        if f.entry.is_some() && !f.std {
+            // The game stops a function chain after 65,536 commands without saying so. An entry
+            // point sets a flag before its body and clears it after; a flag still set later means
+            // the body never reached its end (`_watchdog` reports it).
+            let run = unique(&mut self.used_fns, format!("{name}__run"));
+            let flag = unique(&mut self.used_globals, format!("{name}__cut"));
+            self.extra_globals.push(ir::Global { name: flag.clone(), kind: ir::Kind::Int, init: ir::Expr::Int(0) });
+            let set = |v: i32| ir::Stmt::Assign { target: ir::VarRef::Global(flag.clone()), value: ir::Expr::Int(v) };
+            out.push(ir::Function { name: run.clone(), params: Vec::new(), ret: None, body, entry: None });
+            out.push(ir::Function { name: name.clone(), params, ret: None, body: vec![set(1), ir::Stmt::Expr(ir::Expr::call(&run, vec![])), set(0)], entry });
+            self.watched.push((f.name.clone(), flag));
+        } else {
+            out.push(ir::Function { name: name.clone(), params, ret: (f.ret != Ty::Unit).then(|| kind_of(&f.ret)), body, entry });
+        }
         if let Some(h::EntryKind::Every(n)) = f.entry
             && n > 1
         {

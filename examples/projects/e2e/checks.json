@@ -509,6 +509,19 @@
   "expect": "has 1 [e2e]"
  },
  {
+  "cmd": "scoreboard players get #g.r_overrun_done e2e",
+  "expect": "has 0 [e2e]",
+  "wait": 1
+ },
+ {
+  "cmd": "scoreboard players get #g._cutoffs e2e",
+  "expect": "has 1 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.overrun__cut e2e",
+  "expect": "has 0 [e2e]"
+ },
+ {
   "cmd": "scoreboard players get #g.r_rot_yaw e2e",
   "expect": "has 900000 [e2e]"
  },

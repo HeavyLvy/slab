@@ -82,8 +82,12 @@ A world-acting builtin used as a value becomes `ir::Expr::CommandSuccess`: `set 
 | `push` onto a list selected by a variable index (`xs[i].push(v)`) | would modify a copy |
 | a score holder must be a selector or string literal (`pts[name]` with a variable `name`) | strings are not substituted into commands |
 | string indexing/slicing, selector parts other than the options listed in "Selector variables", score-holder names chosen at run time | commands need those at compile time (or a bigger macro design) |
-| a loop runs at most ~21,000 iterations per tick | `max_command_sequence_length` = 65536 commands; the game stops the whole call chain (docs/mc/05-verified-by-slab.md) |
+| a loop runs at most ~21,000 iterations per tick, and far fewer when the body is more than a few commands (a body that calls library functions can cost hundreds) | `max_command_sequence_length` = 65536 commands; the game stops the whole call chain without any message (docs/mc/05-verified-by-slab.md) |
 | no floats | `/compute` is not used yet |
+
+### Telling when the limit was hit
+
+Because the game stops silently, every user entry point (`#[load]`, `#[tick]`, `#[every]`) is generated as a wrapper: `scoreboard players set #g.<fn>__cut <ns> 1`, `function <ns>:<fn>__run` (the real body), then `... 0`. A body that ran into the limit never reaches the last line, so its flag stays 1. A generated tick function `_watchdog` checks the flags (one command per entry point per tick); when one is still 1 it clears it, adds one to `_cutoffs`, and tells the players ``slab: `fn` was cut off ...``. The cost is about four commands per entry point per run. A pack with no entry points has no watchdog. Tests: `src/compile.rs` and the e2e function `overrun`, which loops 100,000 times once on purpose.
 
 ## Missed optimisations (known, correct but not minimal)
 

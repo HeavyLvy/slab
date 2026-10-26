@@ -44,10 +44,9 @@ scoreboard players operation #ret demo *= #c_2 demo
 return 1
 
 # function demo:boot
-scoreboard players set #double.v_x demo 21
-function demo:double
-scoreboard players operation #boot.v_y demo = #ret demo
-tellraw @a {score:{name:"#boot.v_y",objective:"demo"}}
+scoreboard players set #g.boot__cut demo 1
+function demo:boot__run
+scoreboard players set #g.boot__cut demo 0
 ```
 
 `print` with a number shows the score with a `tellraw` text component, so the number is read at the moment the message is sent.
@@ -872,10 +871,9 @@ fn boot() {
 ```
 ```mcfunction
 # function demo:boot
-scoreboard players set #util__double.v_x demo 4
-function demo:util__double
-scoreboard players operation #boot.t_0 demo = #ret demo
-tellraw @a {score:{name:"#boot.t_0",objective:"demo"}}
+scoreboard players set #g.boot__cut demo 1
+function demo:boot__run
+scoreboard players set #g.boot__cut demo 0
 
 # function demo:util__double
 scoreboard players operation #ret demo = #util__double.v_x demo
@@ -930,13 +928,20 @@ fn counter() {
 scoreboard objectives add demo dummy
 execute unless score #g.ticks demo matches -2147483648..2147483647 run scoreboard players set #g.ticks demo 0
 execute unless data storage demo:globals greeting run data modify storage demo:globals greeting set value "hi"
+execute unless score #g.boot__cut demo matches -2147483648..2147483647 run scoreboard players set #g.boot__cut demo 0
+execute unless score #g.counter__cut demo matches -2147483648..2147483647 run scoreboard players set #g.counter__cut demo 0
+execute unless score #g._cutoffs demo matches -2147483648..2147483647 run scoreboard players set #g._cutoffs demo 0
 function demo:boot
 
 # function demo:boot
-scoreboard players set #g.ticks demo 100
+scoreboard players set #g.boot__cut demo 1
+function demo:boot__run
+scoreboard players set #g.boot__cut demo 0
 
 # function demo:counter
-scoreboard players add #g.ticks demo 1
+scoreboard players set #g.counter__cut demo 1
+function demo:counter__run
+scoreboard players set #g.counter__cut demo 0
 ```
 
 `#[every(1s)]` is a counter global plus a tick function that calls yours when the counter reaches the period (here 20 ticks):
@@ -951,7 +956,9 @@ fn heartbeat() {
 ```
 ```mcfunction
 # function demo:heartbeat
-scoreboard players add #g.beats demo 1
+scoreboard players set #g.heartbeat__cut demo 1
+function demo:heartbeat__run
+scoreboard players set #g.heartbeat__cut demo 0
 
 # function demo:heartbeat__every_tick
 scoreboard players add #g.heartbeat__every demo 1
