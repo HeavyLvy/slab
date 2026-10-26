@@ -23,6 +23,7 @@ name = "my_game"                 # required; the namespace unless `namespace` sa
 version = "0.1.0"
 description = "Shown by /datapack list"
 namespace = "my_game"            # optional: lowercase, letters, digits and _ - . +
+minecraft = "26.3"               # the game version the pack is for (default: the newest)
 
 [build]
 abort-on-unwrap = false          # a failed unwrap() also runs `datapack disable`
@@ -30,6 +31,8 @@ pack-id = "file/my_game"         # the pack that command disables
 ```
 
 Only this part of TOML is read (tables, `key = "text" | true | false | 123`, `#` comments). A key the compiler does not know is an error with its line, so a typo cannot be ignored silently. The namespace is `namespace`, else `name` with every character that is not a letter or digit turned into `_` and lowercased (`My-Game` is `my_game`). The command line wins over the file (`--namespace`, `--description`, `--abort-on-unwrap`, `--pack-id`).
+
+`minecraft` is the version the pack targets: it sets the data pack format in `pack.mcmeta` (`min_format` / `max_format`: 26.1 is 101.1, 26.2 is 107.1, 26.3 is 121.0, from `docs/mc/01-datapack-structure.md`), and a patch release such as `26.1.2` reads as its family. Only 26.3 has been run against a real server, so building for 26.1 or 26.2 prints a warning saying the commands were not tried there; versions before 26.1 are refused, because their `pack.mcmeta` and many commands differ. Language features that need a newer game (the planned `float` uses 26.x's `/compute`) will be errors for older targets. The command line has `--minecraft VERSION`.
 
 A bare directory with a `main.slab` and no `Slab.toml` still builds (its modules sit next to it, and its name is the namespace), which is handy for a quick experiment; `slab init` upgrades it.
 

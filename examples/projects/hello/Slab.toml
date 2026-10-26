@@ -1,4 +1,5 @@
 [project]
 name = "hello"
 version = "0.1.0"
+minecraft = "26.3"
 description = "a small multi-file project"

@@ -12,9 +12,10 @@ use super::error::{Check, Error, Result, bail};
 use super::function::{Function, Line};
 use super::json::Json;
 use super::names::{IdOrTag, ResourceLocation};
+use super::target::Target;
 use super::zip::write_zip;
 
-/// Data pack format of the target game version (26.3 = 121.0).
+/// Data pack format of the default target (26.3 = 121.0); see [`Target`] for the others.
 pub const PACK_FORMAT: u32 = 121;
 
 /// An entry of a tag file.
@@ -118,6 +119,7 @@ impl From<io::Error> for BuildError {
 #[derive(Clone, Debug)]
 pub struct DataPack {
     description: String,
+    target: Target,
     functions: BTreeMap<ResourceLocation, Function>,
     /// registry folder (`function`, `block`, ...) + id -> tag
     tags: BTreeMap<(String, ResourceLocation), Tag>,
@@ -136,11 +138,20 @@ fn check_registry(registry: &str) -> Result<()> {
 
 impl DataPack {
     pub fn new(description: impl Into<String>) -> Self {
-        DataPack { description: description.into(), functions: BTreeMap::new(), tags: BTreeMap::new(), resources: BTreeMap::new() }
+        DataPack { description: description.into(), target: Target::default(), functions: BTreeMap::new(), tags: BTreeMap::new(), resources: BTreeMap::new() }
     }
 
     pub fn description(&self) -> &str {
         &self.description
+    }
+
+    /// The game version the pack declares in `pack.mcmeta` (default: the newest, 26.3).
+    pub fn set_target(&mut self, target: Target) {
+        self.target = target;
+    }
+
+    pub fn target(&self) -> Target {
+        self.target
     }
 
     /// Adds a function, `data/<ns>/function/<path>.mcfunction`.
@@ -309,8 +320,8 @@ impl DataPack {
             "pack",
             Json::object([
                 ("description", Json::str(self.description.clone())),
-                ("min_format", Json::Array(vec![Json::Int(PACK_FORMAT as i64), Json::Int(0)])),
-                ("max_format", Json::Int(PACK_FORMAT as i64)),
+                ("min_format", Json::Array(vec![Json::Int(self.target.format.0 as i64), Json::Int(self.target.format.1 as i64)])),
+                ("max_format", Json::Int(self.target.format.0 as i64)),
             ]),
         )]);
         files.insert("pack.mcmeta".to_owned(), mcmeta.pretty().into_bytes());
@@ -396,6 +407,11 @@ mod tests {
         let mcmeta = String::from_utf8_lossy(&files["pack.mcmeta"]).into_owned();
         assert!(mcmeta.contains("\"min_format\": [\n      121,\n      0\n    ]"), "{mcmeta}");
         assert!(mcmeta.contains("\"max_format\": 121"));
+        // another target changes the declared formats
+        let mut p = simple();
+        p.set_target(Target::parse("26.1").unwrap());
+        let mcmeta = String::from_utf8_lossy(&p.files().unwrap()["pack.mcmeta"]).into_owned();
+        assert!(mcmeta.contains("\"min_format\": [\n      101,\n      1\n    ]") && mcmeta.contains("\"max_format\": 101"), "{mcmeta}");
     }
 
     #[test]

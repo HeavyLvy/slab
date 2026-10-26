@@ -6,6 +6,7 @@
 //! version = "0.1.0"
 //! description = "Shown by /datapack list"
 //! namespace = "my_pack"       # optional: when the pack's namespace differs from its name
+//! minecraft = "26.3"          # the game version the pack is for (default: the newest, 26.3)
 //!
 //! [build]
 //! abort-on-unwrap = false     # a failed unwrap() also runs `datapack disable`
@@ -28,6 +29,7 @@ pub struct Manifest {
     pub version: Option<String>,
     pub description: Option<String>,
     pub namespace: Option<String>,
+    pub minecraft: Option<String>,
     pub abort_on_unwrap: Option<bool>,
     pub pack_id: Option<String>,
 }
@@ -81,13 +83,14 @@ impl Manifest {
                         name = Some(s);
                     }
                 }
-                ("project", "version") | ("project", "description") | ("project", "namespace") | ("build", "pack-id") => {
+                ("project", "version") | ("project", "description") | ("project", "namespace") | ("project", "minecraft") | ("build", "pack-id") => {
                     want(value.clone(), "a string")?;
                     let Value::Str(s) = value else { unreachable!() };
                     match (table.as_str(), key) {
                         ("project", "version") => m.version = Some(s),
                         ("project", "description") => m.description = Some(s),
                         ("project", "namespace") => m.namespace = Some(s),
+                        ("project", "minecraft") => m.minecraft = Some(s),
                         _ => m.pack_id = Some(s),
                     }
                 }
@@ -194,7 +197,7 @@ pub fn load(dir: &Path) -> Result<Manifest, String> {
 
 /// The `Slab.toml` template `slab new` writes.
 pub fn template(name: &str) -> String {
-    format!("[project]\nname = \"{name}\"\nversion = \"0.1.0\"\ndescription = \"\"\n\n[build]\n# abort-on-unwrap = true\n")
+    format!("[project]\nname = \"{name}\"\nversion = \"0.1.0\"\ndescription = \"\"\nminecraft = \"26.3\"\n\n[build]\n# abort-on-unwrap = true\n")
 }
 
 #[cfg(test)]
@@ -209,8 +212,9 @@ mod tests {
         assert_eq!(m.version.as_deref(), Some("1.2.3"));
         assert_eq!(m.description.as_deref(), Some("say \"hi\" # not a comment"));
         assert_eq!((m.abort_on_unwrap, m.pack_id.as_deref()), (Some(true), Some("file/x")));
-        let m = Manifest::parse("[project]\nname = \"a\"\nnamespace = \"custom\"\n").unwrap();
+        let m = Manifest::parse("[project]\nname = \"a\"\nnamespace = \"custom\"\nminecraft = \"26.2\"\n").unwrap();
         assert_eq!(m.namespace(), "custom");
+        assert_eq!(m.minecraft.as_deref(), Some("26.2"));
     }
 
     #[test]

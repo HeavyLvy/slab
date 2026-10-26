@@ -12,6 +12,7 @@ mod json;
 mod names;
 mod nbt;
 mod pack;
+mod target;
 mod text;
 mod zip;
 
@@ -22,5 +23,6 @@ pub use function::{Function, Line};
 pub use json::Json;
 pub use names::{HolderName, Hole, IdOrTag, Objective, ResourceLocation, Word, holder, rl, word};
 pub use nbt::{Compound, Nbt, NbtPath, PathNode};
+pub use target::{TARGETS, Target};
 pub use pack::{BuildError, DataPack, Diagnostic, PACK_FORMAT, Tag, TagEntry};
 pub use text::{ClickEvent, Color, Content, HoverEvent, Style, Text};

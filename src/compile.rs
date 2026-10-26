@@ -3,7 +3,7 @@
 use std::path::Path;
 
 use crate::codegen;
-use crate::datapack::{DataPack, ResourceLocation, Word};
+use crate::datapack::{DataPack, ResourceLocation, Target, Word};
 use crate::diag::{Diagnostic, Severity, SourceMap};
 use crate::lower;
 use crate::manifest::{self, Manifest};
@@ -20,6 +20,8 @@ pub struct Options {
     pub abort_on_unwrap: bool,
     /// The pack id `datapack disable` uses; defaults to `file/<namespace>` (`--pack-id`).
     pub pack_id: Option<String>,
+    /// The Minecraft version to build for, such as `26.3` (`--minecraft`; default: `Slab.toml`, then the newest).
+    pub minecraft: Option<String>,
 }
 
 pub struct Compiled {
@@ -27,6 +29,9 @@ pub struct Compiled {
     pub namespace: String,
     /// The project directory: the one with `Slab.toml`, or the one with `main.slab`.
     pub project_dir: std::path::PathBuf,
+    pub target: Target,
+    /// Plain-text warnings that belong to no source line (an untried Minecraft version).
+    pub notices: Vec<String>,
     pub warnings: Vec<Diagnostic>,
     pub sources: SourceMap,
 }
@@ -128,6 +133,10 @@ pub fn compile(entry: &Path, opts: &Options) -> Result<Compiled, CompileError> {
     let (project, checked, project_dir, manifest) = load_and_check(entry)?;
     let namespace = opts.namespace.clone().or_else(|| manifest.as_ref().map(Manifest::namespace)).unwrap_or_else(|| default_namespace(&project_dir));
     validate_namespace(&namespace).map_err(CompileError::Io)?;
+    let target = match opts.minecraft.clone().or_else(|| manifest.as_ref().and_then(|m| m.minecraft.clone())) {
+        Some(v) => Target::parse(&v).map_err(CompileError::Io)?,
+        None => Target::default(),
+    };
     let manifest_description = manifest.as_ref().and_then(|m| m.description.clone()).filter(|d| !d.trim().is_empty());
     let description = opts.description.clone().or(manifest_description).unwrap_or_else(|| format!("{namespace} (compiled by slab)"));
     let abort_on_unwrap = opts.abort_on_unwrap || manifest.as_ref().and_then(|m| m.abort_on_unwrap).unwrap_or(false);
@@ -138,14 +147,15 @@ pub fn compile(entry: &Path, opts: &Options) -> Result<Compiled, CompileError> {
         Ok(p) => p,
         Err(errors) => return Err(CompileError::Source { sources: project.sources, errors, warnings: checked.warnings }),
     };
-    let pack = lower::lower(&program).map_err(|e| CompileError::Backend(format!("the backend rejected the program: {e}")))?;
+    let mut pack = lower::lower(&program).map_err(|e| CompileError::Backend(format!("the backend rejected the program: {e}")))?;
+    pack.set_target(target);
     let problems = pack.validate();
     if !problems.is_empty() {
         let list: Vec<String> = problems.iter().map(|d| format!("  {d}")).collect();
         return Err(CompileError::Backend(format!("the generated data pack is invalid (this is a bug or a backend limit):\n{}", list.join("\n"))));
     }
     let warnings = checked.warnings.into_iter().filter(|d| d.severity == Severity::Warning).collect();
-    Ok(Compiled { pack, namespace, project_dir, warnings, sources: project.sources })
+    Ok(Compiled { pack, namespace, project_dir, target, notices: target.caveat().into_iter().collect(), warnings, sources: project.sources })
 }
 
 #[cfg(test)]

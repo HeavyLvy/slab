@@ -193,3 +193,44 @@ fn init_turns_a_flat_directory_into_a_project() {
     assert_eq!(Command::new(env!("CARGO_BIN_EXE_slab")).arg("init").current_dir(&dir).output().unwrap().status.code(), Some(1), "already a project");
     let _ = fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn the_target_minecraft_version_sets_the_pack_format() {
+    let dir = scratch("target");
+    fs::create_dir_all(dir.join("src")).unwrap();
+    fs::write(dir.join("src/main.slab"), "import std::print; #[load] fn boot() { print(1); }").unwrap();
+    let manifest = |extra: &str| fs::write(dir.join("Slab.toml"), format!("[project]\nname = \"t\"\n{extra}")).unwrap();
+    let mcmeta = || fs::read_to_string(dir.join("build/t/pack.mcmeta")).unwrap();
+    let build = |args: &[&str]| {
+        let mut a = vec!["build", dir.to_str().unwrap()];
+        a.extend_from_slice(args);
+        slab(&a)
+    };
+
+    // the default is the newest version, which is the one the compiler is checked against
+    manifest("");
+    let o = build(&[]);
+    assert!(o.status.success());
+    assert!(String::from_utf8_lossy(&o.stdout).contains("for Minecraft 26.3"));
+    assert!(mcmeta().contains("121") && !String::from_utf8_lossy(&o.stderr).contains("warning"));
+
+    // an older release gets its own format and a warning that it was not tried
+    manifest("minecraft = \"26.1.2\"\n");
+    let o = build(&[]);
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    let text = mcmeta();
+    assert!(text.contains("101") && text.contains("\"max_format\": 101") && !text.contains("121"), "{text}");
+    assert!(String::from_utf8_lossy(&o.stderr).contains("only checked against Minecraft 26.3"));
+
+    // the command line wins over the manifest
+    let o = build(&["--minecraft", "26.3"]);
+    assert!(mcmeta().contains("121") && o.status.success());
+
+    // versions before 26.1 are refused, from either place
+    assert_eq!(build(&["--minecraft", "1.21.4"]).status.code(), Some(1));
+    manifest("minecraft = \"1.21.4\"\n");
+    let o = build(&[]);
+    assert_eq!(o.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&o.stderr).contains("unsupported Minecraft version `1.21.4`"));
+    let _ = fs::remove_dir_all(&dir);
+}

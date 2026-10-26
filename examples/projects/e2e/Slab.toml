@@ -1,4 +1,5 @@
 [project]
 name = "e2e"
 version = "0.1.0"
+minecraft = "26.3"
 description = "end-to-end test project (tools/verify_all.sh)"

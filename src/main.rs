@@ -24,7 +24,8 @@ build options (they override Slab.toml):
   --namespace NAME       data pack namespace (default: from Slab.toml, else the directory's name)
   --description TEXT     description shown by /datapack list
   --abort-on-unwrap      a failed unwrap()/expect() also runs `datapack disable` for the pack
-  --pack-id ID           the pack id for that (default: file/<namespace>)";
+  --pack-id ID           the pack id for that (default: file/<namespace>)
+  --minecraft VERSION    the game version to build for: 26.1, 26.2 or 26.3 (default: Slab.toml, else 26.3)";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -108,6 +109,7 @@ fn parse_build_args(args: &[String]) -> Result<BuildArgs, String> {
             "--description" => b.opts.description = Some(value(a)?),
             "--abort-on-unwrap" => b.opts.abort_on_unwrap = true,
             "--pack-id" => b.opts.pack_id = Some(value(a)?),
+            "--minecraft" => b.opts.minecraft = Some(value(a)?),
             flag if flag.starts_with('-') => return Err(format!("unknown option `{flag}`")),
             p => {
                 if path_set {
@@ -134,6 +136,9 @@ fn build(args: &[String]) -> ExitCode {
         }
     };
     print_warnings(&compiled.sources, &compiled.warnings);
+    for n in &compiled.notices {
+        eprintln!("warning: {n}");
+    }
 
     let out = b.out.clone().unwrap_or_else(|| compiled.project_dir.join("build").join(&compiled.namespace));
     if let Err(e) = compiled.pack.write_dir(&out, true) {
@@ -141,7 +146,7 @@ fn build(args: &[String]) -> ExitCode {
         return ExitCode::from(1);
     }
     let functions = compiled.pack.functions().count();
-    println!("built `{}`: {} -> {}", compiled.namespace, plural(functions, "function"), out.display());
+    println!("built `{}` for Minecraft {}: {} -> {}", compiled.namespace, compiled.target, plural(functions, "function"), out.display());
     if b.zip {
         let zip = PathBuf::from(format!("{}.zip", out.display()));
         if let Err(e) = compiled.pack.write_zip(&zip) {
