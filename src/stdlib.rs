@@ -52,6 +52,13 @@ pub fn cache_dir() -> PathBuf {
     base.join("slab").join(format!("std-{}-{:08x}", env!("CARGO_PKG_VERSION"), hash as u32))
 }
 
+/// Whether a path is a file of the standard library written by [`write_cache`], of this compiler
+/// version or an older one (editors can still have those open).
+pub fn is_cache_path(path: &std::path::Path) -> bool {
+    let Some(root) = cache_dir().parent().map(std::path::Path::to_path_buf) else { return false };
+    path.strip_prefix(&root).ok().and_then(|rel| rel.components().next()).is_some_and(|c| c.as_os_str().to_string_lossy().starts_with("std-"))
+}
+
 /// The path of an embedded module's source file (it only exists after [`write_cache`]).
 pub fn file_path(m: &StdModule) -> PathBuf {
     cache_dir().join(m.path)

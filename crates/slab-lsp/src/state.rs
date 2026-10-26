@@ -119,6 +119,9 @@ impl Workspace {
     /// for this because `p.` or `p.x` half-typed stops the parser before they'd check.
     pub fn hir_with_replacement(&self, uri: &str, start: usize, end: usize, replacement: &str) -> Option<sema::hir::Hir> {
         let (_, doc, _) = self.locate(uri)?;
+        if slab::stdlib::is_cache_path(&doc.path) {
+            return None;
+        }
         let (_key, root_file, _standalone) = root_for(&doc.path);
         let mut overlay = proj::Overlay::default();
         for d in self.docs.values() {
@@ -136,9 +139,17 @@ impl Workspace {
         sema::check_modules_tolerant(&inputs).hir
     }
 
-    /// The document, its project and (when the file was parsed) its module.
+    /// The document, its project and (when the file was parsed) its module. A file of the
+    /// standard library belongs to no project of its own: it is read through any project that
+    /// has loaded it (they all contain the standard library).
     pub fn locate(&self, uri: &str) -> Option<(&ProjectState, &Doc, Option<usize>)> {
         let doc = self.docs.get(uri)?;
+        if slab::stdlib::is_cache_path(&doc.path) {
+            return self.projects.values().find_map(|state| {
+                let module = state.file_of(&doc.path).and_then(|fi| state.module_of_file(fi))?;
+                Some((state, doc, Some(module)))
+            });
+        }
         let (key, _, _) = root_for(&doc.path);
         let state = self.projects.get(&key)?;
         let module = state.file_of(&doc.path).and_then(|fi| state.module_of_file(fi));
@@ -147,6 +158,21 @@ impl Workspace {
 
     fn sync(&mut self, uri: &str, update: Option<(String, i32)>) -> Vec<Publish> {
         let Some(path) = uri_to_path(uri) else { return Vec::new() };
+        if slab::stdlib::is_cache_path(&path) {
+            // the standard library is not a project: its files use features reserved for it
+            // (`#[intrinsic]`, `#[decimals]`), which checking them on their own would reject
+            return match update {
+                Some((text, version)) => {
+                    let lines = LineIndex::new(&text);
+                    self.docs.insert(uri.to_owned(), Doc { uri: uri.to_owned(), path: path.clone(), text, version, lines });
+                    vec![Publish { uri: uri.to_owned(), version: Some(version), key: path, diagnostics: Vec::new() }]
+                }
+                None => {
+                    self.docs.remove(uri);
+                    vec![Publish { uri: uri.to_owned(), version: None, key: path, diagnostics: Vec::new() }]
+                }
+            };
+        }
         let (key, root_file, standalone) = root_for(&path);
         match update {
             Some((text, version)) => {

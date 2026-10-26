@@ -201,6 +201,35 @@ fn go_to_definition_opens_the_standard_library_source() {
 }
 
 #[test]
+fn an_opened_standard_library_file_is_not_checked_as_a_project() {
+    let d = Dir::new("stdopen", &[("main.slab", MAIN), ("util.slab", UTIL)]);
+    let mut ws = Workspace::default();
+    let main_uri = file_uri(&d.0.join("main.slab"));
+    ws.open(&main_uri, MAIN, 1);
+    // ctrl+click on `print` opens the cache copy of std.slab
+    slab::stdlib::write_cache().expect("cache dir");
+    let std_path = slab::stdlib::cache_dir().join("std.slab");
+    let std_text = std::fs::read_to_string(&std_path).unwrap();
+    assert!(slab::stdlib::is_cache_path(&std_path) && !slab::stdlib::is_cache_path(&d.0.join("main.slab")));
+    let std_uri = file_uri(&std_path);
+    let publishes = ws.open(&std_uri, &std_text, 1);
+    // no "`#[intrinsic]` is only for the standard library" and friends
+    assert!(publishes.iter().all(|p| p.diagnostics.is_empty()), "{:?}", publishes.iter().flat_map(|p| p.diagnostics.iter().map(|d| d.message.clone())).collect::<Vec<_>>());
+    // hover and go-to-definition still work inside it
+    let (state, _doc, module) = ws.locate(&std_uri).expect("found through the project that loaded it");
+    let module = module.unwrap();
+    let at = std_text.find("pub fn print").unwrap() + "pub fn ".len();
+    let hover = state.hover(module, at).expect("hover in std.slab");
+    assert!(hover.contains("fn print(value: any)"), "{hover}");
+    // edits to the project keep working with it open, and closing it is clean
+    let again = ws.change(&main_uri, MAIN, 2);
+    assert!(again.iter().all(|p| p.diagnostics.is_empty()));
+    let closed = ws.close(&std_uri);
+    assert!(closed.iter().all(|p| p.diagnostics.is_empty()));
+    assert!(ws.locate(&main_uri).is_some());
+}
+
+#[test]
 fn hover_shows_signatures_and_builtins() {
     let d = Dir::new("hover", &[("main.slab", MAIN), ("util.slab", UTIL)]);
     let mut ws = Workspace::default();
