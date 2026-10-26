@@ -113,12 +113,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_embedded_modules_parse_and_declare_only_intrinsics() {
+    fn the_embedded_modules_parse_and_every_function_is_an_intrinsic_or_has_a_body() {
         for (m, program) in parsed() {
             for item in &program.items {
                 if let ast::ItemKind::Fn(f) = &item.kind {
-                    assert!(!f.has_body, "{}::{} has a body: the library has only intrinsics so far", m.name, f.name.name);
-                    assert!(item.attrs.iter().any(|a| a.name.name == "intrinsic"), "{}::{} is not an intrinsic", m.name, f.name.name);
+                    let intrinsic = item.attrs.iter().any(|a| a.name.name == "intrinsic");
+                    assert_eq!(f.has_body, !intrinsic, "{}::{}: a library function is either an intrinsic (no body) or written in slab (a body)", m.name, f.name.name);
                 }
             }
         }

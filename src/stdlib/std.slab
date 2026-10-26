@@ -78,3 +78,184 @@ impl<T, E> Result<T, E> {
     #[intrinsic("result.err")]
     pub fn err(self) -> Option<E>;
 }
+
+// ---------------------------------------------------------------------------------------------
+// Fixed-point numbers. Minecraft's scoreboard only holds 32-bit integers, so a number with a
+// fraction is two integers: `whole` (rounded down, so -6.5 is whole -7 and frac 5000) and `frac`,
+// the digits after the point. Which type to use is a question of how the number gets into the
+// program; see docs/lang/doubles.md for the measurements behind the two types.
+//
+// Literals (`1.5`) and operators (`a + b`, `a < b`, `-a`) work on both: `a + b` calls `a.add(b)`.
+// ---------------------------------------------------------------------------------------------
+
+/// A number with 4 decimals, read from the world with no help: `data get` with a scale. Exact
+/// for coordinates within 21,474 blocks of the origin; further out the world gives no more
+/// digits, so `position_near` fails there. All the arithmetic lives here, because the products
+/// fit in 32 bits inside that range.
+#[decimals(4)]
+pub struct NearDouble {
+    whole: int,
+    frac: int,
+}
+
+/// A number with 6 decimals, read through a scratch marker entity, which keeps the digits
+/// anywhere in the world (up to the border at 29,999,984). It needs the chunk at 0 0 loaded and
+/// costs about ten commands per read. Add, subtract and compare here; multiply after converting
+/// with `to_near`, because a product of big numbers does not fit in 32 bits.
+#[decimals(6)]
+pub struct FarDouble {
+    whole: int,
+    frac: int,
+}
+
+impl NearDouble {
+    /// A whole number.
+    pub fn from_int(n: int) -> NearDouble {
+        return NearDouble { whole: n, frac: 0 };
+    }
+
+    /// The number of ten-thousandths: `NearDouble::from_units(-65000)` is -6.5.
+    pub fn from_units(units: int) -> NearDouble {
+        return NearDouble { whole: units / 10000, frac: units % 10000 };
+    }
+
+    /// The number in ten-thousandths (within 214,748 blocks, so it fits an `int`).
+    pub fn units(self) -> int {
+        return self.whole * 10000 + self.frac;
+    }
+
+    /// Rounded down to a whole number.
+    pub fn floor(self) -> int {
+        return self.whole;
+    }
+
+    /// The same number with 6 decimals.
+    pub fn to_far(self) -> FarDouble {
+        return FarDouble { whole: self.whole, frac: self.frac * 100 };
+    }
+
+    pub fn add(self, other: NearDouble) -> NearDouble {
+        return NearDouble::from_units(self.units() + other.units());
+    }
+
+    pub fn sub(self, other: NearDouble) -> NearDouble {
+        return NearDouble::from_units(self.units() - other.units());
+    }
+
+    pub fn neg(self) -> NearDouble {
+        return NearDouble::from_units(0 - self.units());
+    }
+
+    /// Product, cut off after the fourth decimal. Exact while the result is within 214,748.
+    pub fn mul(self, other: NearDouble) -> NearDouble {
+        let cross = self.whole * other.frac + other.whole * self.frac + self.frac * other.frac / 10000;
+        return NearDouble { whole: self.whole * other.whole + cross / 10000, frac: cross % 10000 };
+    }
+
+    /// Quotient by a whole number, cut off after the fourth decimal.
+    pub fn div_int(self, by: int) -> NearDouble {
+        return NearDouble::from_units(self.units() / by);
+    }
+
+    pub fn lt(self, other: NearDouble) -> bool {
+        return self.units() < other.units();
+    }
+
+    pub fn le(self, other: NearDouble) -> bool {
+        return self.units() <= other.units();
+    }
+
+    pub fn gt(self, other: NearDouble) -> bool {
+        return self.units() > other.units();
+    }
+
+    pub fn ge(self, other: NearDouble) -> bool {
+        return self.units() >= other.units();
+    }
+
+    /// The text Minecraft reads as this number: `-6.0005`.
+    pub fn text(self) -> str {
+        return decimal_text(self.whole, self.frac, 10000);
+    }
+}
+
+impl FarDouble {
+    /// A whole number.
+    pub fn from_int(n: int) -> FarDouble {
+        return FarDouble { whole: n, frac: 0 };
+    }
+
+    /// Rounded down to a whole number.
+    pub fn floor(self) -> int {
+        return self.whole;
+    }
+
+    /// Rounded to 4 decimals. Only meaningful within 21,474 blocks of the origin.
+    pub fn to_near(self) -> NearDouble {
+        let units = (self.frac + 50) / 100;
+        return NearDouble { whole: self.whole + units / 10000, frac: units % 10000 };
+    }
+
+    pub fn add(self, other: FarDouble) -> FarDouble {
+        let sum = self.frac + other.frac;
+        return FarDouble { whole: self.whole + other.whole + sum / 1000000, frac: sum % 1000000 };
+    }
+
+    pub fn sub(self, other: FarDouble) -> FarDouble {
+        let diff = self.frac - other.frac;
+        return FarDouble { whole: self.whole - other.whole + diff / 1000000, frac: diff % 1000000 };
+    }
+
+    pub fn neg(self) -> FarDouble {
+        return FarDouble { whole: 0, frac: 0 }.sub(self);
+    }
+
+    pub fn lt(self, other: FarDouble) -> bool {
+        if self.whole != other.whole { return self.whole < other.whole; }
+        return self.frac < other.frac;
+    }
+
+    pub fn le(self, other: FarDouble) -> bool {
+        if self.whole != other.whole { return self.whole < other.whole; }
+        return self.frac <= other.frac;
+    }
+
+    pub fn gt(self, other: FarDouble) -> bool {
+        if self.whole != other.whole { return self.whole > other.whole; }
+        return self.frac > other.frac;
+    }
+
+    pub fn ge(self, other: FarDouble) -> bool {
+        if self.whole != other.whole { return self.whole > other.whole; }
+        return self.frac >= other.frac;
+    }
+
+    /// The text Minecraft reads as this number: `29999984.567800`.
+    pub fn text(self) -> str {
+        return decimal_text(self.whole, self.frac, 1000000);
+    }
+}
+
+/// `whole + frac / scale` as Minecraft writes numbers: a sign, the whole part of the absolute
+/// value, a point, and the fraction with its leading zeros (`-6.0005`, not `-7` and `.5`).
+fn decimal_text(whole: int, frac: int, scale: int) -> str {
+    let mut w = whole;
+    let mut f = frac;
+    let mut sign = "";
+    if w < 0 {
+        sign = "-";
+        if f > 0 {
+            w = 0 - w - 1;
+            f = scale - f;
+        } else {
+            w = 0 - w;
+        }
+    }
+    let mut zeros = "";
+    let mut p = scale / 10;
+    while p > 1 && f < p {
+        zeros = zeros + "0";
+        p = p / 10;
+    }
+    return f"{sign}{w}.{zeros}{f}";
+}

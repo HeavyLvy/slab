@@ -509,6 +509,130 @@
   "expect": "has 1 [e2e]"
  },
  {
+  "cmd": "scoreboard players get #g.r_dbl_add e2e",
+  "expect": "has 17500 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_dbl_negmul e2e",
+  "expect": "has -35000 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_dbl_mul e2e",
+  "expect": "has 31250 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_dbl_mulneg e2e",
+  "expect": "has -31250 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_dbl_trunc e2e",
+  "expect": "has 700 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_dbl_div e2e",
+  "expect": "has 3750 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_dbl_floor e2e",
+  "expect": "has -7 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_dbl_frac e2e",
+  "expect": "has 5000 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_dbl_text e2e",
+  "expect": "has 4 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_dbl_cmp e2e",
+  "expect": "has 15 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_dbl_acc e2e",
+  "expect": "has -5000 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_dbl_far_carry e2e",
+  "expect": "has 1 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_dbl_far_frac e2e",
+  "expect": "has 67801 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_dbl_far_borrow e2e",
+  "expect": "has 867801 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_dbl_far_text e2e",
+  "expect": "has 1 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_dbl_round e2e",
+  "expect": "has 1235 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_dbl_widen e2e",
+  "expect": "has 123500 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_dbl_far_cmp e2e",
+  "expect": "has 15 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_dbl_far_neg_whole e2e",
+  "expect": "has -29999985 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_dbl_far_neg_frac e2e",
+  "expect": "has 432199 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_dbl_pos_x e2e",
+  "expect": "has 55700 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_dbl_pos_y e2e",
+  "expect": "has -202500 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_dbl_pos_z e2e",
+  "expect": "has 91234 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_dbl_far_x e2e",
+  "expect": "has 570000 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_dbl_far_y e2e",
+  "expect": "has -21 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_dbl_far_yf e2e",
+  "expect": "has 750000 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_dbl_far_z e2e",
+  "expect": "has 123400 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_dbl_edge_whole e2e",
+  "expect": "has 29999984 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_dbl_edge_frac e2e",
+  "expect": "has 567801 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_dbl_edge_near_err e2e",
+  "expect": "has 1 [e2e]"
+ },
+ {
+  "cmd": "execute if entity @e[tag=slab.scratch]",
+  "expect": "Test failed"
+ },
+ {
   "cmd": "scoreboard players get #g.r_match_unit e2e",
   "expect": "has 1 [e2e]"
  },

@@ -180,7 +180,7 @@ fn operators_are_type_checked() {
     one_error(&in_fn("let a = 1 == true; print(a);"), "cannot apply `==` to `int` and `bool`");
     ok(&in_fn("let a = \"x\" == \"y\"; print(a);"));
     one_error(&in_fn("if 1 { }"), "expected `bool`, found `int`");
-    one_error(&in_fn("let a = 1.5;"), "floating point");
+    one_error(&in_fn("let a = 1.5;"), "needs a type");
 }
 
 #[test]
@@ -1079,4 +1079,26 @@ fn unreachable_arms_warn() {
     assert!(w.iter().any(|m| m.contains("unreachable pattern")), "{w:?}");
     let w = warnings(&in_fn("let o = Some(1); match o { Some(_) => print(1), None => print(2), _ => print(3) }"));
     assert!(w.iter().any(|m| m.contains("unreachable pattern")), "{w:?}");
+}
+
+// ------------------------------------------------------------------ fixed-point numbers
+
+#[test]
+fn decimal_literals_and_operators_on_fixed_point_structs() {
+    ok(&in_fn("let a: NearDouble = 1.5; let b = a + 0.25; let c = -b * 2; let mut d: NearDouble = 1; d += 0.5; d -= a; if a < b && true { print(c.units()); }"));
+    ok(&in_fn("let f: FarDouble = 29999984.567801; let g = f - 0.5; let n = -g; print(n.text()); if f >= g { print(f.floor()); }"));
+    ok("global g: NearDouble = 1.5; const k: FarDouble = 0.000001; fn f() -> NearDouble { return g + 0.0001; }");
+    let c = ok(&in_fn("let a: NearDouble = -6.5; print(a.floor());"));
+    // `-6.5` is `neg(6.5)`; the literal itself is the struct { whole: 6, frac: 5000 }
+    assert!(c.hir.fns.iter().any(|f| f.name == "t"));
+}
+
+#[test]
+fn decimal_literal_errors() {
+    one_error(&in_fn("let x = 1.5; print(x);"), "needs a type");
+    one_error(&in_fn("let x: NearDouble = 1.23456;"), "keeps 4 decimal digits");
+    one_error(&in_fn("let x: FarDouble = 1.1234567;"), "keeps 6 decimal digits");
+    one_error(&in_fn("let a: NearDouble = 1.5; let b: FarDouble = 1.5; let c = a + b; print(c.text());"), "expected `NearDouble`, found `FarDouble`");
+    one_error(&in_fn("let a: NearDouble = 1.5; print(a / 2);"), "cannot apply `/`");
+    one_error(&in_fn("let a: NearDouble = 1.5; let b = a + 1.5; let c: int = a; print(b.floor() + c);"), "expected `int`, found `NearDouble`");
 }

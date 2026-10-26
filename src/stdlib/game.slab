@@ -6,6 +6,8 @@
 //! `Target` is a selector such as `@a[tag=x]` or an `EntityId`; `Coord` is an `int` expression
 //! or a relative coordinate such as `~` or `^2`.
 
+import std::*;
+
 /// A reference to one entity. It may have died since: every action on a dead entity does
 /// nothing and reports `false`. Create one with `summon`, or from a selector that matches one
 /// entity (`let me = @p;`).
@@ -62,6 +64,20 @@ pub struct Entity {
     pos: Vec3i,
 }
 
+/// A position with 4 decimals, as `position_near` reads it.
+pub struct NearVec3 {
+    x: NearDouble,
+    y: NearDouble,
+    z: NearDouble,
+}
+
+/// A position with 6 decimals, as `position_far` reads it.
+pub struct FarVec3 {
+    x: FarDouble,
+    y: FarDouble,
+    z: FarDouble,
+}
+
 impl EntityId {
     /// The selector text that finds this entity: `@e[scores={<namespace>_id=7},limit=1]`.
     /// Pass it to `run_command` to do something slab has no function for.
@@ -92,4 +108,83 @@ impl EntityId {
         if pos.is_err() { return Err(()); }
         return Ok(Entity { id: self, pos: pos.unwrap() });
     }
+
+    /// One coordinate with 4 decimals: `data get` with the scale 100000, rounded to ten-thousandths
+    /// (the product is a floating-point multiplication that can land just under the integer, so
+    /// reading ten-thousandths directly would sometimes be one too low).
+    fn near_axis(self, axis: int) -> Result<NearDouble, ()> {
+        let read = run_command(f"data get entity {self.selector()} Pos[{axis}] 100000");
+        if read.is_err() { return Err(()); }
+        let n = read.unwrap();
+        // the game stops counting at the largest `int`: that coordinate is out of this type's range
+        if n > 2147483000 { return Err(()); }
+        if n < 0 - 2147483000 { return Err(()); }
+        return Ok(NearDouble::from_units((n + 5) / 10));
+    }
+
+    /// Where the entity is, with 4 decimals, read straight from the world. `Err(())` when it is
+    /// gone or more than 21,474 blocks from the origin (use `position_far` there).
+    pub fn position_near(self) -> Result<NearVec3, ()> {
+        let x = self.near_axis(0);
+        let y = self.near_axis(1);
+        let z = self.near_axis(2);
+        if x.is_err() { return Err(()); }
+        if y.is_err() { return Err(()); }
+        if z.is_err() { return Err(()); }
+        return Ok(NearVec3 { x: x.unwrap(), y: y.unwrap(), z: z.unwrap() });
+    }
+
+    /// Where the entity is, with 6 decimals, anywhere in the world. The game cannot hand out
+    /// the digits of a big coordinate, so a scratch marker is created on the entity, moved back
+    /// to the origin by the whole part (which leaves only the fraction), read, and removed.
+    /// `Err(())` when the entity is gone or the chunk at 0 0 is not loaded (the marker needs it).
+    pub fn position_far(self) -> Result<FarVec3, ()> {
+        let sel = self.selector();
+        let loaded = run_command("execute if loaded 0 0 0");
+        let wx = run_command(f"data get entity {sel} Pos[0]");
+        let wy = run_command(f"data get entity {sel} Pos[1]");
+        let wz = run_command(f"data get entity {sel} Pos[2]");
+        if loaded.is_err() { return Err(()); }
+        if wx.is_err() { return Err(()); }
+        if wy.is_err() { return Err(()); }
+        if wz.is_err() { return Err(()); }
+        let x = wx.unwrap();
+        let y = wy.unwrap();
+        let z = wz.unwrap();
+        let made = run_command(f"execute at {sel} summon marker run tag @s add slab.scratch");
+        if made.is_err() { return Err(()); }
+        let moved = run_command(f"execute as @e[tag=slab.scratch] at @s run tp @s {offset_back(x)} {offset_back(y)} {offset_back(z)}");
+        let fx = run_command("data get entity @e[tag=slab.scratch,limit=1] Pos[0] 10000000");
+        let fy = run_command("data get entity @e[tag=slab.scratch,limit=1] Pos[1] 10000000");
+        let fz = run_command("data get entity @e[tag=slab.scratch,limit=1] Pos[2] 10000000");
+        run_command("kill @e[tag=slab.scratch]");
+        if moved.is_err() { return Err(()); }
+        if fx.is_err() { return Err(()); }
+        if fy.is_err() { return Err(()); }
+        if fz.is_err() { return Err(()); }
+        return Ok(FarVec3 { x: far_coordinate(x, fx.unwrap()), y: far_coordinate(y, fy.unwrap()), z: far_coordinate(z, fz.unwrap()) });
+    }
+
+    /// Move the entity to a position with decimals. `Ok` when it moved.
+    pub fn teleport_near(self, to: NearVec3) -> Result<int, ()> {
+        return run_command(f"tp {self.selector()} {to.x.text()} {to.y.text()} {to.z.text()}");
+    }
+
+    /// Move the entity to a position with 6 decimals, anywhere inside the world border.
+    pub fn teleport_far(self, to: FarVec3) -> Result<int, ()> {
+        return run_command(f"tp {self.selector()} {to.x.text()} {to.y.text()} {to.z.text()}");
+    }
+}
+
+/// The relative coordinate that subtracts `whole`: `~-5`, or `~5` for -5 (a sign cannot be doubled).
+fn offset_back(whole: int) -> str {
+    if whole == 0 { return "~"; }
+    if whole > 0 { return f"~-{whole}"; }
+    return f"~{0 - whole}";
+}
+
+/// A coordinate from its whole part and the fraction read as ten-millionths, rounded to millionths.
+fn far_coordinate(whole: int, tenth_millionths: int) -> FarDouble {
+    let units = (tenth_millionths + 5) / 10;
+    return FarDouble { whole: whole + units / 1000000, frac: units % 1000000 };
 }

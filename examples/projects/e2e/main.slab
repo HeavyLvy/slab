@@ -142,6 +142,36 @@ global r_match_result_ok: int = 0;
 global r_match_result_err: int = 0;
 global r_match_stmt: int = 0;
 global r_match_shadow: int = 0;
+global r_dbl_add: int = 0;
+global r_dbl_negmul: int = 0;
+global r_dbl_mul: int = 0;
+global r_dbl_mulneg: int = 0;
+global r_dbl_trunc: int = 0;
+global r_dbl_div: int = 0;
+global r_dbl_floor: int = 0;
+global r_dbl_frac: int = 0;
+global r_dbl_text: int = 0;
+global r_dbl_cmp: int = 0;
+global r_dbl_acc: int = 0;
+global r_dbl_far_carry: int = 0;
+global r_dbl_far_frac: int = 0;
+global r_dbl_far_borrow: int = 0;
+global r_dbl_far_text: int = 0;
+global r_dbl_round: int = 0;
+global r_dbl_widen: int = 0;
+global r_dbl_far_cmp: int = 0;
+global r_dbl_far_neg_whole: int = 0;
+global r_dbl_far_neg_frac: int = 0;
+global r_dbl_pos_x: int = 0;
+global r_dbl_pos_y: int = 0;
+global r_dbl_pos_z: int = 0;
+global r_dbl_far_x: int = 0;
+global r_dbl_far_y: int = 0;
+global r_dbl_far_yf: int = 0;
+global r_dbl_far_z: int = 0;
+global r_dbl_edge_whole: int = 0;
+global r_dbl_edge_frac: int = 0;
+global r_dbl_edge_near_err: int = 0;
 global r_cmd_value: int = 0;
 global r_cmd_ok: int = 0;
 global r_cmd_err: int = 0;
@@ -372,6 +402,7 @@ fn world_test() {
     }
 
     entity_test();
+    double_world_test();
     string_test();
     selector_test();
     equality_test();
@@ -379,6 +410,7 @@ fn world_test() {
     impl_test();
     command_test();
     match_test();
+    double_test();
 
     // one owned entity is left alive on purpose: `_uninstall` must remove it
     summon("minecraft:marker", bx, 64, bx);
@@ -527,6 +559,104 @@ fn impl_test() {
     // a failed unwrap says so in chat and returns from the function: nothing after it runs
     r_impl_unwrap_none = unwrap_flow(none);
     r_impl_unwrap_some = unwrap_flow(some);
+}
+
+// Fixed-point numbers: `NearDouble` (4 decimals) and `FarDouble` (6 decimals), written in std.slab.
+fn double_test() {
+    let a: NearDouble = 1.5;
+    let b = a + 0.25;
+    r_dbl_add = b.units();
+    r_dbl_negmul = (-b * 2).units();
+    let p: NearDouble = 2.5;
+    r_dbl_mul = (p * 1.25).units();
+    r_dbl_mulneg = (-p * 1.25).units();
+    let q: NearDouble = 0.1234;
+    r_dbl_trunc = (q * 0.5678).units();
+    r_dbl_div = a.div_int(4).units();
+    let n: NearDouble = -6.5;
+    r_dbl_floor = n.floor();
+    r_dbl_frac = n.frac;
+    // the text Minecraft reads: sign, whole part of the absolute value, zero-padded fraction
+    let tiny: NearDouble = -0.0005;
+    let small: NearDouble = 0.05;
+    let mut texts = 0;
+    if n.text() == "-6.5000" { texts += 1; }
+    if tiny.text() == "-0.0005" { texts += 1; }
+    if small.text() == "0.0500" { texts += 1; }
+    if b.text() == "1.7500" { texts += 1; }
+    r_dbl_text = texts;
+    let mut cmp = 0;
+    if a < b { cmp += 1; }
+    if b >= a { cmp += 2; }
+    if -a < a { cmp += 4; }
+    let not_greater = !(a > b);
+    let same = a <= a;
+    if not_greater && same { cmp += 8; }
+    r_dbl_cmp = cmp;
+    let mut acc: NearDouble = 1;
+    acc += 0.5;
+    acc -= 2;
+    r_dbl_acc = acc.units();
+
+    let f: FarDouble = 29999984.567801;
+    let g = f + 0.5;
+    r_dbl_far_carry = g.whole - 29999984;
+    r_dbl_far_frac = g.frac;
+    let h = f - 0.7;
+    r_dbl_far_borrow = h.frac;
+    if f.text() == "29999984.567801" { r_dbl_far_text = 1; }
+    let small_far: FarDouble = 0.123456;
+    r_dbl_round = small_far.to_near().units();
+    let coarse: NearDouble = 0.1235;
+    r_dbl_widen = coarse.to_far().frac;
+    let mut fcmp = 0;
+    if f < g { fcmp += 1; }
+    if g > f { fcmp += 2; }
+    let le = f <= f;
+    let ge = f >= f;
+    if le && ge { fcmp += 4; }
+    let not_less = !(g < f);
+    let not_greater_far = !(f > g);
+    if not_less && not_greater_far { fcmp += 8; }
+    r_dbl_far_cmp = fcmp;
+    let neg = -f;
+    r_dbl_far_neg_whole = neg.whole;
+    r_dbl_far_neg_frac = neg.frac;
+}
+
+// Positions with decimals: read near the origin straight from the game, and anywhere through a
+// scratch marker. Needs `forceload add 0 0` and `forceload add 29999984 0`.
+fn double_world_test() {
+    let m = summon("minecraft:marker", 5, 80, 9);
+    m.teleport_near(NearVec3 { x: 5.57, y: -20.25, z: 9.1234 });
+    let near = m.position_near();
+    if near.is_ok() {
+        let spot = near.unwrap();
+        r_dbl_pos_x = spot.x.units();
+        r_dbl_pos_y = spot.y.units();
+        r_dbl_pos_z = spot.z.units();
+    }
+    let far = m.position_far();
+    if far.is_ok() {
+        let spot = far.unwrap();
+        r_dbl_far_x = spot.x.frac;
+        r_dbl_far_y = spot.y.whole;
+        r_dbl_far_yf = spot.y.frac;
+        r_dbl_far_z = spot.z.frac;
+    }
+    kill(m);
+    // an entity at the world border: only the far read keeps its digits
+    let edge = summon("minecraft:marker", 29999984, 70, 0);
+    edge.teleport_far(FarVec3 { x: 29999984.567801, y: 70.25, z: 0.5 });
+    let ep = edge.position_far();
+    if ep.is_ok() {
+        let spot = ep.unwrap();
+        r_dbl_edge_whole = spot.x.whole;
+        r_dbl_edge_frac = spot.x.frac;
+    }
+    let en = edge.position_near();
+    if en.is_err() { r_dbl_edge_near_err = 1; }
+    kill(edge);
 }
 
 // `run_command`: a command written as text, with the outcome as a `Result<int, ()>`.

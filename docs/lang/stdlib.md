@@ -52,6 +52,8 @@ keep working; the declaration is where `game::EntityId`, `import game::EntityId;
 
 Not everything in `game.slab` is an intrinsic. `Entity`, `Vec3i` and the methods of `EntityId` (`position`, `fetch`, `is_alive`) are plain slab, built on `run_command(text) -> Result<int, ()>`, which runs any command written as text (`docs/lang/compiled-output.md`, "Any command"). This is the rule for new library features: add an intrinsic only when the compiler has to (here `EntityId::selector`, which needs the pack's namespace) and write the rest in slab, so ctrl+click shows what it does.
 
+`std.slab` also has `NearDouble` and `FarDouble`, the fixed-point numbers of `docs/lang/doubles.md`, with the attribute `#[decimals(N)]` that lets the checker build them from decimal literals; `game.slab` reads and writes positions with them (`position_near`, `position_far`, `teleport_near`, `teleport_far`).
+
 ## How it is wired
 
 - The loader adds the embedded modules after the project's own, so module 0 is still `main` and

@@ -120,6 +120,9 @@ struct StructInfo<'a> {
     module: usize,
     decl: &'a ast::StructDecl,
     fields: Vec<(String, Ty)>,
+    /// `#[decimals(N)]` (standard library): a fixed-point number `{ whole, frac }` that decimal
+    /// literals with up to N digits can build, and whose operators call its methods.
+    decimals: Option<u32>,
 }
 
 /// One arm as the checker sees it, whether it comes from a `match` or an `if let`.
@@ -542,7 +545,8 @@ impl<'a> Checker<'a> {
                     let id = StructId(self.structs.len());
                     self.mods[mi].types.insert(s.name.name.clone(), (id, item.public));
                     self.struct_names.push(s.name.name.clone());
-                    self.structs.push(StructInfo { name: s.name.name.clone(), module: mi, decl: s, fields: Vec::new() });
+                    let decimals = self.decimals_attr(mi, item);
+                    self.structs.push(StructInfo { name: s.name.name.clone(), module: mi, decl: s, fields: Vec::new(), decimals });
                 }
                 ast::ItemKind::Enum(d) => {
                     if self.mods[mi].types.contains_key(&d.name.name) || self.mods[mi].lang_types.contains_key(&d.name.name) {
@@ -819,11 +823,63 @@ impl<'a> Checker<'a> {
     fn reject_attrs_on_non_fn(&mut self, item: &ast::Item) {
         let lang_struct = matches!(item.kind, ast::ItemKind::Struct(_));
         for a in &item.attrs {
-            if matches!(item.kind, ast::ItemKind::Fn(_)) || (lang_struct && a.name.name == "lang") {
+            if matches!(item.kind, ast::ItemKind::Fn(_)) || (lang_struct && matches!(a.name.name.as_str(), "lang" | "decimals")) {
                 continue;
             }
             self.error(a.span, "attributes can only be applied to functions");
             return;
+        }
+    }
+
+    /// `#[decimals(4)] pub struct NearDouble { whole: int, frac: int }` in the standard library.
+    fn decimals_attr(&mut self, mi: usize, item: &ast::Item) -> Option<u32> {
+        let attr = item.attrs.iter().find(|a| a.name.name == "decimals")?;
+        if !self.mods[mi].std {
+            self.error(attr.span, "`#[decimals]` is only for the standard library");
+            return None;
+        }
+        match attr.args.first().map(|a| &a.kind) {
+            Some(ast::ExprKind::Int(n)) if (1..=9).contains(n) => Some(*n as u32),
+            _ => {
+                self.error(attr.span, "`#[decimals]` needs the number of decimal digits, 1 to 9");
+                None
+            }
+        }
+    }
+
+    /// The fixed-point struct an expected type stands for, with its digit count.
+    fn decimal_type(&self, expected: Option<&Ty>) -> Option<(StructId, u32)> {
+        let Some(Ty::Struct(id)) = expected else { return None };
+        self.structs[id.0].decimals.map(|d| (*id, d))
+    }
+
+    /// `1.5` / `-` already folded: the whole part and the fraction scaled to `digits` digits.
+    fn decimal_parts(&mut self, text: &str, digits: u32, name: &str, span: Span) -> Option<(i32, i32)> {
+        let (whole, frac) = text.split_once('.').unwrap_or((text, ""));
+        let clean = |t: &str| t.chars().filter(|c| *c != '_').collect::<String>();
+        let (whole, frac) = (clean(whole), clean(frac));
+        if !whole.chars().all(|c| c.is_ascii_digit()) || !frac.chars().all(|c| c.is_ascii_digit()) {
+            self.error_hint(span, format!("`{text}` is not a plain decimal number"), "write digits, a point and digits, like `1.25` (no exponent)");
+            return None;
+        }
+        if frac.len() > digits as usize {
+            self.error_hint(span, format!("`{name}` keeps {digits} decimal digits, `{text}` has {}", frac.len()), format!("write at most {digits} digits after the point, or use the type with more digits"));
+            return None;
+        }
+        let Ok(w) = whole.parse::<i32>() else {
+            self.error(span, format!("`{text}` is too large"));
+            return None;
+        };
+        let scaled = format!("{frac:0<width$}", width = digits as usize);
+        Some((w, scaled.parse::<i32>().unwrap_or(0)))
+    }
+
+    /// A decimal literal (or an integer) where a fixed-point number is expected.
+    fn decimal_literal(&mut self, id: StructId, digits: u32, text: &str, span: Span) -> Expr {
+        let name = self.structs[id.0].name.clone();
+        match self.decimal_parts(text, digits, &name, span) {
+            Some((w, f)) => Expr { kind: ExprKind::Struct { id, fields: vec![Expr { kind: ExprKind::Int(w), ty: Ty::Int, span }, Expr { kind: ExprKind::Int(f), ty: Ty::Int, span }] }, ty: Ty::Struct(id), span },
+            None => Expr::error(span),
         }
     }
 
@@ -1656,10 +1712,17 @@ impl<'a> Checker<'a> {
             }
             K::Bool(b) => Some((ConstVal::Bool(*b), Ty::Bool)),
             K::Str(s) => Some((ConstVal::Str(s.clone()), Ty::Str)),
-            K::Float(_) => {
-                self.error(e.span, "floating point numbers are not supported yet");
-                None
-            }
+            K::Float(text) => match self.decimal_type(expected) {
+                Some((id, digits)) => {
+                    let name = self.structs[id.0].name.clone();
+                    let (w, f) = self.decimal_parts(text, digits, &name, e.span)?;
+                    Some((ConstVal::Struct(id, vec![ConstVal::Int(w), ConstVal::Int(f)]), Ty::Struct(id)))
+                }
+                None => {
+                    self.error_hint(e.span, "a number with a decimal point needs a type", "write it where a fixed-point type is expected: `global x: NearDouble = 1.5;`");
+                    None
+                }
+            },
             K::Unit => Some((ConstVal::Unit, Ty::Unit)),
             K::Error => None,
             K::Ident(name) => {
@@ -2002,6 +2065,23 @@ impl<'a> Checker<'a> {
             K::Assign { target, op, value } => {
                 let t = self.expr(target, None);
                 self.check_place(&t);
+                // `a += b` on a fixed-point number is `a = a.add(b)`
+                if *op != AssignOp::Assign
+                    && let Ty::Struct(_) = &t.ty
+                    && let Some(name) = match op {
+                        AssignOp::Add => Some("add"),
+                        AssignOp::Sub => Some("sub"),
+                        AssignOp::Mul => Some("mul"),
+                        AssignOp::Div => Some("div"),
+                        AssignOp::Rem => Some("rem"),
+                        AssignOp::Assign => None,
+                    }
+                    && let Some(key) = Self::type_key(&t.ty)
+                    && let Some(&mx) = self.method_index.get(&(key, name.to_owned()))
+                {
+                    let call = self.call_method(mx, t.clone(), std::slice::from_ref(value), s.span, s.span);
+                    return Stmt::Assign { target: t, op: AssignOp::Assign, value: call };
+                }
                 let v = self.expr(value, Some(&t.ty));
                 match op {
                     AssignOp::Assign => self.mismatch(v.span, &t.ty, &v.ty),
@@ -2506,6 +2586,12 @@ impl<'a> Checker<'a> {
         use ast::ExprKind as K;
         let span = e.span;
         let mk = |kind: ExprKind, ty: Ty| Expr { kind, ty, span };
+        if let K::Int(n) = &e.kind
+            && let Some((id, digits)) = self.decimal_type(expected)
+        {
+            // `x + 1` where `x` is a fixed-point number
+            return self.decimal_literal(id, digits, &n.to_string(), span);
+        }
         match &e.kind {
             K::Match { scrut, arms } => {
                 let scrut = self.match_scrutinee(scrut);
@@ -2525,10 +2611,13 @@ impl<'a> Checker<'a> {
                 }
                 mk(ExprKind::Int(*n as i32), Ty::Int)
             }
-            K::Float(_) => {
-                self.error(span, "floating point numbers are not supported yet");
-                Expr::error(span)
-            }
+            K::Float(text) => match self.decimal_type(expected) {
+                Some((id, digits)) => self.decimal_literal(id, digits, text, span),
+                None => {
+                    self.error_hint(span, "a number with a decimal point needs a type", "write it where a fixed-point type is expected: `let x: NearDouble = 1.5;` (`NearDouble` and `FarDouble` are in std)");
+                    Expr::error(span)
+                }
+            },
             K::Bool(b) => mk(ExprKind::Bool(*b), Ty::Bool),
             K::Str(s) => mk(ExprKind::Str(s.clone()), Ty::Str),
             K::Format(parts) => {
@@ -2604,7 +2693,7 @@ impl<'a> Checker<'a> {
                     }
                 mk(ExprKind::Rel { kind: *kind, offset: offset.clone() }, Ty::Coord)
             }
-            K::Unary { op, expr } => self.unary(*op, expr, span),
+            K::Unary { op, expr } => self.unary(*op, expr, expected, span),
             K::Binary { op, lhs, rhs } => self.binary(*op, lhs, rhs, span),
             K::Range { .. } => {
                 self.error_hint(span, "a range is only allowed as the subject of a `for` loop", "write `for i in 0..n { ... }`");
@@ -2727,15 +2816,32 @@ impl<'a> Checker<'a> {
         Expr { kind: ExprKind::Struct { id, fields }, ty: Ty::Struct(id), span }
     }
 
-    fn unary(&mut self, op: UnOp, inner: &'a ast::Expr, span: Span) -> Expr {
+    fn unary(&mut self, op: UnOp, inner: &'a ast::Expr, expected: Option<&Ty>, span: Span) -> Expr {
         match op {
             UnOp::Neg => {
+                // a fixed-point number is negated by its `neg` method
+                if self.decimal_type(expected).is_some() {
+                    let e = self.expr(inner, expected);
+                    if let Some(key) = Self::type_key(&e.ty)
+                        && let Some(&mx) = self.method_index.get(&(key, "neg".to_owned()))
+                    {
+                        return self.call_method(mx, e, &[], span, span);
+                    }
+                    self.operand(&e, &Ty::Int, "-");
+                    return Expr::error(span);
+                }
                 // `-2147483648`
                 if let ast::ExprKind::Int(n) = &inner.kind
                     && fits_i32(-*n) {
                         return Expr { kind: ExprKind::Int((-*n) as i32), ty: Ty::Int, span };
                     }
                 let e = self.expr(inner, Some(&Ty::Int));
+                if let Some(key) = Self::type_key(&e.ty)
+                    && matches!(e.ty, Ty::Struct(_))
+                    && let Some(&mx) = self.method_index.get(&(key, "neg".to_owned()))
+                {
+                    return self.call_method(mx, e, &[], span, span);
+                }
                 self.operand(&e, &Ty::Int, "-");
                 Expr { kind: ExprKind::Unary { op, expr: Box::new(e) }, ty: Ty::Int, span }
             }
@@ -2756,6 +2862,14 @@ impl<'a> Checker<'a> {
 
     fn binary(&mut self, op: BinOp, lhs: &'a ast::Expr, rhs: &'a ast::Expr, span: Span) -> Expr {
         let mut l = self.expr(lhs, None);
+        if let Ty::Struct(_) = &l.ty
+            && let Some(name) = operator_method(op)
+            && let Some(key) = Self::type_key(&l.ty)
+            && let Some(&mx) = self.method_index.get(&(key, name.to_owned()))
+        {
+            // `a + b` on a fixed-point number is `a.add(b)`
+            return self.call_method(mx, l, std::slice::from_ref(rhs), span, span);
+        }
         let comparing = matches!(op, BinOp::Eq | BinOp::Ne);
         // the left side gives the right one its expected type (`xs == []`, `e == @s`)
         let mut r = if comparing && !matches!(l.ty, Ty::Selector | Ty::Error) { self.expr(rhs, Some(&l.ty.clone())) } else { self.expr(rhs, None) };
@@ -3184,6 +3298,22 @@ impl<'a> Checker<'a> {
             }
         }
     }
+}
+
+/// The method a struct provides for an operator (`a + b` is `a.add(b)`).
+fn operator_method(op: BinOp) -> Option<&'static str> {
+    Some(match op {
+        BinOp::Add => "add",
+        BinOp::Sub => "sub",
+        BinOp::Mul => "mul",
+        BinOp::Div => "div",
+        BinOp::Rem => "rem",
+        BinOp::Lt => "lt",
+        BinOp::Le => "le",
+        BinOp::Gt => "gt",
+        BinOp::Ge => "ge",
+        BinOp::Eq | BinOp::Ne | BinOp::And | BinOp::Or => return None,
+    })
 }
 
 fn op_str(op: BinOp) -> &'static str {

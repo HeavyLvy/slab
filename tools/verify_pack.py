@@ -180,12 +180,15 @@ def main():
         if args.setup:
             # poll instead of sleeping: a fresh world needs a variable time to load its first chunk
             deadline = time.time() + args.settle
-            while time.time() < deadline:
-                if any("Test passed" in l for l in srv.command("execute if loaded 0 64 0")):
-                    break
-                time.sleep(0.5)
-            else:
-                problems.append("the chunk at 0 0 did not become entity-ticking after --setup")
+            # every `forceload add X Z` in the setup must have loaded (X Z are block coordinates)
+            spots = [(0, 0)] + [(int(m.group(1)), int(m.group(2))) for m in (re.match(r"forceload add (-?\d+) (-?\d+)$", c) for c in args.setup) if m]
+            for x, z in dict.fromkeys(spots):
+                while time.time() < deadline:
+                    if any("Test passed" in l for l in srv.command(f"execute if loaded {x} 64 {z}")):
+                        break
+                    time.sleep(0.5)
+                else:
+                    problems.append(f"the chunk at {x} {z} did not become entity-ticking after --setup")
             time.sleep(0.5)
         for fn in args.run:
             print(f"== function {fn} ==")
