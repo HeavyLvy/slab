@@ -230,6 +230,26 @@ fn an_opened_standard_library_file_is_not_checked_as_a_project() {
 }
 
 #[test]
+fn dot_completion_on_an_entity_offers_its_methods_not_unrelated_fields() {
+    let d = Dir::new("entdot", &[("main.slab", "")]);
+    let mut ws = Workspace::default();
+    let uri = file_uri(&d.0.join("main.slab"));
+    let src = "import game::*;\nstruct Other { pos: int }\nfn f(e: EntityId) {\n    let n = e.position();\n    e.\n}\n";
+    ws.open(&uri, src, 1);
+    let at = src.find("e.\n").unwrap() + 2;
+    let items = completion::completions(&ws, &uri, at).unwrap();
+    assert!(items.iter().any(|i| i.label == "position" && i.kind == 2), "{items:?}");
+    assert!(items.iter().any(|i| i.label == "position_near") && items.iter().any(|i| i.label == "selector"), "{items:?}");
+    assert!(!items.iter().any(|i| i.label == "pos" && i.kind == 5), "fields of unrelated structs are not offered: {items:?}");
+    // the same while a prefix is typed and rejected
+    let typed = "import game::*;\nstruct Other { pos: int }\nfn f(e: EntityId) {\n    e.pos\n}\n";
+    ws.change(&uri, typed, 2);
+    let at = typed.find("e.pos").unwrap() + 2;
+    let items = completion::completions(&ws, &uri, at).unwrap();
+    assert!(items.iter().any(|i| i.label == "position"), "{items:?}");
+}
+
+#[test]
 fn hover_shows_signatures_and_builtins() {
     let d = Dir::new("hover", &[("main.slab", MAIN), ("util.slab", UTIL)]);
     let mut ws = Workspace::default();

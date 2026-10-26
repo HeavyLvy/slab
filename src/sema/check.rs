@@ -2956,7 +2956,8 @@ impl<'a> Checker<'a> {
                 let hint = if name.name == "len" { "did you mean the method `len()`?" } else { "only structs have fields" };
                 let msg = format!("`{}` has no field `{}`", self.tn(other), name.name);
                 self.error_hint(name.span, msg, hint);
-                Expr::error(span)
+                // keep the base and its type (as for a struct), so an editor can offer its methods
+                Expr { kind: ExprKind::Field { base: Box::new(b), index: usize::MAX, name: name.name.clone() }, ty: Ty::Error, span }
             }
         }
     }
