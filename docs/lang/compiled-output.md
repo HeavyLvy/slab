@@ -690,6 +690,20 @@ effect give @s minecraft:speed 10
 teleport @s ~ ~1 ~
 ```
 
+`be e { .. }` is `as e at @s { .. }`. For a selector it is the same command; for an `Entity` value the id is stored once instead of twice (`as e at e` needs two lookups):
+
+```slab show=f
+fn f(boss: Entity) {
+    be boss { tp(@s, ~, ~1, ~); }
+}
+```
+```mcfunction
+# function demo:f
+execute store result storage demo:macro h0 int 1 run scoreboard players get #f.v_boss demo
+function demo:f/m0 with storage demo:macro
+data remove storage demo:macro h0
+```
+
 ## Entities
 
 An `Entity` value is a number: an id stored as a score named `demo_id` on the entity itself. The first time an entity becomes a value it is given the next free id. Acting on it addresses `@e[scores={demo_id=N},limit=1]` with `N` filled in through a macro. `_ensure_id` and `_alloc_id` are small generated helpers.

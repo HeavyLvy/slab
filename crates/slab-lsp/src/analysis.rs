@@ -218,7 +218,7 @@ impl Walker<'_> {
             StmtKind::Context { clauses, body } => {
                 for c in clauses {
                     match &c.kind {
-                        ast::CtxKind::As(e) | ast::CtxKind::At(e) => self.expr(e, Role::Plain),
+                        ast::CtxKind::As(e) | ast::CtxKind::At(e) | ast::CtxKind::Be(e) => self.expr(e, Role::Plain),
                     ast::CtxKind::In(_) => {}
                     ast::CtxKind::Positioned(es) | ast::CtxKind::Facing(es) => {
                         for e in es {
@@ -449,7 +449,7 @@ fn stmt<'a>(s: &'a ast::Stmt, f: &mut impl FnMut(&'a ast::Expr)) {
         StmtKind::Context { clauses, body } => {
             for c in clauses {
                 match &c.kind {
-                    ast::CtxKind::As(e) | ast::CtxKind::At(e) => visit(e, f),
+                    ast::CtxKind::As(e) | ast::CtxKind::At(e) | ast::CtxKind::Be(e) => visit(e, f),
                     ast::CtxKind::In(_) => {}
                     ast::CtxKind::Positioned(es) | ast::CtxKind::Facing(es) => {
                         for e in es {

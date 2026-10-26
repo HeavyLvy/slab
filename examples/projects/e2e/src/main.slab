@@ -171,6 +171,8 @@ global r_dbl_far_z: int = 0;
 global r_dbl_edge_whole: int = 0;
 global r_dbl_edge_frac: int = 0;
 global r_dbl_edge_near_err: int = 0;
+global r_be_handle: int = 0;
+global r_be_selector: int = 0;
 global r_cmd_value: int = 0;
 global r_cmd_ok: int = 0;
 global r_cmd_err: int = 0;
@@ -980,6 +982,19 @@ fn entity_test() {
     if pts[first] == 7 { r_for_score = 7; }
 
     // kill one: its handle goes stale and every action on it fails (catchable)
+    // `be e { }` is `as e at @s { }`: the block runs at the entity, so `~ ~5 ~` moves it up
+    let up = summon("minecraft:marker", 3, 90, 3);
+    tag::add(up, "bez");
+    be up { tp(@s, ~, ~5, ~); }
+    let up_at = up.position();
+    if up_at.is_ok() {
+        let spot = up_at.unwrap();
+        r_be_handle = spot.y;
+    }
+    let mut ran = 0;
+    be @e[tag=bez] { ran += 1; }
+    r_be_selector = ran;
+    kill(up);
     kill(b);
     if !exists(b) { r_ent_after_kill = 1; }
     if !tp(b, 0, 70, 0) { r_ent_stale_tp = 1; }

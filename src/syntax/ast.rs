@@ -196,6 +196,8 @@ pub struct CtxClause {
 pub enum CtxKind {
     As(Expr),
     At(Expr),
+    /// `be e`: `as e at @s`, written once.
+    Be(Expr),
     In(Expr),
     Positioned([Expr; 3]),
     Rotated([Expr; 2]),

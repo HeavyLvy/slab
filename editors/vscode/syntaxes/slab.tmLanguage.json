@@ -122,7 +122,7 @@
       "match": "\\b([A-Za-z_]\\w*)\\b(?=\\s*\\()"
     },
     "context-keywords": {
-      "match": "\\b(?:as|at|positioned|rotated|facing|align|anchored)\\b",
+      "match": "\\b(?:as|at|be|positioned|rotated|facing|align|anchored)\\b",
       "name": "keyword.control.context.slab"
     },
     "control-keywords": {

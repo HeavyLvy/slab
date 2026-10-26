@@ -628,6 +628,18 @@ mod tests {
     }
 
     #[test]
+    fn be_is_as_and_at_with_one_lookup() {
+        let c = build_main("fn f(e: Entity) { be e { tp(@s, ~, ~1, ~); } be @a[tag=x] positioned ~ ~2 ~ { say(\"hi\"); } }");
+        let m = fn_text(&c, "t:f/m0");
+        assert!(m.contains("execute as @e[scores={t_id=$(h0)},limit=1] at @s run function t:f/b0"), "{m}");
+        assert!(fn_text(&c, "t:f").contains("execute as @a[tag=x] at @s positioned ~ ~2 ~ run function t:f/b1"), "{}", fn_text(&c, "t:f"));
+        // the entity value is stored once for `be`; `as e at e` needs it twice
+        let twice = build_main("fn f(e: Entity) { as e at e { tp(@s, ~, ~1, ~); } }");
+        let count = |c: &Compiled| fn_text(c, "t:f").matches("store result storage t:macro").count();
+        assert_eq!((count(&c), count(&twice)), (1, 2));
+    }
+
+    #[test]
     fn a_selector_becomes_a_handle_through_the_id_helper() {
         let c = build_main("fn f() -> Entity { let me = @p; return me; }");
         let f = fn_text(&c, "t:f");

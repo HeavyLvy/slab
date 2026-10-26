@@ -2464,7 +2464,13 @@ impl<'a> Checker<'a> {
     fn context_stmt(&mut self, clauses: &'a [ast::CtxClause], body: &'a ast::Block) -> Stmt {
         let mut out = Vec::new();
         for c in clauses {
-            if let Some(h) = self.ctx_clause(c) {
+            if let ast::CtxKind::Be(e) = &c.kind {
+                // `be e` is `as e at @s`: after `as`, `@s` is the entity, and `e` is evaluated once
+                let who = self.selector_operand(e);
+                let here = Expr { kind: ExprKind::Selector(crate::datapack::Selector::new(crate::datapack::SelectorVar::S), Vec::new()), ty: Ty::Selector, span: e.span };
+                out.push(CtxClause::As(who));
+                out.push(CtxClause::At(here));
+            } else if let Some(h) = self.ctx_clause(c) {
                 out.push(h);
             }
         }
@@ -2500,6 +2506,7 @@ impl<'a> Checker<'a> {
         Some(match &c.kind {
             K::As(e) => CtxClause::As(self.selector_operand(e)),
             K::At(e) => CtxClause::At(self.selector_operand(e)),
+            K::Be(_) => unreachable!("`be` is expanded by context_stmt"),
             K::In(e) => {
                 let (v, _) = self.const_expr(e, Some(&Ty::Str))?;
                 let ConstVal::Str(s) = v else {

@@ -80,6 +80,10 @@ A handle is a plain integer: copying it copies the reference, and nothing happen
 * reading entity data (`Health`, `Pos`, ...) is not available yet; it needs floats;
 * a selector with a variable part (`@e[distance=..r]`) is not supported.
 
+## Acting as an entity: `be`
+
+`as e at e { .. }` is what you write most often. `be e { .. }` is the same thing (`execute as e at @s`: after `as`, `@s` is the entity, so `at @s` is its position) with `e` written and looked up once. A value that is an `Entity` is found through its id, which costs a macro call, so `be e` is also half the work of `as e at e`. It is a clause like the others and chains: `be e positioned ~ ~1 ~ { .. }`, and it takes a selector too: `be @e[tag=boss] { .. }`.
+
 ## Reading an entity: the methods of `Entity`
 
 There is one type, `Entity`, and every value of it has the same methods: a variable that holds an entity is a handle (an id), and each method looks the entity up when it is called, so it always sees the entity as it is *now*, and a method on a dead entity returns `Err` or `false`. The methods are ordinary slab code in `game.slab` (ctrl+click the names in the editor) over [`run_command`](stdlib.md), in one `impl Entity` block:

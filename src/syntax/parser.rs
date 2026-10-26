@@ -71,7 +71,7 @@ fn starts_item(t: &Tok) -> bool {
 }
 
 fn is_ctx_kw(t: &Tok) -> bool {
-    matches!(t, Tok::Kw(Kw::As | Kw::At | Kw::In | Kw::Positioned | Kw::Rotated | Kw::Facing | Kw::Align | Kw::Anchored))
+    matches!(t, Tok::Kw(Kw::As | Kw::At | Kw::Be | Kw::In | Kw::Positioned | Kw::Rotated | Kw::Facing | Kw::Align | Kw::Anchored))
 }
 
 fn bin_op(t: &Tok) -> Option<(BinOp, u8)> {
@@ -905,6 +905,7 @@ impl Parser {
             let kind = match kw {
                 Kw::As => CtxKind::As(self.expr_operand()?),
                 Kw::At => CtxKind::At(self.expr_operand()?),
+                Kw::Be => CtxKind::Be(self.expr_operand()?),
                 Kw::In => CtxKind::In(self.expr_operand()?),
                 Kw::Positioned => CtxKind::Positioned([self.expr_operand()?, self.expr_operand()?, self.expr_operand()?]),
                 Kw::Facing => CtxKind::Facing([self.expr_operand()?, self.expr_operand()?, self.expr_operand()?]),
@@ -1420,6 +1421,14 @@ mod tests {
         assert!(matches!(els.as_deref(), Some(Else::If(inner)) if matches!(inner.kind, StmtKind::IfLet { .. })));
         // no `;` needed after a match statement
         assert_eq!(func("fn f() { match o { _ => {} } a(); }").body.stmts.len(), 2);
+    }
+
+    #[test]
+    fn be_is_a_context_clause() {
+        let StmtKind::Context { clauses, .. } = first_stmt("be e positioned ~ ~1 ~ { a(); }") else { panic!("a context block") };
+        assert_eq!(clauses.len(), 2);
+        assert!(matches!(&clauses[0].kind, CtxKind::Be(e) if sx(e) == "e"));
+        assert!(matches!(&clauses[1].kind, CtxKind::Positioned(_)));
     }
 
     #[test]

@@ -509,6 +509,14 @@
   "expect": "has 1 [e2e]"
  },
  {
+  "cmd": "scoreboard players get #g.r_be_handle e2e",
+  "expect": "has 95 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_be_selector e2e",
+  "expect": "has 1 [e2e]"
+ },
+ {
   "cmd": "scoreboard players get #g.r_dbl_add e2e",
   "expect": "has 17500 [e2e]"
  },
