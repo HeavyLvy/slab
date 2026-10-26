@@ -743,7 +743,7 @@ mod tests {
         let remember = fn_text(&c, "t:_limit_setup/b0");
         assert!(remember.contains("store result score") && remember.contains("run gamerule minecraft:max_command_sequence_length\n"), "{remember}");
         assert!(setup.contains("gamerule minecraft:max_command_sequence_length 900000"), "{setup}");
-        assert!(fn_text(&c, "t:_limit_restore").contains("$gamerule minecraft:max_command_sequence_length $(h0)"));
+        assert!(fn_text(&c, "t:_limit_restore/m0").contains("$gamerule minecraft:max_command_sequence_length $(h0)"));
         assert!(fn_text(&c, "t:_uninstall").contains("function t:_limit_restore"));
         // `_init` no longer calls the load functions: each is its own entry of the load tag, after the setup
         assert!(!fn_text(&c, "t:_init").contains("function t:boot"));
