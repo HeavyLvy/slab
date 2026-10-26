@@ -55,6 +55,7 @@ The frontend, `codegen` and `lower` must never `format!` a command, SNBT, JSON o
 - `cargo test` (unit + integration), `cargo clippy --all-targets` (kept at zero warnings).
 - `slab new NAME`, `slab init`, `slab build [PATH] [-o DIR] [--zip] [--namespace NS]`, `slab check [PATH]`, `slab parse FILE`. A project is a `Slab.toml` plus `src/main.slab` (`docs/lang/modules.md`, `src/manifest.rs`); a bare directory with a `main.slab` still works. Examples: `examples/slab/*.slab` (single files, must parse + check), `examples/projects/hello` (small multi-file project), `examples/projects/e2e` (the end-to-end test project).
 - A language feature touches several places: grammar doc -> parser (+ tests) -> checker rules (+ `docs/lang/semantics.md`, + tests in `src/sema/tests.rs`) -> `codegen` (+ `docs/lang/codegen.md`, + tests in `src/compile.rs`) -> IR/lowering if it needs a runtime construct -> **a case in `examples/projects/e2e` with an expected value in `checks.json`**.
+- `cargo run --example costs -- PROJECT [prefix]` prints what each generated function costs in commands (estimate, `src/cost.rs`): use it to see what makes generated code expensive. The limit that matters is 65,536 commands per function chain per tick (`docs/lang/tasks.md`).
 - Adding a keyword, operator, builtin or selector letter is visible to the editor tooling: run `cargo run -p slab-lsp -- grammar` to regenerate the extension's TextMate grammar (a drift test in `crates/slab-lsp` fails until you do).
 
 ## Verifying output against the real game

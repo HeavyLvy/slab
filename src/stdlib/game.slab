@@ -200,11 +200,12 @@ impl Entity {
     /// Turn the entity: yaw in degrees (0 faces south, 90 west, -90 east, 180 north), pitch
     /// from -90 (up) to 90 (down). A yaw outside -180 to 180 is wrapped into it.
     pub fn set_rotation(self, yaw: NearDouble, pitch: NearDouble) -> Result<int, ()> {
-        // the game keeps whatever yaw it is given (540 stays 540), so wrap it here
-        let turn = yaw.units() % 3600000;
-        let mut wrapped = turn;
-        if turn >= 1800000 { wrapped = turn - 3600000; }
-        return run_command(f"rotate {self.selector()} {NearDouble::from_units(wrapped).text()} {pitch.text()}");
+        // the game keeps whatever yaw it is given (540 stays 540), so wrap it here: into
+        // -180..180, in ten-thousandths of a degree
+        let mut turn = (yaw.whole * 10000 + yaw.frac) % 3600000;
+        if turn >= 1800000 { turn = turn - 3600000; }
+        let wrapped = NearDouble { whole: turn / 10000, frac: turn % 10000 };
+        return run_command(f"rotate {self.selector()} {wrapped.text()} {pitch.text()}");
     }
 
     /// Turn the entity to look at another entity (its feet).

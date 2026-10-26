@@ -69,9 +69,9 @@ while true {
 of a loop, or a block, costs is **measured, not guessed**: the first code generation pass numbers
 them, `compile.rs` lowers the pack and measures each with the estimator of `src/cost.rs`, and a
 second pass writes the numbers into the `budget -= cost` constants (only constants change, so the
-measurements stay right). The measure counts the commands on every branch of the body, so a slice
-uses somewhat less than the budget (the ring above: about 50 trips per tick, around 19,000 commands
-of 30,000). That is deliberate: too little only makes a task a little slower, too much would be cut
+measurements stay right). The measure counts the commands of every branch that can run together (of an `if`/`else`, only the dearer
+side), so a slice uses somewhat less than the budget (the ring above: about 35 trips per tick, around
+10,000 of the 30,000 commands). That is deliberate: too little only makes a task a little slower, too much would be cut
 off by the game.
 
 If a slice does hit the limit anyway (a block with a loop inside a `be` block, say), the guard that

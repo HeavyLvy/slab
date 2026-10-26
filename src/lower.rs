@@ -862,9 +862,12 @@ impl<'a> Lower<'a> {
         }
     }
 
-    /// Copies a non-temp holder into a fresh temp so later side effects can't change it.
+    /// Copies a non-temp holder into a fresh temp so later side effects can't change it. A local
+    /// of the running function needs no copy: a call cannot change it (a recursive call saves and
+    /// restores the locals), and nothing else runs between reading it and using it.
     fn protect(&mut self, v: IntVal) -> R<IntVal> {
         match v {
+            IntVal::Holder(h, false) if h.as_str().starts_with(&format!("#{}.v_", self.f.name)) => Ok(IntVal::Holder(h, false)),
             IntVal::Holder(h, false) => {
                 let t = self.alloc_int()?;
                 self.copy_score(&t, &h);

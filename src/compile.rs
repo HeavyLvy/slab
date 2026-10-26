@@ -144,11 +144,13 @@ fn limit_warnings(pack: &DataPack, info: &lower::LowerInfo, program: &crate::ir:
     for (name, (file, span)) in entries {
         let Ok(id) = ResourceLocation::new(namespace, name) else { continue };
         let est = cost::estimate(pack, &info.loops, &id);
-        // only what always runs is counted, so the warning is never about code that merely might be long
-        if est.low <= limit {
+        // Only what always runs is counted, but a function that returns early still has its later
+        // lines counted (about a third too many in the worst code seen), so there is room: the
+        // warning is for code that is clearly too long, not for code near the limit.
+        if est.low <= limit + limit / 4 {
             continue;
         }
-        let mut d = Diagnostic::warning(format!("`{name}` runs at least {} commands in one tick, and the game stops a function after {} without saying so", with_commas(est.low), with_commas(limit)), *span)
+        let mut d = Diagnostic::warning(format!("`{name}` runs about {} commands in one tick, and the game stops a function after {} without saying so", with_commas(est.low), with_commas(limit)), *span)
             .in_file(*file);
         d = match est.heaviest.as_ref().filter(|h| h.total > limit / 2) {
             Some(h) => {
@@ -715,7 +717,7 @@ mod tests {
         // 30,000 trips of a body of several commands: far past 65,536
         let w = limit_warnings_of("#[load] fn boot() { for i in 0..30000 { say(\"x\"); } }");
         assert_eq!(w.len(), 1, "{w:?}");
-        assert!(w[0].contains("`boot` runs at least") && w[0].contains("30000 times"), "{w:?}");
+        assert!(w[0].contains("`boot` runs about") && w[0].contains("30000 times"), "{w:?}");
         // a loop that fits, or one whose length the compiler cannot tell, says nothing
         assert!(limit_warnings_of("#[load] fn boot() { for i in 0..100 { say(\"x\"); } }").is_empty());
         assert!(limit_warnings_of("global n: int = 5; #[load] fn boot() { n = 40000; let mut i = 0; while i < n { say(\"x\"); i += 1; } }").is_empty(), "the bound can change");

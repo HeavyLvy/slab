@@ -173,9 +173,18 @@ impl NearDouble {
         return self.units() >= other.units();
     }
 
-    /// The text Minecraft reads as this number: `-6.0005`.
+    /// The text Minecraft reads as this number: `-6.0005`. Written out in one function with the
+    /// common case (not negative) first, because it runs for every number put into a command.
     pub fn text(self) -> str {
-        return decimal_text(self.whole, self.frac, 10000);
+        let w = self.whole;
+        let f = self.frac;
+        if w >= 0 {
+            if f >= 1000 { return f"{w}.{f}"; }
+            if f >= 100 { return f"{w}.0{f}"; }
+            if f >= 10 { return f"{w}.00{f}"; }
+            return f"{w}.000{f}";
+        }
+        return decimal_text(w, f, 10000);
     }
 }
 

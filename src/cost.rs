@@ -8,8 +8,11 @@
 //!
 //! Which branch runs is not known, so there are two numbers: `low` leaves out every call that
 //! sits under an `if`/`unless` (what always runs: a warning built on it is never wrong, but it
-//! can miss code whose work is all in branches), and `high` counts them all (an upper bound,
-//! too high wherever the branches exclude each other).
+//! can miss code whose work is all in branches), and `high` counts the ones that can run
+//! together: of an `if`/`else` (the pair of calls the lowering writes for a stored test) only the
+//! dearer branch counts, and of a chain of early returns (`if <test> if function f run return 1`)
+//! only the dearest one, because the function ends after the first that happens. Other
+//! conditional calls count in full, so `high` stays an upper bound.
 
 use std::collections::{HashMap, HashSet};
 
@@ -52,6 +55,29 @@ struct Estimator<'a> {
 struct Call {
     id: String,
     conditional: bool,
+    group: Group,
+}
+
+/// Calls of which at most one runs (so `high` counts only the dearest).
+#[derive(Clone, Debug, PartialEq)]
+enum Group {
+    None,
+    /// `execute if|unless score <holder> <objective> matches 1 run function f`: the two sides
+    /// of one stored test (`key`) exclude each other.
+    Flag { key: String, then: bool },
+    /// `... if function f run return 1`: after `f` ran, the function returned.
+    Return,
+}
+
+fn group_of(line: &str) -> Group {
+    let words: Vec<&str> = line.split_whitespace().collect();
+    if let ["execute", polarity @ ("if" | "unless"), "score", holder, objective, "matches", "1", "run", "function", _] = words.as_slice() {
+        return Group::Flag { key: format!("{holder} {objective}"), then: *polarity == "if" };
+    }
+    if line.contains(" if function ") && line.contains(" run return") {
+        return Group::Return;
+    }
+    Group::None
 }
 
 /// The functions a line calls: `function ns:x`, `run function ns:x with ...`, `if function ns:x`.
@@ -73,7 +99,7 @@ fn calls_in(line: &str) -> Vec<Call> {
             // `... if function x`: the `if` that tests the call does not make it conditional
             let own = before.trim_end().strip_suffix("unless").or_else(|| before.trim_end().strip_suffix("if")).unwrap_or(before);
             let conditional = own.split_whitespace().any(|w| w == "if" || w == "unless");
-            out.push(Call { id, conditional });
+            out.push(Call { id, conditional, group: group_of(line) });
         }
         consumed += i + "function ".len();
         rest = after;
@@ -90,6 +116,9 @@ impl Estimator<'_> {
         let Some((lines, calls)) = self.bodies.get(id).cloned() else { return (0, 0) };
         self.stack.insert(id.to_owned());
         let (mut low, mut high) = (lines, lines);
+        // the dearest side of each stored test, and the dearest of the early returns
+        let mut flags: HashMap<String, (u64, u64)> = HashMap::new();
+        let mut returns = 0u64;
         for call in &calls {
             if call.id == id || self.stack.contains(&call.id) {
                 continue;
@@ -98,7 +127,19 @@ impl Estimator<'_> {
             if !call.conditional {
                 low = low.saturating_add(l);
             }
-            high = high.saturating_add(h);
+            match &call.group {
+                Group::None => high = high.saturating_add(h),
+                Group::Return => returns = returns.max(h),
+                Group::Flag { key, then } => {
+                    let sides = flags.entry(key.clone()).or_default();
+                    let side = if *then { &mut sides.0 } else { &mut sides.1 };
+                    *side = (*side).max(h);
+                }
+            }
+        }
+        high = high.saturating_add(returns);
+        for (a, b) in flags.values() {
+            high = high.saturating_add((*a).max(*b));
         }
         self.stack.remove(id);
         let result = match self.loops.get(id).and_then(|l| l.trips) {
@@ -146,6 +187,10 @@ mod tests {
         assert_eq!(ids("execute if score #a t matches 1.. run function t:b"), [("t:b".to_owned(), true)]);
         assert_eq!(ids("execute unless entity @s run function t:b"), [("t:b".to_owned(), true)]);
         assert_eq!(ids("execute if function t:b run return 1"), [("t:b".to_owned(), false)]);
+        assert_eq!(group_of("execute if score #f t matches 1 run function t:b"), Group::Flag { key: "#f t".into(), then: true });
+        assert_eq!(group_of("execute unless score #f t matches 1 run function t:b"), Group::Flag { key: "#f t".into(), then: false });
+        assert_eq!(group_of("execute if score #a t matches 5.. if function t:b run return 1"), Group::Return);
+        assert_eq!(group_of("execute as @a run function t:b"), Group::None);
         assert_eq!(ids("execute if score #a t matches 1.. if function t:b run return 1"), [("t:b".to_owned(), true)]);
         assert!(ids("schedule function t:later 1t").is_empty());
         assert!(ids("say function t:nope").is_empty());

@@ -65,21 +65,16 @@ fn fact(n: int) -> int {
 # function demo:fact
 execute if score #fact.v_n demo matches ..1 if function demo:fact/b0 run return 1
 scoreboard players operation #fact.t_0 demo = #fact.v_n demo
-scoreboard players operation #fact.t_1 demo = #fact.v_n demo
-scoreboard players remove #fact.t_1 demo 1
+scoreboard players remove #fact.t_0 demo 1
 data modify storage demo:stack i append value 0
 execute store result storage demo:stack i[-1] int 1 run scoreboard players get #fact.v_n demo
-data modify storage demo:stack i append value 0
-execute store result storage demo:stack i[-1] int 1 run scoreboard players get #fact.t_0 demo
-scoreboard players operation #fact.v_n demo = #fact.t_1 demo
+scoreboard players operation #fact.v_n demo = #fact.t_0 demo
 function demo:fact
-execute store result score #fact.t_0 demo run data get storage demo:stack i[-1]
-data remove storage demo:stack i[-1]
 execute store result score #fact.v_n demo run data get storage demo:stack i[-1]
 data remove storage demo:stack i[-1]
-scoreboard players operation #fact.t_1 demo = #ret demo
-scoreboard players operation #ret demo = #fact.t_0 demo
-scoreboard players operation #ret demo *= #fact.t_1 demo
+scoreboard players operation #fact.t_0 demo = #ret demo
+scoreboard players operation #ret demo = #fact.v_n demo
+scoreboard players operation #ret demo *= #fact.t_0 demo
 return 1
 ```
 
