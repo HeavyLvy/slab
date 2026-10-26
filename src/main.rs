@@ -11,12 +11,17 @@ const USAGE: &str = "usage:
   slab init                     make the current directory a project (moves .slab files into src/)
   slab build [PATH] [options]   compile a project to a data pack
   slab check [PATH]             parse and type-check a project, reporting errors and warnings
+  slab fmt [PATH...] [options]  format source files in place (a project, a directory or files)
   slab parse <file.slab>        parse one file and print its syntax tree
 
 A project is a directory with a Slab.toml and its code in src/, where src/main.slab is the root
 module. PATH is that directory, or any directory inside it (default: .), or the path of main.slab.
 Other .slab files are modules: `import a::b;` loads src/a/b.slab. (A bare directory with a
 main.slab and no Slab.toml also works.)
+
+fmt options:
+  --check                change nothing; list the files that are not formatted and exit with 1
+  --stdin                read one file from standard input and write it formatted to standard output
 
 build options (they override Slab.toml):
   -o, --out DIR          write the data pack folder here (default: <project>/build/<namespace>)
@@ -51,6 +56,7 @@ fn main() -> ExitCode {
             [path] => check(Path::new(path)),
             _ => usage_error("`slab check` takes at most one path"),
         },
+        "fmt" => fmt(rest),
         "parse" => match rest {
             [path] => parse_file(path),
             _ => usage_error("`slab parse` takes one file"),
@@ -235,6 +241,108 @@ fn build_once(b: &BuildArgs) -> ExitCode {
         println!("zipped: {}", zip.display());
     }
     ExitCode::SUCCESS
+}
+
+/// The `.slab` files under `path`: the file itself, or every file in the directory (a project's
+/// `src/`, when it has a `Slab.toml`), without descending into hidden folders, `build` or `target`.
+fn slab_files(path: &Path, out: &mut Vec<PathBuf>) -> std::io::Result<()> {
+    if path.is_file() {
+        out.push(path.to_path_buf());
+        return Ok(());
+    }
+    let dir = if path.join(slab::manifest::FILE).is_file() { path.join(slab::manifest::SOURCE_DIR) } else { path.to_path_buf() };
+    let mut entries: Vec<PathBuf> = std::fs::read_dir(&dir)?.filter_map(|e| e.ok()).map(|e| e.path()).collect();
+    entries.sort();
+    for entry in entries {
+        let name = entry.file_name().and_then(|n| n.to_str()).unwrap_or("");
+        if entry.is_dir() {
+            if !name.starts_with('.') && name != "build" && name != "target" {
+                slab_files(&entry, out)?;
+            }
+        } else if entry.extension().is_some_and(|e| e == "slab") {
+            out.push(entry);
+        }
+    }
+    Ok(())
+}
+
+fn fmt(args: &[String]) -> ExitCode {
+    let (mut check, mut stdin, mut paths) = (false, false, Vec::new());
+    for a in args {
+        match a.as_str() {
+            "--check" => check = true,
+            "--stdin" => stdin = true,
+            flag if flag.starts_with('-') => return usage_error(&format!("unknown option `{flag}` for `slab fmt`")),
+            path => paths.push(PathBuf::from(path)),
+        }
+    }
+    if stdin {
+        if !paths.is_empty() || check {
+            return usage_error("`slab fmt --stdin` reads standard input and takes no paths or --check");
+        }
+        let mut text = String::new();
+        if let Err(e) = std::io::Read::read_to_string(&mut std::io::stdin(), &mut text) {
+            eprintln!("error: cannot read standard input: {e}");
+            return ExitCode::from(1);
+        }
+        return match slab::fmt::format(&text) {
+            Ok(formatted) => {
+                let _ = write!(std::io::stdout(), "{formatted}");
+                ExitCode::SUCCESS
+            }
+            Err(d) => {
+                eprint!("{}", SourceFile::new("<stdin>", text).render(&d));
+                ExitCode::from(1)
+            }
+        };
+    }
+    if paths.is_empty() {
+        paths.push(PathBuf::from("."));
+    }
+    let mut files = Vec::new();
+    for path in &paths {
+        if let Err(e) = slab_files(path, &mut files) {
+            eprintln!("error: cannot read {}: {e}", path.display());
+            return ExitCode::from(1);
+        }
+    }
+    if files.is_empty() {
+        eprintln!("error: no .slab files found");
+        return ExitCode::from(1);
+    }
+    let (mut changed, mut failed) = (0, 0);
+    for file in &files {
+        let text = match std::fs::read_to_string(file) {
+            Ok(t) => t,
+            Err(e) => {
+                eprintln!("error: cannot read {}: {e}", file.display());
+                failed += 1;
+                continue;
+            }
+        };
+        match slab::fmt::format(&text) {
+            Ok(formatted) if formatted == text => {}
+            Ok(formatted) => {
+                changed += 1;
+                if check {
+                    println!("would reformat {}", file.display());
+                } else if let Err(e) = std::fs::write(file, formatted) {
+                    eprintln!("error: cannot write {}: {e}", file.display());
+                    failed += 1;
+                } else {
+                    println!("formatted {}", file.display());
+                }
+            }
+            Err(d) => {
+                eprint!("{}", SourceFile::new(file.display().to_string(), text).render(&d));
+                failed += 1;
+            }
+        }
+    }
+    let unchanged = files.len() - changed - failed;
+    let verb = if check { "would change" } else { "formatted" };
+    println!("{verb} {}, {unchanged} already formatted{}", plural(changed, "file"), if failed > 0 { format!(", {} with errors", plural(failed, "file")) } else { String::new() });
+    if failed > 0 || (check && changed > 0) { ExitCode::from(1) } else { ExitCode::SUCCESS }
 }
 
 fn parse_file(path: &str) -> ExitCode {

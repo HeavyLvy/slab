@@ -10,7 +10,7 @@ objective points = "dummy";
 
 fn fight() {
     let boss = summon("minecraft:zombie", 0, 64, 0);   // a handle to the new entity
-    let me   = @p;                                      // the single entity a selector matches
+    let me = @p;                                        // the single entity a selector matches
     if !tp(boss, 0, 70, 0) { print("boss is gone"); }   // acting on a dead entity fails, catchably
     effect::give(boss, "minecraft:glowing", 10s);
     as boss { print("running as the boss"); }

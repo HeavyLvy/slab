@@ -5,6 +5,7 @@ slab new NAME                 create a project: NAME/Slab.toml and NAME/src/main
 slab init                     make the current directory a project (moves .slab files into src/)
 slab build [PATH] [options]   compile a project to a data pack
 slab check [PATH]             parse and type-check a project, reporting errors and warnings
+slab fmt [PATH...] [options]  format source files in place
 slab parse <file.slab>        parse one file and print its syntax tree
 ```
 
@@ -31,11 +32,26 @@ slab build [PATH] [-o DIR] [--zip] [--watch] [options]
 
 Anything given on the command line wins over `Slab.toml`.
 
-Warnings are printed but do not fail the build. They include an entry point that is estimated to run far more than the game's 65,536 commands per tick; see [Tasks](../lang/tasks.md).
+Warnings are printed but do not fail the build. They include names that break the [naming conventions](style.md) (turn that off with `[lint] naming = "off"` in `Slab.toml`). They include an entry point that is estimated to run far more than the game's 65,536 commands per tick; see [Tasks](../lang/tasks.md).
 
 ## `slab check`
 
 Parses and type-checks without writing anything. Exit code 0 means no errors; warnings are printed.
+
+## `slab fmt`
+
+```text
+slab fmt [PATH...] [--check] [--stdin]
+```
+
+Rewrites `.slab` files in the canonical layout described in [Style and naming](style.md). Each `PATH` is a file, a project (its `src/` is formatted) or a directory (every `.slab` file below it); the default is `.`. It prints the files it changed.
+
+| Option | Meaning |
+|---|---|
+| `--check` | Change nothing. List the files that are not formatted and exit with 1 if there are any. Meant for CI. |
+| `--stdin` | Read one file from standard input and write it formatted to standard output. This is what editors use. |
+
+A file with a syntax error is reported and left as it is. The language server offers the same formatting as "Format Document".
 
 ## `slab new` and `slab init`
 

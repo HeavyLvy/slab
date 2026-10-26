@@ -39,6 +39,7 @@ fn serve(connection: &Connection) -> Result<(), String> {
         "hoverProvider": true,
         "definitionProvider": true,
         "documentSymbolProvider": true,
+        "documentFormattingProvider": true,
         "completionProvider": { "triggerCharacters": [".", ":", "[", ",", "="], "resolveProvider": false },
         "signatureHelpProvider": { "triggerCharacters": ["(", ","] },
         "semanticTokensProvider": {
@@ -68,6 +69,7 @@ fn serve(connection: &Connection) -> Result<(), String> {
                     "textDocument/completion" => completion_response(&ws, params),
                     "textDocument/signatureHelp" => signature_response(&ws, params),
                     "textDocument/documentSymbol" => document_symbols(&ws, params),
+                    "textDocument/formatting" => formatting(&ws, params),
                     "textDocument/semanticTokens/full" => semantic_tokens(&ws, params),
                     other => {
                         eprintln!("slab-lsp: ignoring request `{other}`");
@@ -239,6 +241,16 @@ fn completion_response(ws: &Workspace, params: &Value) -> Value {
         })
         .collect();
     json!({ "isIncomplete": false, "items": json_items })
+}
+
+/// One edit that replaces the document with its `slab fmt` form (none when it is already
+/// formatted or does not parse: the diagnostics already say why).
+fn formatting(ws: &Workspace, params: &Value) -> Value {
+    let Some((_state, doc, _module)) = param_uri(params).and_then(|uri| ws.locate(uri)) else { return Value::Null };
+    match crate::format::edit(&doc.text, &doc.lines, ws.enc) {
+        Some((range, new_text)) => json!([{ "range": range_value(range), "newText": new_text }]),
+        None => json!([]),
+    }
 }
 
 fn document_symbols(ws: &Workspace, params: &Value) -> Value {

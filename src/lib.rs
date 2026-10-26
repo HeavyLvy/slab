@@ -9,6 +9,7 @@ pub mod cost;
 pub mod datapack;
 pub mod diag;
 pub mod ir;
+pub mod fmt;
 pub mod lint;
 pub mod lower;
 pub mod manifest;

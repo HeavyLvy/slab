@@ -584,3 +584,14 @@ fn match_bindings_hover_and_complete() {
     let items = completion::completions(&ws, &uri, at).unwrap();
     assert!(items.iter().any(|i| i.label == "extra" && i.kind == 6), "{items:?}");
 }
+
+#[test]
+fn formatting_replaces_the_document_and_leaves_formatted_or_broken_code_alone() {
+    let text = "fn  f(){\n  let x=1;\n}\n";
+    let lines = LineIndex::new(text);
+    let (range, new_text) = slab_lsp::format::edit(text, &lines, Enc::Utf16).expect("an edit");
+    assert_eq!(new_text, "fn f() {\n    let x = 1;\n}\n");
+    assert_eq!((range.start.line, range.start.character, range.end.line, range.end.character), (0, 0, 3, 0));
+    assert!(slab_lsp::format::edit(&new_text, &LineIndex::new(&new_text), Enc::Utf16).is_none());
+    assert!(slab_lsp::format::edit("fn f( {", &LineIndex::new("fn f( {"), Enc::Utf16).is_none());
+}
