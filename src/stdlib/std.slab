@@ -238,24 +238,36 @@ impl FarDouble {
 
 /// `whole + frac / scale` as Minecraft writes numbers: a sign, the whole part of the absolute
 /// value, a point, and the fraction with its leading zeros (`-6.0005`, not `-7` and `.5`).
+/// `scale` is 10000 or 1000000. No loops and few calls: this runs for every number written
+/// into a command, and a tick may run only 65,536 commands.
 fn decimal_text(whole: int, frac: int, scale: int) -> str {
-    let mut w = whole;
-    let mut f = frac;
-    let mut sign = "";
-    if w < 0 {
-        sign = "-";
-        if f > 0 {
-            w = 0 - w - 1;
-            f = scale - f;
-        } else {
-            w = 0 - w;
-        }
+    if whole >= 0 {
+        if scale == 10000 { return text4("", whole, frac); }
+        return text6("", whole, frac);
     }
-    let mut zeros = "";
-    let mut p = scale / 10;
-    while p > 1 && f < p {
-        zeros = zeros + "0";
-        p = p / 10;
+    // below zero the game wants the sign and the absolute value: -6.5 is `-6.5`, not `-7` and `.5`
+    if frac > 0 {
+        if scale == 10000 { return text4("-", 0 - whole - 1, scale - frac); }
+        return text6("-", 0 - whole - 1, scale - frac);
     }
-    return f"{sign}{w}.{zeros}{f}";
+    if scale == 10000 { return text4("-", 0 - whole, 0); }
+    return text6("-", 0 - whole, 0);
+}
+
+/// `sign`, `whole`, a point and four digits: `frac` is 0 to 9999 and keeps its leading zeros.
+fn text4(sign: str, whole: int, frac: int) -> str {
+    if frac >= 1000 { return f"{sign}{whole}.{frac}"; }
+    if frac >= 100 { return f"{sign}{whole}.0{frac}"; }
+    if frac >= 10 { return f"{sign}{whole}.00{frac}"; }
+    return f"{sign}{whole}.000{frac}";
+}
+
+/// The same with six digits.
+fn text6(sign: str, whole: int, frac: int) -> str {
+    if frac >= 100000 { return f"{sign}{whole}.{frac}"; }
+    if frac >= 10000 { return f"{sign}{whole}.0{frac}"; }
+    if frac >= 1000 { return f"{sign}{whole}.00{frac}"; }
+    if frac >= 100 { return f"{sign}{whole}.000{frac}"; }
+    if frac >= 10 { return f"{sign}{whole}.0000{frac}"; }
+    return f"{sign}{whole}.00000{frac}";
 }
