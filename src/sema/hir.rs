@@ -193,6 +193,8 @@ pub enum ExprKind {
     Variant { enum_id: EnumId, index: usize, args: Vec<Expr> },
     /// `()`.
     Unit,
+    /// A constant NBT compound written as `{ key: value, .. }`: the options of a particle.
+    Nbt(crate::datapack::Compound),
     Local(LocalId),
     Global(GlobalId),
     /// A selector literal. The expressions fill the run-time parts of its options (`$name`,
@@ -270,7 +272,7 @@ impl Expr {
                 f(index);
             }
             ExprKind::Match { scrut, .. } => f(scrut),
-            ExprKind::Int(_) | ExprKind::Bool(_) | ExprKind::Str(_) | ExprKind::Unit | ExprKind::Local(_) | ExprKind::Global(_) | ExprKind::Rel { .. } | ExprKind::Error => {}
+            ExprKind::Int(_) | ExprKind::Bool(_) | ExprKind::Str(_) | ExprKind::Unit | ExprKind::Nbt(_) | ExprKind::Local(_) | ExprKind::Global(_) | ExprKind::Rel { .. } | ExprKind::Error => {}
         }
     }
 
@@ -313,7 +315,7 @@ impl Expr {
                     }
                 }
             }
-            ExprKind::Int(_) | ExprKind::Bool(_) | ExprKind::Str(_) | ExprKind::Unit | ExprKind::Local(_) | ExprKind::Global(_) | ExprKind::Rel { .. } | ExprKind::Error => {}
+            ExprKind::Int(_) | ExprKind::Bool(_) | ExprKind::Str(_) | ExprKind::Unit | ExprKind::Nbt(_) | ExprKind::Local(_) | ExprKind::Global(_) | ExprKind::Rel { .. } | ExprKind::Error => {}
         }
     }
 

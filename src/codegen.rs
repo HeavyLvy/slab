@@ -880,6 +880,8 @@ impl<'a> Gen<'a> {
             h::ExprKind::Unit => ir::Expr::Int(0),
             h::ExprKind::Local(id) => ir::Expr::var(&self.local_names[id.0]),
             h::ExprKind::Global(id) => ir::Expr::global(&self.global_names[id.0]),
+            // only read by `particle`, which takes it from its arguments
+            h::ExprKind::Nbt(c) => ir::Expr::Data(Nbt::Compound(c.clone())),
             h::ExprKind::Selector(..) | h::ExprKind::Rel { .. } => {
                 self.err(e.span, "a selector or coordinate cannot be used as a value here");
                 ir::Expr::Int(0)
@@ -1719,31 +1721,26 @@ impl<'a> Gen<'a> {
                 Command::Setblock { pos, block: datapack::BlockState::new(block), mode: None }
             }
             "particle" => {
-                // the name may carry options: `item{item:{id:"minecraft:diamond",count:1}}`
-                let (name, options) = match const_str(&args[0]) {
-                    Some(text) => {
-                        let (id, options) = match text.find('{') {
-                            Some(i) => (text[..i].to_owned(), Some(text[i..].to_owned())),
-                            None => (text.clone(), None),
-                        };
-                        match ResourceLocation::parse(&id) {
-                            Ok(id) => (datapack::Arg::Lit(id), options),
-                            Err(e) => {
-                                self.err(args[0].span, e.message().to_owned());
-                                return None;
-                            }
-                        }
-                    }
-                    None => (self.str_arg(&args[0], holes, ResourceLocation::parse)?, None),
+                // `particle(kind, { options }, x, y, z, ...)`: the options are a constant compound
+                let (options, rest) = match args.get(1).map(|a| &a.kind) {
+                    Some(h::ExprKind::Nbt(c)) => (Some(c.clone()), &args[2..]),
+                    _ => (None, &args[1..]),
                 };
-                let pos = if args.len() >= 4 { Some(self.pos(&args[1..4], holes)?) } else { None };
+                let name = self.str_arg(&args[0], holes, ResourceLocation::parse)?;
+                let args: Vec<&h::Expr> = std::iter::once(&args[0]).chain(rest.iter()).collect();
+                let pos = if args.len() >= 4 {
+                    let coords: Vec<h::Expr> = args[1..4].iter().map(|e| (*e).clone()).collect();
+                    Some(self.pos(&coords, holes)?)
+                } else {
+                    None
+                };
                 let spread = if args.len() >= 9 {
                     let number = |this: &mut Self, e: &h::Expr| -> Option<f64> {
                         let text = const_str(e)?;
                         text.parse::<f64>().map_err(|_| this.err(e.span, format!("`{text}` is not a number"))).ok()
                     };
-                    let delta = [number(self, &args[4])?, number(self, &args[5])?, number(self, &args[6])?];
-                    let speed = number(self, &args[7])?;
+                    let delta = [number(self, args[4])?, number(self, args[5])?, number(self, args[6])?];
+                    let speed = number(self, args[7])?;
                     let count = match &args[8].kind {
                         h::ExprKind::Int(n) if *n >= 0 => Num::Lit(*n as u32),
                         h::ExprKind::Int(_) => {
@@ -1752,7 +1749,7 @@ impl<'a> Gen<'a> {
                         }
                         _ => Num::Hole(self.hole(holes, &args[8])),
                     };
-                    let mode = match args.get(9).and_then(const_str).as_deref() {
+                    let mode = match args.get(9).and_then(|e| const_str(e)).as_deref() {
                         None => None,
                         Some("force") => Some(datapack::ParticleMode::Force),
                         Some("normal") => Some(datapack::ParticleMode::Normal),

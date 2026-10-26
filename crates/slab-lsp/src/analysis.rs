@@ -717,7 +717,7 @@ fn visit_hir_expr(e: &HirExpr, offset: usize, best: &mut Option<(u32, HirExpr)>)
                 }
             }
         }
-        HirExprKind::Int(_) | HirExprKind::Bool(_) | HirExprKind::Str(_) | HirExprKind::Global(_) | HirExprKind::Local(_) | HirExprKind::Rel { .. } | HirExprKind::Error => {}
+        HirExprKind::Int(_) | HirExprKind::Bool(_) | HirExprKind::Str(_) | HirExprKind::Nbt(_) | HirExprKind::Global(_) | HirExprKind::Local(_) | HirExprKind::Rel { .. } | HirExprKind::Error => {}
         HirExprKind::Selector(_, holes) => {
             for h in holes {
                 visit_hir_expr(h, offset, best);

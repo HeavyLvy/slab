@@ -1115,8 +1115,9 @@ pub enum Command {
     Kill(Option<Selector>),
     Summon { entity: Arg<ResourceLocation>, pos: Option<Pos>, nbt: Option<Compound> },
     /// `particle <name>[{options}] [<pos> [<delta> <speed> <count> [force|normal] [<viewers>]]]`.
-    /// `options` is the SNBT of a particle that takes data (`item{item:{id:"minecraft:diamond",count:1}}`), braces included.
-    Particle { name: Arg<ResourceLocation>, options: Option<String>, pos: Option<Pos>, spread: Option<ParticleSpread> },
+    /// `options` is the data of a particle that takes some (`item{item:{id:"minecraft:diamond",count:1}}`), written
+    /// right after the name.
+    Particle { name: Arg<ResourceLocation>, options: Option<Compound>, pos: Option<Pos>, spread: Option<ParticleSpread> },
     Setblock { pos: Pos, block: BlockState, mode: Option<SetblockMode> },
     /// `gamerule <rule> [<value>]`; no value queries.
     Gamerule { rule: ResourceLocation, value: Option<GameRuleValue> },
@@ -1357,7 +1358,7 @@ impl Check for Command {
                     if matches!(name, Arg::Hole(_)) {
                         bail!("a particle chosen at run time carries its options in the same text");
                     }
-                    check_snbt_braces("particle options", o)?;
+                    o.check()?;
                 }
                 pos.check()?;
                 if let Some(s) = spread {
@@ -1396,44 +1397,6 @@ impl Check for Command {
             }
         }
     }
-}
-
-/// `{ ... }` on one line with balanced braces and brackets outside strings: the shape of an SNBT
-/// compound (what is inside is the game's to check). A `$(` would be read as a macro placeholder.
-fn check_snbt_braces(what: &str, text: &str) -> Result<()> {
-    single_line(what, text)?;
-    if text.contains("$(") {
-        bail!("{what} cannot contain `$(` (it would be read as a macro placeholder)");
-    }
-    if !text.starts_with('{') || !text.ends_with('}') {
-        bail!("{what} must be a compound in braces, such as `{{item:{{id:\"minecraft:stone\",count:1}}}}`, found {text:?}");
-    }
-    let (mut depth, mut quote, mut escaped) = (0i32, None::<char>, false);
-    for c in text.chars() {
-        match quote {
-            Some(q) => match c {
-                _ if escaped => escaped = false,
-                '\\' => escaped = true,
-                c if c == q => quote = None,
-                _ => {}
-            },
-            None => match c {
-                '"' | '\'' => quote = Some(c),
-                '{' | '[' => depth += 1,
-                '}' | ']' => {
-                    depth -= 1;
-                    if depth < 0 {
-                        bail!("{what} has a closing bracket with no opening one: {text:?}");
-                    }
-                }
-                _ => {}
-            },
-        }
-    }
-    if depth != 0 || quote.is_some() {
-        bail!("{what} has an unclosed bracket or quote: {text:?}");
-    }
-    Ok(())
 }
 
 impl fmt::Display for Command {
@@ -1490,7 +1453,7 @@ impl fmt::Display for Command {
             Command::Particle { name, options, pos, spread } => {
                 write!(f, "particle {name}")?;
                 if let Some(o) = options {
-                    f.write_str(o)?;
+                    write!(f, "{o}")?;
                 }
                 if let Some(p) = pos {
                     write!(f, " {p}")?;
@@ -1771,17 +1734,17 @@ mod tests {
         // a particle with data, a spread and a mode (the example from the wiki)
         let item = Command::Particle {
             name: rl("item").into(),
-            options: Some("{item:{id:\"minecraft:diamond\",count:1}}".into()),
+            options: Some(Compound::new().with("item", Compound::new().with("id", super::super::nbt::Nbt::str("minecraft:diamond")).with("count", 1))),
             pos: Some(Pos::new(Coord::Rel(0.0), Coord::Rel(1.0), Coord::Rel(0.0))),
             spread: Some(ParticleSpread { delta: [0.2, 0.2, 0.2], speed: 0.1, count: Num::Lit(20), mode: Some(ParticleMode::Force), viewers: Some(Selector::a()) }),
         };
         assert_eq!(item.to_string(), "particle minecraft:item{item:{id:\"minecraft:diamond\",count:1}} ~ ~1 ~ 0.2 0.2 0.2 0.1 20 force @a");
         assert!(item.check().is_ok());
-        let mut bad = item.clone();
-        if let Command::Particle { options, .. } = &mut bad {
-            *options = Some("{item:{id:\"x\"}".into());
+        let mut by_hole = item.clone();
+        if let Command::Particle { name, .. } = &mut by_hole {
+            *name = Arg::Hole(Hole(0));
         }
-        assert!(bad.check().unwrap_err().to_string().contains("unclosed"));
+        assert!(by_hole.check().unwrap_err().to_string().contains("run time"));
         let mut no_pos = item.clone();
         if let Command::Particle { pos, .. } = &mut no_pos {
             *pos = None;

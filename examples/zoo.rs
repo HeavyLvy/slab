@@ -293,17 +293,17 @@ fn holes() -> Function {
     f.push(Command::Particle { name: rl("end_rod").into(), options: None, pos: Some(Pos::local(0.0, 1.0, 0.0)), spread: None });
     f.push(Command::Particle {
         name: rl("item").into(),
-        options: Some("{item:{id:\"minecraft:diamond\",count:1}}".into()),
+        options: Some(Compound::new().with("item", Compound::new().with("id", Nbt::str("minecraft:diamond")).with("count", 1))),
         pos: Some(Pos::new(Coord::Rel(0.0), Coord::Rel(1.0), Coord::Rel(0.0))),
         spread: Some(ParticleSpread { delta: [0.2, 0.2, 0.2], speed: 0.1, count: Num::Lit(20), mode: Some(ParticleMode::Force), viewers: Some(Selector::a()) }),
     });
     f.push(Command::Particle {
         name: rl("dust").into(),
-        options: Some("{color:[1.0f,0.0f,0.0f],scale:1.5f}".into()),
+        options: Some(Compound::new().with("color", vec![Nbt::Float(1.0), Nbt::Float(0.0), Nbt::Float(0.0)]).with("scale", Nbt::Float(1.5))),
         pos: Some(Pos::here()),
         spread: Some(ParticleSpread { delta: [0.0, 0.0, 0.0], speed: 0.0, count: Num::Lit(0), mode: Some(ParticleMode::Normal), viewers: None }),
     });
-    f.push(Command::Particle { name: rl("block").into(), options: Some("{block_state:\"minecraft:stone\"}".into()), pos: None, spread: None });
+    f.push(Command::Particle { name: rl("block").into(), options: Some(Compound::new().with("block_state", "minecraft:stone")), pos: None, spread: None });
     f.push(Command::Run(Arg::Lit("list".into())));
     f.push(Command::Data(Data::Modify {
         target: DataTarget::Storage(rl("zoo:vars")),

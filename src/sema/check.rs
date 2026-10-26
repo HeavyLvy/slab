@@ -8,7 +8,7 @@ use super::hir::*;
 use super::matching;
 use super::selector;
 use super::ty::{EnumId, StructId, Ty};
-use crate::datapack::{HolderName, ResourceLocation, Word};
+use crate::datapack::{Compound, HolderName, Nbt, ResourceLocation, Word};
 use crate::diag::{Diagnostic, Span};
 use crate::syntax::ast::{self, AssignOp, BinOp, UnOp};
 
@@ -3189,26 +3189,31 @@ impl<'a> Checker<'a> {
 
     fn builtin_call(&mut self, b: &Intrinsic, args: &'a [ast::Expr], span: Span) -> Expr {
         let ret = self.intrinsic_ret(b);
-        if args.len() < b.min_args || args.len() > b.params.len() {
+        // `particle(kind, { options }, x, y, z, ..)`: a compound right after the name is the data
+        // of the particle, not one of the declared parameters
+        let options_at = (b.id == "particle" && args.len() >= 2 && matches!(args[1].kind, ast::ExprKind::Compound(_))).then_some(1);
+        let options = options_at.map(|i| self.nbt_const(&args[i]));
+        let argc = args.len() - usize::from(options_at.is_some());
+        if argc < b.min_args || argc > b.params.len() {
             let takes = if b.min_args == b.params.len() {
                 format!("{} argument{}", b.params.len(), if b.params.len() == 1 { "" } else { "s" })
             } else {
                 format!("{} to {} arguments", b.min_args, b.params.len())
             };
-            self.arity_error(&format!("`{}`", b.path()), takes, args.len(), span);
+            self.arity_error(&format!("`{}`", b.path()), takes, argc, span);
             self.args_for_errors(args);
             return Expr { kind: ExprKind::Error, ty: ret, span };
         }
         // `particle` takes its arguments in groups: the name, the position, the spread (delta,
-        // speed, count), then the mode and the viewers
-        if b.id == "particle" && !matches!(args.len(), 1 | 4 | 9 | 10 | 11) {
-            self.error_hint(span, format!("`particle` takes 1, 4, 9, 10 or 11 arguments, found {}", args.len()), "(kind), (kind, x, y, z), (kind, x, y, z, dx, dy, dz, speed, count), then a mode `\"force\"`/`\"normal\"`, then the viewers");
+        // speed, count), then the mode and the viewers; the options go after the name
+        if b.id == "particle" && !matches!(argc, 1 | 4 | 9 | 10 | 11) {
+            self.error_hint(span, format!("`particle` takes 1, 4, 9, 10 or 11 arguments (not counting the options), found {argc}"), "(kind), (kind, x, y, z), (kind, x, y, z, dx, dy, dz, speed, count), then a mode `\"force\"`/`\"normal\"`, then the viewers; the options `{ .. }` come right after the kind");
             self.args_for_errors(args);
             return Expr { kind: ExprKind::Error, ty: ret, span };
         }
         let mut hargs = Vec::new();
         let mut ok = true;
-        for (a, p) in args.iter().zip(&b.params) {
+        for (a, p) in args.iter().enumerate().filter(|(i, _)| Some(*i) != options_at).map(|(_, a)| a).zip(&b.params) {
             let h = match p {
                 BParam::Printable => {
                     let h = self.expr(a, None);
@@ -3258,10 +3263,67 @@ impl<'a> Checker<'a> {
             ok &= !h.ty.is_error();
             hargs.push(h);
         }
+        if let (Some(at), Some(compound)) = (options_at, options) {
+            match compound {
+                Some(c) => hargs.insert(at, Expr { kind: ExprKind::Nbt(c), ty: Ty::Str, span: args[at].span }),
+                None => ok = false,
+            }
+        }
         if ok {
             self.builtin_semantics(b.id, &hargs);
         }
         Expr { kind: ExprKind::Builtin { name: b.id, args: hargs }, ty: ret, span }
+    }
+
+    /// A `{ key: value, .. }` written in the source as NBT: numbers, strings, booleans, lists and
+    /// compounds of constants. A decimal number is a `float`, which is what the particle options
+    /// that take one (`scale`, `color`) ask for, and the game also accepts it where an int is expected.
+    fn nbt_const(&mut self, e: &'a ast::Expr) -> Option<Compound> {
+        let ast::ExprKind::Compound(fields) = &e.kind else {
+            self.error(e.span, "expected `{ key: value, .. }`");
+            return None;
+        };
+        let mut out = Compound::new();
+        for f in fields {
+            let value = self.nbt_value(&f.value)?;
+            out.insert(f.name.clone(), value);
+        }
+        Some(out)
+    }
+
+    fn nbt_value(&mut self, e: &'a ast::Expr) -> Option<Nbt> {
+        use ast::ExprKind as K;
+        Some(match &e.kind {
+            K::Str(s) => Nbt::String(s.clone()),
+            K::Bool(b) => Nbt::bool(*b),
+            K::Compound(_) => Nbt::Compound(self.nbt_const(e)?),
+            K::List(items) => Nbt::List(items.iter().map(|i| self.nbt_value(i)).collect::<Option<Vec<_>>>()?),
+            K::Float(t) => match t.replace('_', "").parse::<f32>() {
+                Ok(v) if v.is_finite() => Nbt::Float(v),
+                _ => {
+                    self.error(e.span, format!("`{t}` is not a number"));
+                    return None;
+                }
+            },
+            K::Unary { op: ast::UnOp::Neg, expr } => match self.nbt_value(expr)? {
+                Nbt::Float(v) => Nbt::Float(-v),
+                Nbt::Int(v) => Nbt::Int(v.checked_neg()?),
+                _ => {
+                    self.error(e.span, "`-` needs a number");
+                    return None;
+                }
+            },
+            _ => match self.const_expr(e, None) {
+                Some((ConstVal::Int(n), _)) => Nbt::Int(n),
+                Some((ConstVal::Bool(b), _)) => Nbt::bool(b),
+                Some((ConstVal::Str(s), _)) => Nbt::String(s),
+                Some(_) => {
+                    self.error(e.span, "this kind of value is not allowed in NBT here");
+                    return None;
+                }
+                None => return None,
+            },
+        })
     }
 
     /// The text of a number written in the source: an integer (or constant), or a decimal literal,
@@ -3307,9 +3369,12 @@ impl<'a> Checker<'a> {
             "effect.give" | "summon" | "setblock" | "particle" => {
                 let idx = if name == "effect.give" { 1 } else if name == "summon" || name == "particle" { 0 } else { 3 };
                 if let Some((id, sp)) = s(idx)
-                    // a particle's id may be followed by its options in braces
-                    && let Err(e) = ResourceLocation::parse(if name == "particle" { id.split('{').next().unwrap_or(&id) } else { &id }) {
-                        self.error(sp, format!("invalid id: {}", e.message()));
+                    && let Err(e) = ResourceLocation::parse(&id) {
+                        if name == "particle" && id.contains('{') {
+                            self.error_hint(sp, "the options of a particle are their own argument", "write `particle(\"item\", { item: { id: \"minecraft:diamond\", count: 1 } }, ~, ~1, ~)`");
+                        } else {
+                            self.error(sp, format!("invalid id: {}", e.message()));
+                        }
                     }
                 if name == "effect.give" {
                     // the duration is in ticks (so `10s` means ten seconds); the game takes whole seconds
