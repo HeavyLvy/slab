@@ -46,7 +46,7 @@ Versions follow [Semantic Versioning](https://semver.org/): `MAJOR.MINOR.PATCH`,
 
 To release: on `main`, make a commit "Release X.Y.Z" that sets the version in those files, runs `cargo build` to update `Cargo.lock`, and renames `[Unreleased]` to `[X.Y.Z] - date` in the changelog (with a new empty `[Unreleased]` above it and the link lines at the bottom updated). Once CI is green, `git tag -a vX.Y.Z -m "slab X.Y.Z" && git push origin vX.Y.Z`. The `release` workflow checks that the tag matches the files and is on `main`, builds `slab` and `slab-lsp` for Linux, macOS (Apple silicon) and Windows plus the extension (`.vsix`), and publishes a GitHub release with the changelog section as its notes. Version tags are never moved or deleted; a bad release is fixed by a new patch version.
 
-A release publishes more than the GitHub release page, each part only when its token is set as a repository secret (Settings -> Secrets and variables -> Actions, or `gh secret set NAME`):
+A release can publish more than the GitHub release page (the extension is not on any store yet, and the first release will tell you whether the others work), each part only when its token is set as a repository secret (Settings -> Secrets and variables -> Actions, or `gh secret set NAME`):
 
 | Secret | Publishes | Where the token comes from |
 |---|---|---|

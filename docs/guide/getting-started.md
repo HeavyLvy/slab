@@ -50,7 +50,7 @@ cargo install slab-lang slab-lsp
 
 ### The editor extension
 
-In VS Code, open the Extensions view (the four squares on the left, or Ctrl+Shift+X), search for **slab** and click Install. Or from a terminal: `code --install-extension heavylvy.slab-vscode`. VSCodium and other editors that use [Open VSX](https://open-vsx.org/) find it there too. It gives highlighting, errors and warnings as you type, hover, completion, go to definition, an outline and formatting.
+If VS Code (or VSCodium) is installed, the install command above has **already installed the extension** for you: reload any open VS Code window and open a `.slab` file. To add it by hand, download the `.vsix` for your system from the [releases page](https://github.com/HeavyLvy/slab/releases/latest) (`slab-vscode-win32-x64-<version>.vsix`, `-darwin-arm64-` or `-linux-x64-`; any other system takes the one without a system name), then in VS Code open the Extensions view (Ctrl+Shift+X), click the `...` menu at its top and choose **Install from VSIX...**. (To skip it when installing, set `SLAB_NO_EXTENSION=1`. The extension is not on the VS Code Marketplace yet.) It gives highlighting, errors and warnings as you type, hover, completion, go to definition, an outline and formatting.
 
 On Windows, macOS (Apple silicon) and Linux (x64) the extension already contains the language server (`slab-lsp`), so there is nothing more to do. On other computers it looks for `slab-lsp` in your `PATH` and in `~/.cargo/bin`, so install it as above, or set *slab: Server Path* in the settings. A `.vsix` file for each system is also attached to every release (*Extensions: Install from VSIX...*).
 
