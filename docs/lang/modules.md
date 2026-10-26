@@ -38,6 +38,8 @@ Only this part of TOML is read (tables, `key = "text" | true | false | 123`, `#`
 
 `minecraft` is the version the pack targets: it sets the data pack format in `pack.mcmeta` (`min_format` / `max_format`: 26.1 is 101.1, 26.2 is 107.1, 26.3 is 121.0, from `docs/mc/01-datapack-structure.md`), and a patch release such as `26.1.2` reads as its family. Only 26.3 has been run against a real server, so building for 26.1 or 26.2 prints a warning saying the commands were not tried there; versions before 26.1 are refused, because their `pack.mcmeta` and many commands differ. Language features that need a newer game (the planned `float` uses 26.x's `/compute`) will be errors for older targets. The command line has `--minecraft VERSION`.
 
+`slab build --watch` (`-w`) builds, then keeps running and builds again whenever a `.slab` file under `src/` or `Slab.toml` is saved, added or removed (a check every quarter second, no extra dependency). An error is shown and watching goes on; each successful build rewrites the output folder, so with `-o` pointing at a world's `datapacks/<name>` you only have to `/reload` in the game. Ctrl+C stops it.
+
 A bare directory with a `main.slab` and no `Slab.toml` still builds (its modules sit next to it, and its name is the namespace), which is handy for a quick experiment; `slab init` upgrades it.
 
 ## Importing

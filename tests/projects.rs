@@ -234,3 +234,73 @@ fn the_target_minecraft_version_sets_the_pack_format() {
     assert!(String::from_utf8_lossy(&o.stderr).contains("unsupported Minecraft version `1.21.4`"));
     let _ = fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn watch_rebuilds_when_a_source_file_changes_and_survives_errors() {
+    use std::io::{BufRead, BufReader};
+    use std::process::Stdio;
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    let dir = scratch("watch");
+    fs::create_dir_all(dir.join("src")).unwrap();
+    fs::write(dir.join("Slab.toml"), "[project]\nname = \"w\"\n").unwrap();
+    let main = dir.join("src/main.slab");
+    fs::write(&main, "fn one() {}\n").unwrap();
+    let out = dir.join("out");
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_slab"))
+        .args(["build", "--watch", dir.to_str().unwrap(), "-o", out.to_str().unwrap()])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    // both streams into one channel, a line at a time
+    let (tx, rx) = mpsc::channel::<String>();
+    for stream in [Box::new(child.stdout.take().unwrap()) as Box<dyn std::io::Read + Send>, Box::new(child.stderr.take().unwrap())] {
+        let tx = tx.clone();
+        std::thread::spawn(move || {
+            for line in BufReader::new(stream).lines().map_while(Result::ok) {
+                if tx.send(line).is_err() {
+                    break;
+                }
+            }
+        });
+    }
+    let wait_for = |needle: &str| -> bool {
+        let deadline = std::time::Instant::now() + Duration::from_secs(20);
+        while std::time::Instant::now() < deadline {
+            if let Ok(line) = rx.recv_timeout(Duration::from_millis(200))
+                && line.contains(needle)
+            {
+                return true;
+            }
+        }
+        false
+    };
+    let function = |name: &str| out.join(format!("data/w/function/{name}.mcfunction")).is_file();
+
+    assert!(wait_for("[watch 1] done"), "the first build");
+    assert!(function("one"));
+
+    // a saved change is built, and the output is replaced
+    fs::write(&main, "fn two() {}\n").unwrap();
+    assert!(wait_for("[watch 2] done"), "the rebuild after a change");
+    assert!(function("two") && !function("one"));
+
+    // a mistake is reported and watching goes on
+    fs::write(&main, "fn broken( {\n").unwrap();
+    assert!(wait_for("[watch 3] failed"), "a failing rebuild is reported");
+    assert!(child.try_wait().unwrap().is_none(), "still running after an error");
+    fs::write(&main, "fn three() {}\n").unwrap();
+    assert!(wait_for("[watch 4] done"), "the rebuild after the fix");
+    assert!(function("three"));
+
+    // a new module file counts as a change too
+    fs::write(dir.join("src/extra.slab"), "pub fn x() {}\n").unwrap();
+    assert!(wait_for("[watch 5] done"), "a new file");
+
+    let _ = child.kill();
+    let _ = child.wait();
+    let _ = fs::remove_dir_all(&dir);
+}

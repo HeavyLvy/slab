@@ -43,6 +43,7 @@ slab new my_project              # Slab.toml + src/main.slab
 cd my_project
 slab build                       # -> build/<name>/ (a data pack folder), like `cargo build`
 slab build --zip                 # also writes <name>.zip
+slab build -w -o /path/to/world/datapacks/my_pack   # rebuild into the world each time a source file is saved, then `/reload`
 slab check                       # type-check only
 ```
 

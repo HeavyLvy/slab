@@ -21,6 +21,7 @@ main.slab and no Slab.toml also works.)
 build options (they override Slab.toml):
   -o, --out DIR          write the data pack folder here (default: <project>/build/<namespace>)
   --zip                  also write DIR.zip
+  -w, --watch            keep running and build again whenever a source file is saved
   --namespace NAME       data pack namespace (default: from Slab.toml, else the directory's name)
   --description TEXT     description shown by /datapack list
   --abort-on-unwrap      a failed unwrap()/expect() also runs `datapack disable` for the pack
@@ -95,11 +96,13 @@ struct BuildArgs {
     path: PathBuf,
     out: Option<PathBuf>,
     zip: bool,
+    /// Rebuild whenever a source file changes (`--watch`).
+    watch: bool,
     opts: Options,
 }
 
 fn parse_build_args(args: &[String]) -> Result<BuildArgs, String> {
-    let mut b = BuildArgs { path: PathBuf::from("."), out: None, zip: false, opts: Options::default() };
+    let mut b = BuildArgs { path: PathBuf::from("."), out: None, zip: false, watch: false, opts: Options::default() };
     let mut path_set = false;
     let mut it = args.iter();
     while let Some(a) = it.next() {
@@ -107,6 +110,7 @@ fn parse_build_args(args: &[String]) -> Result<BuildArgs, String> {
         match a.as_str() {
             "-o" | "--out" => b.out = Some(PathBuf::from(value(a)?)),
             "--zip" => b.zip = true,
+            "-w" | "--watch" => b.watch = true,
             "--namespace" => b.opts.namespace = Some(value(a)?),
             "--description" => b.opts.description = Some(value(a)?),
             "--abort-on-unwrap" => b.opts.abort_on_unwrap = true,
@@ -132,6 +136,77 @@ fn build(args: &[String]) -> ExitCode {
         Ok(b) => b,
         Err(m) => return usage_error(&m),
     };
+    if b.watch { watch(&b) } else { build_once(&b) }
+}
+
+/// The files a build reads: every `.slab` file under the source root, and `Slab.toml`, with
+/// their modification times and sizes. A change in this list means "build again".
+fn source_snapshot(path: &Path) -> Vec<(PathBuf, Option<std::time::SystemTime>, u64)> {
+    fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
+        for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+            let p = entry.path();
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if p.is_dir() {
+                // build output and tool folders are not source
+                if !name.starts_with('.') && !matches!(name.as_str(), "build" | "target" | "node_modules") {
+                    walk(&p, out);
+                }
+            } else if p.extension().is_some_and(|x| x == "slab") {
+                out.push(p);
+            }
+        }
+    }
+    let mut files = Vec::new();
+    // when the entry cannot be found there is nothing to watch yet; the build says why
+    if let Ok(root_file) = slab::project::find_root_file(path)
+        && let Some(root) = root_file.parent()
+    {
+        walk(root, &mut files);
+        if let Some(manifest) = root.parent().map(|p| p.join(slab::manifest::FILE)).filter(|m| m.is_file()) {
+            files.push(manifest);
+        }
+    }
+    files.sort();
+    files
+        .into_iter()
+        .map(|p| {
+            let meta = std::fs::metadata(&p).ok();
+            let (modified, len) = meta.map_or((None, 0), |m| (m.modified().ok(), m.len()));
+            (p, modified, len)
+        })
+        .collect()
+}
+
+/// `slab build --watch`: build, then build again whenever a source file is saved, added or
+/// removed. Mistakes are shown and watching goes on; stop it with Ctrl+C.
+fn watch(b: &BuildArgs) -> ExitCode {
+    let mut runs = 0;
+    loop {
+        // taken before the build, so a save during the build triggers the next one
+        let snapshot = source_snapshot(&b.path);
+        runs += 1;
+        let started = std::time::Instant::now();
+        let status = build_once(b);
+        if status == ExitCode::SUCCESS {
+            println!("[watch {runs}] done in {} ms; `/reload` in the game to load it", started.elapsed().as_millis());
+        } else {
+            eprintln!("[watch {runs}] failed, fix the errors above and save again");
+        }
+        if runs == 1 {
+            println!("watching {} source file(s); Ctrl+C stops", snapshot.len());
+        }
+        loop {
+            std::thread::sleep(std::time::Duration::from_millis(250));
+            if source_snapshot(&b.path) != snapshot {
+                // an editor may write several files; let it finish before building
+                std::thread::sleep(std::time::Duration::from_millis(150));
+                break;
+            }
+        }
+    }
+}
+
+fn build_once(b: &BuildArgs) -> ExitCode {
     let compiled = match compile::compile(&b.path, &b.opts) {
         Ok(c) => c,
         Err(e) => {
