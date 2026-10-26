@@ -3,3 +3,8 @@
 build/
 
 # editors/vscode has its own .gitignore (node_modules, dist, *.vsix)
+
+# python and OS droppings
+__pycache__/
+*.pyc
+.DS_Store

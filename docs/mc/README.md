@@ -2,7 +2,7 @@
 
 Target: **Java Edition 26.3 "Wilderness Bound"**, released 2026-09-15. Data pack format **121.0**, resource pack format 97.1, protocol 777, data version 5023, requires Java 25.
 
-These docs were compiled from minecraft.wiki, the misode.github.io technical changelog and other web sources. Each section lists its sources. `**UNVERIFIED**` marks claims that weren't confirmed; verify and then fix the doc.
+These docs were compiled from minecraft.wiki, the misode.github.io technical changelog and other web sources. Each section lists its sources. They are research notes written for this project, not copies of those pages; where a page of minecraft.wiki (licensed CC BY-NC-SA 3.0) was the source, the facts are restated and the page is credited. `**UNVERIFIED**` marks claims that weren't confirmed; verify and then fix the doc.
 
 | File | Contents |
 |---|---|

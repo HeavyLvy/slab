@@ -101,6 +101,13 @@ fn missing_module_and_missing_main() {
 }
 
 #[test]
+fn version_is_printed() {
+    let o = slab(&["--version"]);
+    assert!(o.status.success());
+    assert_eq!(String::from_utf8_lossy(&o.stdout), format!("slab {}\n", env!("CARGO_PKG_VERSION")));
+}
+
+#[test]
 fn usage_errors() {
     assert_eq!(slab(&[]).status.code(), Some(2));
     assert_eq!(slab(&["frobnicate"]).status.code(), Some(2));

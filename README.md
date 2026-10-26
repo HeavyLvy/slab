@@ -1,6 +1,13 @@
 # slab
 
-A small, statically typed language that compiles to a Minecraft Java **26.3** data pack.
+[![CI](https://github.com/HeavyLvy/slab/actions/workflows/ci.yml/badge.svg)](https://github.com/HeavyLvy/slab/actions/workflows/ci.yml)
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+
+A small, statically typed language that compiles to a Minecraft Java **26.3** data pack. Write functions, structs, enums and loops; get a folder of `.mcfunction` files you drop into a world.
+
+> **Status:** early (0.1). The compiler is checked against a real 26.3 dedicated server, but the language can still change. Issues and ideas are welcome.
+>
+> slab is an unofficial tool. It is not made by, approved by or associated with Mojang or Microsoft. "Minecraft" is a trademark of Mojang Synergies AB; this repository contains no game files.
 
 ```slab
 // src/main.slab
@@ -37,7 +44,7 @@ pub fn clamp(x: int, lo: int, hi: int) -> int {
 
 ## Documentation
 
-The documentation is a book in `docs/` (a guide, the command line and `Slab.toml` references, a standard library reference written from the library's own sources, how the compiler works, and notes on Minecraft 26.3):
+Read it online at <https://heavylvy.github.io/slab/>. The documentation is a book in `docs/` (a guide, the command line and `Slab.toml` references, a standard library reference written from the library's own sources, how the compiler works, and notes on Minecraft 26.3):
 
 ```
 cargo install mdbook --locked   # once
@@ -57,6 +64,7 @@ slab build                       # -> build/<name>/ (a data pack folder), like `
 slab build --zip                 # also writes <name>.zip
 slab build -w -o /path/to/world/datapacks/my_pack   # rebuild into the world each time a source file is saved, then `/reload`
 slab check                       # type-check only
+slab fmt                         # format the source (--check for CI)
 ```
 
 Copy the folder (or zip) into `<world>/datapacks/` and `/reload`. To remove everything the pack created (scoreboard, storage, summoned entities, added tags), run `/function <name>:_uninstall` and then `/datapack disable` it.
@@ -68,7 +76,10 @@ Copy the folder (or zip) into `<world>/datapacks/` and `/reload`. To remove ever
 * `#[load]`, `#[tick]` and `#[every(N)]` register functions; `as`/`at`/`in`/`positioned`/... blocks map to `/execute`.
 * Errors point at the exact file and line; the compiler checks the whole program before writing anything.
 
-Limits worth knowing: no floats, no string concatenation (f-strings can only be printed), and a loop can run about 21,000 iterations per tick (Minecraft's command limit).
+* `str` values can be joined with `+` and used in commands; `NearDouble`/`FarDouble` give decimal positions; `match`, `Option`/`Result` and enums are there; `task fn` runs long loops over many ticks.
+* `slab fmt` formats code, and names that break the naming conventions are warned about (see `docs/reference/style.md`).
+
+Limits worth knowing: no general `float` type yet, and one function call chain may run at most 65,536 commands per tick (Minecraft's limit; the compiler warns, and `task fn` spreads the work over ticks).
 
 ## Install
 
@@ -103,7 +114,8 @@ writes it from the compiler's own keyword/builtin lists, and a test fails if it 
 * `docs/lang/` - the language: syntax, semantics, modules, how it compiles.
 * `docs/lang/compiled-output.md` - what each piece of slab code turns into, command by command (checked against the compiler by a test).
 * `examples/` - `slab/` single files, `projects/hello` a small multi-file project.
-* `CLAUDE.md` - how the compiler is organised and how it is tested against a real server (`tools/verify_all.sh`).
+* [CONTRIBUTING.md](CONTRIBUTING.md) - building, testing, and how the compiler is organised.
+* `CLAUDE.md` - the same notes in the form the project's AI coding assistant reads.
 
 ## License
 

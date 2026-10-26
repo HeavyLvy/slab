@@ -13,6 +13,7 @@ const USAGE: &str = "usage:
   slab check [PATH]             parse and type-check a project, reporting errors and warnings
   slab fmt [PATH...] [options]  format source files in place (a project, a directory or files)
   slab parse <file.slab>        parse one file and print its syntax tree
+  slab --version                print the version
 
 A project is a directory with a Slab.toml and its code in src/, where src/main.slab is the root
 module. PATH is that directory, or any directory inside it (default: .), or the path of main.slab.
@@ -61,6 +62,10 @@ fn main() -> ExitCode {
             [path] => parse_file(path),
             _ => usage_error("`slab parse` takes one file"),
         },
+        "-V" | "--version" | "version" => {
+            println!("slab {}", env!("CARGO_PKG_VERSION"));
+            ExitCode::SUCCESS
+        }
         "-h" | "--help" | "help" => {
             println!("{USAGE}");
             ExitCode::SUCCESS

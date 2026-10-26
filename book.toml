@@ -12,5 +12,6 @@ build-dir = "target/book"
 [output.html]
 default-theme = "navy"
 preferred-dark-theme = "navy"
-git-repository-url = ""
+git-repository-url = "https://github.com/HeavyLvy/slab"
+edit-url-template = "https://github.com/HeavyLvy/slab/edit/main/{path}"
 additional-js = ["docs/theme/slab-highlight.js"]

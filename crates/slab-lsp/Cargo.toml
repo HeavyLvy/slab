@@ -4,6 +4,13 @@ version = "0.1.0"
 edition = "2024"
 authors = ["HeavyLvy <90272914+HeavyLvy@users.noreply.github.com>"]
 license = "Apache-2.0"
+description = "Language server for the slab language (diagnostics, hover, completion, formatting)"
+repository = "https://github.com/HeavyLvy/slab"
+homepage = "https://heavylvy.github.io/slab/"
+readme = "../../README.md"
+keywords = ["minecraft", "datapack", "compiler", "language"]
+categories = ["compilers", "game-development"]
+rust-version = "1.88"
 
 [dependencies]
 slab = { path = "../.." }
