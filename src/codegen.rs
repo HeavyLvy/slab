@@ -1747,7 +1747,7 @@ impl<'a> Gen<'a> {
                             self.err(args[8].span, "a particle count cannot be negative");
                             return None;
                         }
-                        _ => Num::Hole(self.hole(holes, &args[8])),
+                        _ => Num::Hole(self.hole(holes, args[8])),
                     };
                     let mode = match args.get(9).and_then(|e| const_str(e)).as_deref() {
                         None => None,
