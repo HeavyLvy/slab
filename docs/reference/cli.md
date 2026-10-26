@@ -10,7 +10,7 @@ slab parse <file.slab>        parse one file and print its syntax tree
 slab --version                print the version
 ```
 
-`PATH` is a project directory, or any directory inside one (the default is `.`, found like Cargo finds `Cargo.toml`), or the path of a `main.slab`. A project is a directory with a [`Slab.toml`](slab-toml.md) and its code in `src/`; `src/main.slab` is the root module and `import a::b;` loads `src/a/b.slab`. A bare directory with a `main.slab` and no `Slab.toml` also works.
+`PATH` is a project directory, or any directory inside one (the default is `.`; slab looks for a `Slab.toml` in that directory and then in each parent directory), or the path of a `main.slab`. A project is a directory with a [`Slab.toml`](slab-toml.md) and its code in `src/`; `src/main.slab` is the root module and `import a::b;` loads `src/a/b.slab`. A bare directory with a `main.slab` and no `Slab.toml` also works.
 
 ## `slab build`
 

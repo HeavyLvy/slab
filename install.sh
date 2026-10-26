@@ -5,7 +5,7 @@
 #   curl -fsSL https://raw.githubusercontent.com/HeavyLvy/slab/main/install.sh | sh
 #
 # Linux (x86_64) and macOS (Apple silicon). On Windows use install.ps1; elsewhere
-# `cargo install slab-lang slab-lsp` builds it from source.
+# building from source (`cargo install slab-lang slab-lsp`, needs Rust from https://rustup.rs) works anywhere.
 #
 # Environment:
 #   SLAB_VERSION      install this version (0.1.0 or v0.1.0) instead of the latest
@@ -26,7 +26,7 @@ arch=$(uname -m)
 case "$os-$arch" in
     Linux-x86_64 | Linux-amd64) platform="linux-x86_64" ;;
     Darwin-arm64 | Darwin-aarch64) platform="macos-arm64" ;;
-    *) fail "no prebuilt binaries for $os $arch; build from source with: cargo install slab-lang slab-lsp" ;;
+    *) fail "no prebuilt binaries for $os $arch; build from source: install Rust from https://rustup.rs, then run: cargo install slab-lang slab-lsp" ;;
 esac
 
 if [ -n "${SLAB_VERSION:-}" ]; then

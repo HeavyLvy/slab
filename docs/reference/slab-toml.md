@@ -1,6 +1,6 @@
 # Slab.toml
 
-`Slab.toml` describes a project, the way `Cargo.toml` does for a Rust one. It sits at the top of the project, next to the `src/` folder.
+`Slab.toml` describes a project: its name, the Minecraft version it is for and the build options. It sits at the top of the project, next to the `src/` folder.
 
 ```toml
 [project]

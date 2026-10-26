@@ -1,14 +1,16 @@
 # Getting started
 
+## What you need
+
+* **Minecraft: Java Edition 26.3** (slab can also target 26.1 and 26.2). Bedrock Edition is not supported.
+* **The `slab` program**, one small download. You do **not** need to know Rust or install it, and there is nothing else to set up.
+* **A text editor.** Any will do; [Visual Studio Code](https://code.visualstudio.com/) with the slab extension is the best fit, because it shows errors as you type.
+
+slab is used from a *terminal* (a window where you type commands): on Windows open **PowerShell** from the Start menu, on macOS open **Terminal** (in Applications → Utilities), on Linux open your terminal app.
+
 ## Install
 
-There are two programs: `slab`, the compiler you run in a terminal, and `slab-lsp`, the language server that gives editors errors, hover and completion. Pick one way to get them.
-
-**Linux and macOS** (x86_64 Linux, Apple silicon): download the latest release.
-
-```text
-curl -fsSL https://raw.githubusercontent.com/HeavyLvy/slab/main/install.sh | sh
-```
+The install command downloads the latest release and puts `slab` where your terminal can find it. Paste it into the terminal and press Enter.
 
 **Windows** (PowerShell):
 
@@ -16,27 +18,45 @@ curl -fsSL https://raw.githubusercontent.com/HeavyLvy/slab/main/install.sh | sh
 irm https://raw.githubusercontent.com/HeavyLvy/slab/main/install.ps1 | iex
 ```
 
-Both put `slab` and `slab-lsp` in a per-user folder (`~/.local/bin`, or `%LOCALAPPDATA%\slab\bin`) and tell you if it is not on your `PATH`. Set `SLAB_VERSION` to install an older version and `SLAB_INSTALL_DIR` to choose the folder. The scripts are short; read them first if you like.
-
-**With Rust**, on any platform:
+**macOS** (Apple silicon) and **Linux** (x86_64):
 
 ```text
-cargo install slab-lang slab-lsp                   # builds from crates.io
-cargo binstall slab-lang slab-lsp                  # or download the prebuilt release (needs cargo-binstall)
-cargo install --git https://github.com/HeavyLvy/slab slab-lang slab-lsp   # the newest, unreleased code
+curl -fsSL https://raw.githubusercontent.com/HeavyLvy/slab/main/install.sh | sh
 ```
 
-(`slab-lang` is the crate that installs the `slab` command.) You can also download the archive for your platform from the [releases page](https://github.com/HeavyLvy/slab/releases) and unpack it anywhere on your `PATH`.
+Then **close the terminal and open a new one** (so it notices the new program) and check it worked:
 
-Check it works with `slab --version`.
+```text
+slab --version
+```
+
+It should print `slab 0.1.0` (or a newer version). That is all: continue with [your first project](#your-first-project).
+
+The scripts are short and you can read them first ([install.sh](https://github.com/HeavyLvy/slab/blob/main/install.sh), [install.ps1](https://github.com/HeavyLvy/slab/blob/main/install.ps1)). They install two programs into a folder of your own (`~/.local/bin`, or `%LOCALAPPDATA%\slab\bin` on Windows), and change nothing else; no administrator rights are needed.
+
+### Without a script
+
+Download the archive for your system from the [releases page](https://github.com/HeavyLvy/slab/releases/latest) (`slab-<version>-windows-x86_64.zip`, `-macos-arm64.tar.gz` or `-linux-x86_64.tar.gz`) and unpack it. Inside are `slab` and `slab-lsp`. You can run `slab` from that folder (`./slab` or `.\slab.exe`), or move both files to a folder on your `PATH` to run it from anywhere.
+
+### Other computers (Intel Macs, ARM Linux, ...)
+
+There are no ready-made downloads for these yet, so slab has to be built from its source code, which needs the free Rust toolchain. Install Rust from [rustup.rs](https://rustup.rs) (it is one command or one installer), then:
+
+```text
+cargo install slab-lang slab-lsp
+```
+
+(`slab-lang` is the crate that installs the `slab` command.) Rust developers can also use `cargo binstall slab-lang slab-lsp` for the prebuilt files, or `cargo install --git https://github.com/HeavyLvy/slab slab-lang slab-lsp` for the newest, unreleased code.
 
 ### The editor extension
 
-For VS Code, install the **slab** extension (`heavylvy.slab-vscode`): search for it in the Extensions view, or run `code --install-extension heavylvy.slab-vscode`. VSCodium and other editors that use [Open VSX](https://open-vsx.org/) find it there too. It gives highlighting, errors and warnings as you type, hover, completion, go to definition, an outline and formatting.
+In VS Code, open the Extensions view (the four squares on the left, or Ctrl+Shift+X), search for **slab** and click Install. Or from a terminal: `code --install-extension heavylvy.slab-vscode`. VSCodium and other editors that use [Open VSX](https://open-vsx.org/) find it there too. It gives highlighting, errors and warnings as you type, hover, completion, go to definition, an outline and formatting.
 
-The version for your platform (Windows x64, macOS Apple silicon, Linux x64) already contains the language server. On other platforms it looks for `slab-lsp` in your `PATH` and in `~/.cargo/bin`, so install it as above, or set *slab: Server Path* in the settings. A `.vsix` file for each platform is also attached to every release (*Extensions: Install from VSIX...*).
+On Windows, macOS (Apple silicon) and Linux (x64) the extension already contains the language server (`slab-lsp`), so there is nothing more to do. On other computers it looks for `slab-lsp` in your `PATH` and in `~/.cargo/bin`, so install it as above, or set *slab: Server Path* in the settings. A `.vsix` file for each system is also attached to every release (*Extensions: Install from VSIX...*).
 
-To remove slab again: delete the two programs (or `cargo uninstall slab-lang slab-lsp`) and uninstall the extension.
+### Removing slab
+
+Delete the two programs from the folder above (or run `cargo uninstall slab-lang slab-lsp` if you used cargo) and uninstall the extension.
 
 ## Your first project
 
@@ -78,7 +98,7 @@ writes a data pack folder to `build/my_pack/`. The name `my_pack` is the pack's 
 
 ## Put it in a world
 
-A data pack lives in a world's `datapacks` folder. Build straight into it:
+A data pack lives in a world's `datapacks` folder, inside the Minecraft folder: `%APPDATA%\.minecraft` on Windows, `~/Library/Application Support/minecraft` on macOS, `~/.minecraft` on Linux (a launcher such as Prism or CurseForge keeps each instance's folder somewhere of its own: look for "open folder" in its menu). Build straight into it:
 
 ```text
 slab build -o "<minecraft folder>/saves/<world>/datapacks/my_pack"

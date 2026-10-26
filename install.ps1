@@ -15,7 +15,7 @@ $repo = 'HeavyLvy/slab'
 $dir = if ($env:SLAB_INSTALL_DIR) { $env:SLAB_INSTALL_DIR } else { Join-Path $env:LOCALAPPDATA 'slab\bin' }
 
 if ($env:PROCESSOR_ARCHITECTURE -ne 'AMD64') {
-    throw "no prebuilt binaries for $env:PROCESSOR_ARCHITECTURE; build from source with: cargo install slab-lang slab-lsp"
+    throw "no prebuilt binaries for $env:PROCESSOR_ARCHITECTURE; build from source: install Rust from https://rustup.rs, then run: cargo install slab-lang slab-lsp"
 }
 
 if ($env:SLAB_VERSION) {

@@ -2,7 +2,7 @@
 
 ## Naming
 
-slab follows Rust's conventions, and `slab check` and `slab build` warn about names that break them. A warning names the spelling it would like:
+slab uses the naming conventions most modern languages share (they are Rust's), and `slab check` and `slab build` warn about names that break them. A warning names the spelling it would like:
 
 ```text
 warning: function `makeRing` should be snake_case

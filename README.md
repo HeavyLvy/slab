@@ -47,7 +47,7 @@ pub fn clamp(x: int, lo: int, hi: int) -> int {
 Read it online at <https://heavylvy.github.io/slab/>. The documentation is a book in `docs/` (a guide, the command line and `Slab.toml` references, a standard library reference written from the library's own sources, how the compiler works, and notes on Minecraft 26.3):
 
 ```
-cargo install mdbook --locked   # once
+cargo install mdbook --locked   # once (needs Rust; only for working on the docs)
 tools/docs.sh serve             # read it at http://localhost:3000, updated as you edit
 tools/docs.sh                   # build it into target/book (static HTML, host it anywhere)
 ```
@@ -55,6 +55,8 @@ tools/docs.sh                   # build it into target/book (static HTML, host i
 `.github/workflows/docs.yml` publishes it with GitHub Pages (Settings -> Pages -> Source: GitHub Actions).
 
 ## Install
+
+slab is one small download; **you do not need Rust, Cargo or any other tools**. Paste one line into a terminal (PowerShell on Windows, Terminal on macOS):
 
 Linux (x86_64) and macOS (Apple silicon):
 
@@ -68,7 +70,9 @@ Windows (PowerShell):
 irm https://raw.githubusercontent.com/HeavyLvy/slab/main/install.ps1 | iex
 ```
 
-Or, with Rust, on any platform: `cargo install slab-lang slab-lsp` (builds from crates.io; the crate `slab-lang` installs the `slab` command), `cargo binstall slab-lang slab-lsp` (prebuilt), or `cargo install --git https://github.com/HeavyLvy/slab slab-lang slab-lsp` (the newest code). Prebuilt archives are on the [releases page](https://github.com/HeavyLvy/slab/releases).
+Then open a new terminal and run `slab --version`. Prefer not to run a script? Download and unpack the archive for your system from the [releases page](https://github.com/HeavyLvy/slab/releases). [Getting started](https://heavylvy.github.io/slab/guide/getting-started.html) walks through it step by step.
+
+Only if there is no download for your computer (Intel Macs, ARM Linux), or if you are a Rust developer: `cargo install slab-lang slab-lsp` builds from crates.io (the crate `slab-lang` installs the `slab` command), `cargo binstall slab-lang slab-lsp` fetches the prebuilt files, and `cargo install --git https://github.com/HeavyLvy/slab slab-lang slab-lsp` gets the newest code.
 
 For VS Code, install the **slab** extension (`code --install-extension heavylvy.slab-vscode`, or search the Extensions view; on VSCodium it comes from [Open VSX](https://open-vsx.org/)). It highlights `.slab` files immediately and, with the `slab-lsp` language server (bundled in the Windows, macOS and Linux versions), adds live errors and warnings from the real compiler, hover with types and builtin docs, go to definition, completion, an outline and formatting. The grammar is generated: `crates/slab-lsp` writes it from the compiler's own keyword/builtin lists, and a test fails if it goes stale.
 
@@ -79,7 +83,7 @@ Working on slab itself: `tools/dev-install.sh` builds this checkout and installs
 ```
 slab new my_project              # Slab.toml + src/main.slab
 cd my_project
-slab build                       # -> build/<name>/ (a data pack folder), like `cargo build`
+slab build                       # -> build/<name>/ (a data pack folder)
 slab build --zip                 # also writes <name>.zip
 slab build -w -o /path/to/world/datapacks/my_pack   # rebuild into the world each time a source file is saved, then `/reload`
 slab check                       # type-check only

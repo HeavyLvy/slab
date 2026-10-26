@@ -34,8 +34,7 @@ data packs (see `README.md` in the repository root).
 The Windows (x64), macOS (Apple silicon) and Linux (x64) versions of the extension contain the
 language server, so there is nothing else to install for the editor features. To build and run
 programs you also need the `slab` command: see
-[Install](https://heavylvy.github.io/slab/guide/getting-started.html#install) (a one-line script, or
-`cargo install slab-lang slab-lsp`).
+[Install](https://heavylvy.github.io/slab/guide/getting-started.html#install) (a one-line command; no Rust needed).
 
 On other platforms the extension looks for `slab-lsp` on your `PATH` and in `~/.cargo/bin`;
 install it with `cargo install slab-lsp`, or set *slab: Server Path* (`slab.server.path`) to

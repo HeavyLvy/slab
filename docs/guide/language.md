@@ -1,6 +1,6 @@
 # The language
 
-slab looks like Rust: braces, `let`, `fn`, `->`, `::` for paths. Every example on this page is checked by the compiler when the documentation is built, so what you see works.
+slab uses braces, `let`, `fn`, `->` and `::` for paths, so if you have seen Rust, TypeScript, Swift or Kotlin it will look familiar; if not, this page explains each piece. Every example on this page is checked by the compiler when the documentation is built, so what you see works.
 
 ## Values and variables
 

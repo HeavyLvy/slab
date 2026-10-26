@@ -1,6 +1,6 @@
 # slab
 
-**slab** is a small, statically typed programming language that compiles to a Minecraft Java Edition **data pack**. You write code that looks like Rust, and `slab build` turns it into the `.mcfunction` files, scoreboards and storage the game runs.
+**slab** is a small, statically typed programming language that compiles to a Minecraft Java Edition **data pack**. You write code in a familiar, braces-and-types style (it reads a bit like Rust or TypeScript, but you need to know neither), and `slab build` turns it into the `.mcfunction` files, scoreboards and storage the game runs.
 
 ```slab
 import std::print;
@@ -42,7 +42,7 @@ Numbers (`int`, `bool`) live on the scoreboard; strings, lists, structs and enum
 
 ## Where to start
 
-* New here? [**Getting started**](guide/getting-started.md): install, make a project, load it into a world.
+* New here? [**Getting started**](guide/getting-started.md): install (one command, no Rust or other tools needed), make a project, load it into a world.
 * Learning the language? [**The language**](guide/language.md), then [**Structs, enums and match**](guide/data.md), then [**Talking to Minecraft**](guide/minecraft.md).
 * Looking something up? The [**command line**](reference/cli.md), [**`Slab.toml`**](reference/slab-toml.md) and the [**standard library**](reference/std.md) references.
 * Curious how it works? The **Compiler internals** section, and the **Minecraft notes** with what was learned by running the output on a real server.
