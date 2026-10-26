@@ -50,8 +50,8 @@ A release can publish more than the GitHub release page (the extension is not on
 
 | Secret | Publishes | Where the token comes from |
 |---|---|---|
-| `VSCE_PAT` | the VS Code extension to the Marketplace | an Azure DevOps personal access token with the *Marketplace: Manage* scope for all accessible organizations, for the publisher `heavylvy` created at <https://marketplace.visualstudio.com/manage> |
-| `OVSX_PAT` | the same packages to Open VSX | an access token from <https://open-vsx.org/user-settings/tokens> (sign in with GitHub, sign the publisher agreement, then `npx ovsx create-namespace heavylvy -p <token>` once) |
+| `VSCE_PAT` | the VS Code extension to the Marketplace | an Azure DevOps personal access token with the *Marketplace: Manage* scope for all accessible organizations, for the publisher `HeavyLvy` created at <https://marketplace.visualstudio.com/manage> |
+| `OVSX_PAT` | the same packages to Open VSX | an access token from <https://open-vsx.org/user-settings/tokens> (sign in with GitHub, sign the publisher agreement, then `npx ovsx create-namespace HeavyLvy -p <token>` once) |
 | `CARGO_REGISTRY_TOKEN` | `slab-lang` and `slab-lsp` to crates.io | a token from <https://crates.io/settings/tokens> with the *publish-new* and *publish-update* scopes |
 
 The extension is published as one package per platform with the language server inside (Linux x64, macOS arm64, Windows x64) plus a universal one that finds `slab-lsp` on `PATH`. To publish a release's extension again, run the `publish-extension` workflow by hand with the tag.

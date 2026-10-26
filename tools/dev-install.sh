@@ -10,7 +10,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-EXTENSION_ID="heavylvy.slab-vscode"
+EXTENSION_ID="HeavyLvy.slab-vscode"
 cli=1
 extension=1
 dry=0
