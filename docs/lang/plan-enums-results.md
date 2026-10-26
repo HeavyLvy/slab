@@ -1,3 +1,5 @@
+> **Superseded in part:** the plan below has a separate `EntityId` handle and an `Entity` snapshot struct. They were merged: there is one type, `game::Entity` (the handle), with all the methods; there is no snapshot struct and no `fetch`. See `docs/lang/entities.md`.
+
 # Plan: a standard library written in slab, dynamic selectors, enums, Result, match, run_command, equality, richer entities
 
 Status: **draft for review, nothing implemented.** "(decided)" marks what you already chose.

@@ -102,7 +102,7 @@ impl fmt::Display for TyDisplay<'_> {
                 Ok(())
             }
             Ty::Param(i) => write!(f, "T{i}"),
-            Ty::Entity => f.write_str("EntityId"),
+            Ty::Entity => f.write_str("Entity"),
             Ty::Selector => f.write_str("selector"),
             Ty::Coord => f.write_str("coordinate"),
             Ty::Error => f.write_str("{error}"),

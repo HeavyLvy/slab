@@ -120,7 +120,6 @@ global r_impl_unwrap_some: int = 0;
 global r_pos_x: int = 0;
 global r_pos_y: int = 0;
 global r_pos_z: int = 0;
-global r_pos_fetch: int = 0;
 global r_pos_alive: int = 0;
 global r_pos_gone: int = 0;
 global r_pos_sel: int = 0;
@@ -446,19 +445,19 @@ fn world_test() {
 }
 
 struct Duel {
-    left: EntityId,
-    right: EntityId,
+    left: Entity,
+    right: Entity,
 }
 
-fn raise(e: EntityId, y: int) -> bool {
+fn raise(e: Entity, y: int) -> bool {
     return tp(e, 8, y, 8);
 }
 
-fn spawn_at(x: int) -> EntityId {
+fn spawn_at(x: int) -> Entity {
     return summon("minecraft:marker", x, 64, 8);
 }
 
-// EntityId values: a variable holds an entity and acts on it. Run by the harness after world_test.
+// Entity values: a variable holds an entity and acts on it. Run by the harness after world_test.
 struct Pair2 { a: int, name: str, tags: list<str> }
 
 fn eq_str(a: str, b: str) -> bool { return a == b; }
@@ -896,7 +895,7 @@ fn selector_test() {
     r_sel_ntype = c;                     // none
 
     // a selector with a variable can become an entity, and works as a target
-    let picked: EntityId = @e[tag=seltest, tag=$t, limit=1];
+    let picked: Entity = @e[tag=seltest, tag=$t, limit=1];
     tag::add(picked, "picked");
     r_sel_picked = 0;
     if exists(@e[tag=picked]) { r_sel_picked = 1; }
@@ -985,7 +984,7 @@ fn entity_test() {
     if !exists(b) { r_ent_after_kill = 1; }
     if !tp(b, 0, 70, 0) { r_ent_stale_tp = 1; }
 
-    // `EntityId` methods are written in slab (game.slab) over `run_command`: the position of an
+    // `Entity` methods are written in slab (game.slab) over `run_command`: the position of an
     // entity. The chunk 0 0 is the only one loaded; the entity is moved to a fractional position
     // below ground with a command written as text, and the y is rounded down (-20.25 -> -21).
     let m = summon("minecraft:marker", 7, 80, 9);
@@ -996,11 +995,6 @@ fn entity_test() {
         r_pos_x = v.x;
         r_pos_y = v.y;
         r_pos_z = v.z;
-    }
-    let snap = m.fetch();
-    if snap.is_ok() {
-        let entity = snap.unwrap();
-        if entity.pos.z == 9 && entity.id == m { r_pos_fetch = 1; }
     }
     if m.is_alive() { r_pos_alive = 1; }
     let sel_text = m.selector();

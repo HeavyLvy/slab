@@ -15,7 +15,7 @@ slab is statically typed with local inference: every expression has a type known
 | `Name` | a `struct`, a compound of storable fields | command storage |
 | `Name<A, B>` | an `enum` with its type arguments, `Option<int>`, `Result<(), str>` (`docs/lang/enums.md`) | command storage |
 | `()` | no value (statements, functions without `->`); also the payload of `Ok(())` | - |
-| `game::EntityId` | a reference to one entity (`docs/lang/entities.md`); a built-in type | scoreboard (an int id) |
+| `game::Entity` | a reference to one entity (`docs/lang/entities.md`); a built-in type | scoreboard (an int id) |
 | selector | `@a[...]` literal | **not storable** (expression only) |
 | coordinate | `~`, `~1`, `^2` | **not storable** (expression only) |
 
@@ -61,7 +61,7 @@ Semantic analysis runs over the whole project at once: it first registers every 
 
 **`Option` and `Result` methods** (built into the standard library, `docs/lang/enums.md`): `is_some`, `is_none`, `unwrap`, `unwrap_or(default)`, `expect(message)` for `Option<T>`; `is_ok`, `is_err`, `unwrap`, `unwrap_or(default)`, `expect(message)`, `ok()` (-> `Option<T>`), `err()` (-> `Option<E>`) for `Result<T, E>`. `unwrap` and `expect` on a missing value cannot panic in a data pack: they print `slab: unwrap on None (main.slab:12)` (or your `expect` message) to chat and return from the function with a zero value of its return type. `slab build --abort-on-unwrap` also runs `datapack disable "file/<namespace>"` (`--pack-id` names another pack), which stops the whole pack. Inside a context block (`as @a { }`), which a `return` cannot leave, they only print.
 
-**Equality** (`==`, `!=`): both sides must have the same type, which can be any storable type: `int`, `bool`, `EntityId`, `str`, `list<T>` and structs (compared by contents, field by field and element by element; order matters for lists). A selector that matches one entity may stand on either side of an `EntityId` (`boss == @s`, `@s != @p`): it is converted to a handle first, and a selector that can match several entities is the usual error. `int` and `bool` compare as scores; everything else is compared in command storage (below). Selectors and `()` themselves cannot be compared.
+**Equality** (`==`, `!=`): both sides must have the same type, which can be any storable type: `int`, `bool`, `Entity`, `str`, `list<T>` and structs (compared by contents, field by field and element by element; order matters for lists). A selector that matches one entity may stand on either side of an `Entity` (`boss == @s`, `@s != @p`): it is converted to a handle first, and a selector that can match several entities is the usual error. `int` and `bool` compare as scores; everything else is compared in command storage (below). Selectors and `()` themselves cannot be compared.
 
 Builtins that act on the world return `bool`: **did the command work?** `if !tp(boss, 0, 70, 0) { ... }` catches a missing target. Ignoring the result is free (the plain command is emitted); using it costs one `execute store success`. "Worked" is Minecraft's own notion: it targeted something and changed something, so `tag::add` fails if the tag is already there, `setblock` fails if the block is unchanged, `kill`/`tp`/`effect::give` fail when nothing matches, and a run-time value out of range fails that one command.
 
@@ -77,7 +77,7 @@ Builtins that act on the world return `bool`: **did the command work?** `if !tp(
 | `game::effect::clear(sel)` | `bool` | |
 | `game::tp(sel, x, y, z)` | `bool` | each coordinate is any `int` expression or `~`/`^` |
 | `game::setblock(x, y, z, id)` | `bool` | `id` is any `str` |
-| `game::summon(id [, x, y, z])` | `game::EntityId` | `id` is any `str` |
+| `game::summon(id [, x, y, z])` | `game::Entity` | `id` is any `str` |
 
 Methods: `list.push(x)` (needs a mutable place), `list.len()`, `str.len()`. Whether the *backend* can lower each builtin yet is separate from this table; a builtin the backend lacks is reported by the lowering, not here.
 
@@ -85,7 +85,7 @@ Methods: `list.push(x)` (needs a mutable place), `list.len()`, `str.len()`. Whet
 
 `@e[type=zombie, distance=..10, tag=!boss, scores={kills=1..}, limit=1]` is converted to the datapack module's typed `Selector` during checking, so unknown keys, bad numbers/ranges/ids/names and repeated single-use options are compile errors with the span of the offending argument. Supported keys: `x y z dx dy dz distance x_rotation y_rotation level limit sort tag team name gamemode type predicate scores`. `nbt=` and `advancements=` are not supported yet.
 
-**Variables in selectors**: `$name` / `${expression}` in an option value is filled in at run time (`@e[tag=$t, distance=..${r * 2}, scores={kills=$min..}]`, `tag=!$t`, `tag=pre_$suffix`). The text-like options (`tag team name type gamemode`) take a `str`; the numeric ones (`limit x y z dx dy dz`, and each end of `distance x_rotation y_rotation level` and of a score range) take an `int`, as a whole value or as a range end (`..$r`, `$a..$b`), not mixed with other characters. `sort`, `predicate`, `nbt` and `advancements` cannot take a variable. The selector still works wherever a selector does (`for`, `as`/`at`, builtin targets, `objective[holder]`, `exists`). A selector with a variable is not provably one entity, so `let e: EntityId = @e[limit=$n]` is an error (a literal `limit=1` is needed). A value that is not valid where it lands (a tag with a space, an unknown entity type) makes that one command do nothing at run time.
+**Variables in selectors**: `$name` / `${expression}` in an option value is filled in at run time (`@e[tag=$t, distance=..${r * 2}, scores={kills=$min..}]`, `tag=!$t`, `tag=pre_$suffix`). The text-like options (`tag team name type gamemode`) take a `str`; the numeric ones (`limit x y z dx dy dz`, and each end of `distance x_rotation y_rotation level` and of a score range) take an `int`, as a whole value or as a range end (`..$r`, `$a..$b`), not mixed with other characters. `sort`, `predicate`, `nbt` and `advancements` cannot take a variable. The selector still works wherever a selector does (`for`, `as`/`at`, builtin targets, `objective[holder]`, `exists`). A selector with a variable is not provably one entity, so `let e: Entity = @e[limit=$n]` is an error (a literal `limit=1` is needed). A value that is not valid where it lands (a tag with a space, an unknown entity type) makes that one command do nothing at run time.
 
 ## Diagnostics
 

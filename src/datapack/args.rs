@@ -459,7 +459,7 @@ pub enum SelectorArg {
     Scores(Vec<(Objective, IntRange)>),
     /// `scores={obj=$(hN)}`: the one entity whose id score is the number supplied at run time
     /// (an entity handle). Matches at most one entity.
-    EntityId { objective: Objective, hole: Hole },
+    Entity { objective: Objective, hole: Hole },
     Tag { name: Word, negated: bool },
     Team { name: Word, negated: bool },
     /// Plain-text entity name (not JSON).
@@ -508,7 +508,7 @@ impl SelectorArg {
             SelectorArg::Distance(_) => "distance",
             SelectorArg::XRotation(_) => "x_rotation",
             SelectorArg::YRotation(_) => "y_rotation",
-            SelectorArg::Scores(_) | SelectorArg::EntityId { .. } => "scores",
+            SelectorArg::Scores(_) | SelectorArg::Entity { .. } => "scores",
             SelectorArg::Tag { .. } => "tag",
             SelectorArg::Team { .. } => "team",
             SelectorArg::Name { .. } => "name",
@@ -589,7 +589,7 @@ impl fmt::Display for SelectorArg {
                 }
                 f.write_char('}')
             }
-            SelectorArg::EntityId { objective, hole } => write!(f, "scores={{{objective}={hole}}}"),
+            SelectorArg::Entity { objective, hole } => write!(f, "scores={{{objective}={hole}}}"),
             SelectorArg::Tag { name, negated } => write!(f, "tag={}{name}", bang(*negated)),
             SelectorArg::Team { name, negated } => write!(f, "team={}{name}", bang(*negated)),
             SelectorArg::Name { name, negated } => {
@@ -722,7 +722,7 @@ impl Selector {
     /// searching at the first hit, and Minecraft refuses a selector that "allows more than one"
     /// entity in single-target arguments such as `scoreboard players get`.
     pub fn entity_id(objective: Objective, hole: Hole) -> Self {
-        Selector::e().arg(SelectorArg::EntityId { objective, hole }).limit(1)
+        Selector::e().arg(SelectorArg::Entity { objective, hole }).limit(1)
     }
 
     pub fn score(self, objective: Objective, range: IntRange) -> Self {
@@ -730,7 +730,7 @@ impl Selector {
     }
 
     /// Renumbers the run-time holes of the dynamic options (the caller allocates the real hole
-    /// numbers for the command being built). `EntityId` holes are not touched.
+    /// numbers for the command being built). `Entity` holes are not touched.
     pub fn remap_holes(&mut self, mut f: impl FnMut(Hole) -> Hole) {
         let mut map = |parts: &mut Vec<ArgPart>| {
             for p in parts {
@@ -756,7 +756,7 @@ impl Selector {
                 // `@n[limit=2]` is allowed and then matches several.
                 !self.args.iter().any(|a| matches!(a, SelectorArg::Limit(n) if *n > 1) || matches!(a, SelectorArg::Dynamic { key: DynKey::Limit, .. }))
             }
-            SelectorVar::A | SelectorVar::E => self.args.iter().any(|a| matches!(a, SelectorArg::Limit(1) | SelectorArg::EntityId { .. })),
+            SelectorVar::A | SelectorVar::E => self.args.iter().any(|a| matches!(a, SelectorArg::Limit(1) | SelectorArg::Entity { .. })),
         }
     }
 }

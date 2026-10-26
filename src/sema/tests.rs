@@ -195,9 +195,9 @@ fn equality_compares_stored_values_and_handles() {
     assert_eq!(e.len(), 2, "each selector is reported: {e:?}");
     one_error(&in_fn("print(@s == 1);"), "cannot apply `==` to `selector` and `int`");
     // an entity and a selector that matches one entity compare as entities, either way round
-    ok(&in_fn("let e: EntityId = @p; print(e == @s); print(@s == e); print(@s != @p); print(@e[limit=1, tag=x] == e);"));
-    one_error(&in_fn("let e: EntityId = @p; print(e == @e[tag=x]);"), "can match several entities");
-    one_error(&in_fn("let e: EntityId = @p; print(@a == e);"), "can match several entities");
+    ok(&in_fn("let e: Entity = @p; print(e == @s); print(@s == e); print(@s != @p); print(@e[limit=1, tag=x] == e);"));
+    one_error(&in_fn("let e: Entity = @p; print(e == @e[tag=x]);"), "can match several entities");
+    one_error(&in_fn("let e: Entity = @p; print(@a == e);"), "can match several entities");
     // text constants compare at compile time
     ok("const A: str = \"x\"; const SAME: bool = A == \"x\"; global g: bool = SAME;");
 }
@@ -311,7 +311,7 @@ fn method_mistakes() {
     one_error("fn f(self) {}", "`Self` is only available inside an `impl` block");
     one_error("struct S {} impl S { fn a(self) {} fn a(self) {} }", "`S` has two methods called `a`");
     one_error("enum E { A } impl E { fn A(self) {} }", "`E` already has a variant called `A`");
-    one_error("impl int { fn f(self) {} }", "methods can only be added to structs, enums and `EntityId`, not `int`");
+    one_error("impl int { fn f(self) {} }", "methods can only be added to structs, enums and `Entity`, not `int`");
     one_error("impl Nope { }", "unknown type `Nope`");
     one_error("struct S {} impl S { fn f(self); }", "method `f` has no body");
     one_error("struct S {} impl S { #[intrinsic(\"x\")] fn f(self); }", "only for the standard library");
@@ -506,7 +506,7 @@ fn selectors_are_validated_and_typed() {
     assert_eq!(e.len(), 2, "{e:?}");
     assert!(e[0].contains("unknown selector argument `tpye`"));
     assert!(e[1].contains("positive integer"));
-    one_error(&in_fn("kill(1);"), "expected a `selector` or an `EntityId`, found `int`");
+    one_error(&in_fn("kill(1);"), "expected a `selector` or an `Entity`, found `int`");
     one_error(&in_fn("let n = @s + 1;"), "cannot apply `+`");
 }
 
@@ -530,8 +530,8 @@ fn selector_options_can_use_variables() {
     one_error(&in_fn("kill(@e[tag=$nope]);"), "cannot find `nope`");
     one_error(&in_fn("let r = 1; kill(@e[sort=$r]);"), "cannot take a variable");
     // a limit chosen at run time is not provably one entity
-    one_error(&in_fn("let n = 1; let e: EntityId = @e[limit=$n];"), "can match several entities");
-    ok(&in_fn("let t = \"a\"; let e: EntityId = @e[tag=$t, limit=1]; print(e);"));
+    one_error(&in_fn("let n = 1; let e: Entity = @e[limit=$n];"), "can match several entities");
+    ok(&in_fn("let t = \"a\"; let e: Entity = @e[tag=$t, limit=1]; print(e);"));
 }
 
 #[test]
@@ -583,10 +583,10 @@ fn builtin_names_are_ordinary_names() {
 #[test]
 fn builtin_modules_use_double_colon_paths() {
     // fully qualified, with no import at all
-    let program = parse("fn f() { std::print(1); game::say(\"x\"); game::tag::add(@s, \"t\"); let e: game::EntityId = game::summon(\"minecraft:cow\"); game::effect::clear(e); }").unwrap();
+    let program = parse("fn f() { std::print(1); game::say(\"x\"); game::tag::add(@s, \"t\"); let e: game::Entity = game::summon(\"minecraft:cow\"); game::effect::clear(e); }").unwrap();
     assert!(check(&program).is_ok());
     // module aliases, item imports and globs
-    ok("import game::tag; import game::effect as fx; import game::summon as spawn; import game::EntityId as Mob; fn f() { tag::add(@s, \"t\"); fx::clear(@s); let m: Mob = spawn(\"minecraft:cow\"); kill(m); }");
+    ok("import game::tag; import game::effect as fx; import game::summon as spawn; import game::Entity as Mob; fn f() { tag::add(@s, \"t\"); fx::clear(@s); let m: Mob = spawn(\"minecraft:cow\"); kill(m); }");
     ok("import game::tag::{add, has}; fn f() { add(@s, \"t\"); print(has(@s, \"t\")); }");
     // mistakes
     one_error(&in_fn("game::nope();"), "module `game` has no item `nope`");
@@ -594,7 +594,7 @@ fn builtin_modules_use_double_colon_paths() {
     one_error(&in_fn("let e: game::Nope = 1;"), "module `game` has no type `Nope`");
     one_error(&in_fn("nope::say(\"x\");"), "cannot find module `nope`");
     one_error(&in_fn("game.say(\"x\");"), "`game` is a module");
-    one_error(&in_fn("let e = game::EntityId { };"), "cannot be built with a struct literal");
+    one_error(&in_fn("let e = game::Entity { };"), "cannot be built with a struct literal");
     one_error("import game::nope;", "module `game` has no item `nope`");
     one_error("import game::{nope};", "has no item `nope`");
     one_error("import game::say::*;", "is not a module");
@@ -625,7 +625,7 @@ fn objectives() {
 #[test]
 fn context_blocks() {
     ok(&in_fn("as @a[tag=ready] at @s positioned ~ ~1 ~ rotated 0 90 align xz anchored eyes { say(\"x\"); } in \"minecraft:the_nether\" { } facing 0 64 0 { }"));
-    one_error(&in_fn("as 1 { }"), "expected a `selector` or an `EntityId`, found `int`");
+    one_error(&in_fn("as 1 { }"), "expected a `selector` or an `Entity`, found `int`");
     one_error(&in_fn("positioned \"a\" 0 0 { }"), "expected a coordinate");
     one_error(&in_fn("align xx { }"), "invalid axes `xx`");
     one_error(&in_fn("align w { }"), "invalid axes");
@@ -685,7 +685,7 @@ fn bad_types() {
     one_error("fn f(a: list) {}", "`list` takes exactly one type argument");
     one_error("fn f(a: int<str>) {}", "does not take type arguments");
     one_error("struct S { a: list<Nope> }", "unknown type `Nope`");
-    one_error("global g: EntityId = 0;", "expected `EntityId`, found `int`");
+    one_error("global g: Entity = 0;", "expected `Entity`, found `int`");
 }
 
 // ------------------------------------------------------------------ entities
@@ -693,18 +693,18 @@ fn bad_types() {
 #[test]
 fn entity_values() {
     // a single-entity selector becomes a handle; `summon` returns one
-    ok(&in_fn("let me = @p; let boss = summon(\"minecraft:zombie\", 1, 64, 2); let e: EntityId = @s; let n = @n[type=zombie]; let f = @a[limit=1]; print(me); print(boss == e && n != f);"));
-    ok("struct Fight { boss: EntityId, helpers: list<EntityId> } fn pick() -> EntityId { return @r; } fn hit(e: EntityId) -> bool { return kill(e); } fn f() { let fight = Fight { boss: @p, helpers: [@s, pick()] }; hit(fight.boss); for h in fight.helpers { tp(h, 0, 70, 0); } }");
+    ok(&in_fn("let me = @p; let boss = summon(\"minecraft:zombie\", 1, 64, 2); let e: Entity = @s; let n = @n[type=zombie]; let f = @a[limit=1]; print(me); print(boss == e && n != f);"));
+    ok("struct Fight { boss: Entity, helpers: list<Entity> } fn pick() -> Entity { return @r; } fn hit(e: Entity) -> bool { return kill(e); } fn f() { let fight = Fight { boss: @p, helpers: [@s, pick()] }; hit(fight.boss); for h in fight.helpers { tp(h, 0, 70, 0); } }");
     // and usable as a target anywhere a selector is
     ok(&in_fn("let b = summon(\"minecraft:pig\"); kill(b); tp(b, 1, 2, 3); effect::give(b, \"speed\", 10s); tag::add(b, \"x\"); as b at b { say(\"hi\"); } print(exists(b)); print(tag::has(b, \"x\"));"));
-    ok("objective pts = \"dummy\"; fn f(b: EntityId) { pts[b] += 1; print(pts[b]); }");
+    ok("objective pts = \"dummy\"; fn f(b: Entity) { pts[b] += 1; print(pts[b]); }");
     // it is its own type
-    one_error(&in_fn("let e: EntityId = 5; print(e);"), "expected `EntityId`, found `int`");
-    one_error(&in_fn("let e = @p; let n: int = e; print(n);"), "expected `int`, found `EntityId`");
-    one_error(&in_fn("let e = @p; let b = e + 1; print(b);"), "cannot apply `+` to `EntityId` and `int`");
+    one_error(&in_fn("let e: Entity = 5; print(e);"), "expected `Entity`, found `int`");
+    one_error(&in_fn("let e = @p; let n: int = e; print(n);"), "expected `int`, found `Entity`");
+    one_error(&in_fn("let e = @p; let b = e + 1; print(b);"), "cannot apply `+` to `Entity` and `int`");
     // a selector that can match several entities is not one entity
-    one_error(&in_fn("let all: EntityId = @a; print(all);"), "can match several entities");
-    one_error("fn f(e: EntityId) {} fn g() { f(@e[type=pig]); }", "can match several entities");
+    one_error(&in_fn("let all: Entity = @a; print(all);"), "can match several entities");
+    one_error("fn f(e: Entity) {} fn g() { f(@e[type=pig]); }", "can match several entities");
     // a plain selector value is still not storable
     one_error(&in_fn("let a = @a[tag=x]; print(1);"), "can match several entities");
 }
@@ -812,7 +812,7 @@ fn for_over_a_selector_rejects_loop_jumps_and_assignment() {
 #[test]
 fn for_over_one_entity_selector_works_and_others_error() {
     ok(&in_fn("for e in @s { tp(e, 0, 70, 0); } for me in @p { tag::add(me, \"seen\"); }"));
-    one_error(&in_fn("let boss = summon(\"minecraft:zombie\", 0, 64, 0); for e in boss { tp(e, 0, 70, 0); }"), "cannot iterate over an `EntityId`");
+    one_error(&in_fn("let boss = summon(\"minecraft:zombie\", 0, 64, 0); for e in boss { tp(e, 0, 70, 0); }"), "cannot iterate over an `Entity`");
     one_error(&in_fn("for x in 1 { print(x); }"), "cannot iterate over `int`");
 }
 

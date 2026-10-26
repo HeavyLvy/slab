@@ -8,7 +8,7 @@ This page shows, for each kind of slab code, the Minecraft commands it becomes. 
 
 | slab | lives in | looks like |
 |---|---|---|
-| `int`, `bool` (and an `EntityId` handle) | the scoreboard, objective `demo` | holder `#fn.v_name` for a local, `#fn.t_N` for a temporary, `#g.name` for a global, `#ret` for a return value |
+| `int`, `bool` (and an `Entity` handle) | the scoreboard, objective `demo` | holder `#fn.v_name` for a local, `#fn.t_N` for a temporary, `#g.name` for a global, `#ret` for a return value |
 | `str`, `list`, structs | command storage `demo:vars` | `fn.v_name` for a local, `fn.t_N` for a temporary |
 | globals of those types | command storage `demo:globals` | `name` |
 | arguments of a command that are only known at run time | command storage `demo:macro` | keys `h0`, `h1`, ... (see "Minecraft commands" below) |
@@ -692,7 +692,7 @@ teleport @s ~ ~1 ~
 
 ## Entities
 
-An `EntityId` value is a number: an id stored as a score named `demo_id` on the entity itself. The first time an entity becomes a value it is given the next free id. Acting on it addresses `@e[scores={demo_id=N},limit=1]` with `N` filled in through a macro. `_ensure_id` and `_alloc_id` are small generated helpers.
+An `Entity` value is a number: an id stored as a score named `demo_id` on the entity itself. The first time an entity becomes a value it is given the next free id. Acting on it addresses `@e[scores={demo_id=N},limit=1]` with `N` filled in through a macro. `_ensure_id` and `_alloc_id` are small generated helpers.
 
 ```slab show=f,f/m0
 fn f() {
@@ -794,7 +794,7 @@ $kill @e[tag=$(h0),distance=..$(h1)]
 
 ## Equality
 
-`int`, `bool` and `EntityId` values compare as scores. Everything stored in command storage (strings, lists, structs) compares by contents. A stored string against a literal is one `execute if data` test:
+`int`, `bool` and `Entity` values compare as scores. Everything stored in command storage (strings, lists, structs) compares by contents. A stored string against a literal is one `execute if data` test:
 
 ```slab show=f
 fn f(a: str) -> bool {

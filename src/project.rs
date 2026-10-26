@@ -259,7 +259,7 @@ mod tests {
     #[test]
     fn built_in_modules_are_not_files() {
         // `std` and `game` need no file, for the module, its submodules and its items alike
-        let d = Dir::new("builtin", &[("main.slab", "import std::print; import game::*; import game::tag; import game::tag::{add}; import game::EntityId as E; fn main() {}")]);
+        let d = Dir::new("builtin", &[("main.slab", "import std::print; import game::*; import game::tag; import game::tag::{add}; import game::Entity as E; fn main() {}")]);
         let p = load(&d.0.join("main.slab")).ok().expect("loads");
         assert_eq!(names(&p), ["main"]);
     }

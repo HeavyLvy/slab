@@ -171,7 +171,7 @@ struct FnSig<'a> {
 enum TypeKey {
     Struct(StructId),
     Enum(EnumId),
-    /// The entity handle (`game::EntityId`).
+    /// The entity handle (`game::Entity`).
     Entity,
 }
 
@@ -915,7 +915,7 @@ impl<'a> Checker<'a> {
         let ret = match f.ret.as_ref().map(|t| t.name.name.as_str()) {
             None => BRet::Unit,
             Some("bool") => BRet::Bool,
-            Some("EntityId") => BRet::Entity,
+            Some("Entity") => BRet::Entity,
             Some("Result") => BRet::CommandResult,
             Some(other) => {
                 self.error(f.ret.as_ref().map_or(f.name.span, |t| t.span), format!("an intrinsic cannot return `{other}`"));
@@ -935,7 +935,7 @@ impl<'a> Checker<'a> {
         self.declare_value(&f.name, ValueSym::Builtin(idx), public);
     }
 
-    /// `#[lang("entity")] pub struct EntityId {}` in the standard library: the name stands for a
+    /// `#[lang("entity")] pub struct Entity {}` in the standard library: the name stands for a
     /// type the compiler provides.
     fn register_lang_type(&mut self, mi: usize, s: &'a ast::StructDecl, attr: &'a ast::Attr, public: bool) {
         if !self.mods[mi].std {
@@ -1018,10 +1018,10 @@ impl<'a> Checker<'a> {
             let (key, owner, type_name) = match &target {
                 Ty::Struct(id) => (Some(TypeKey::Struct(*id)), Some(self.structs[id.0].module), self.struct_names[id.0].clone()),
                 Ty::Enum(id, _) => (Some(TypeKey::Enum(*id)), Some(self.enums[id.0].module), self.enum_names[id.0].clone()),
-                Ty::Entity => (Some(TypeKey::Entity), self.mods[mi].std.then_some(mi), "EntityId".to_owned()),
+                Ty::Entity => (Some(TypeKey::Entity), self.mods[mi].std.then_some(mi), "Entity".to_owned()),
                 Ty::Error => (None, None, String::new()),
                 other => {
-                    let msg = format!("methods can only be added to structs, enums and `EntityId`, not `{}`", self.tn(other));
+                    let msg = format!("methods can only be added to structs, enums and `Entity`, not `{}`", self.tn(other));
                     self.error(d.target.span, msg);
                     (None, None, String::new())
                 }
@@ -1504,7 +1504,7 @@ impl<'a> Checker<'a> {
                 None => match self.prelude_types.get(name).cloned() {
                     Some(ty) => self.finish_type(ty, t),
                     None => {
-                        self.error_hint(t.span, format!("unknown type `{name}`"), "types are int, bool, str, list<T>, Option<T>, Result<T, E>, game::EntityId, and your structs and enums");
+                        self.error_hint(t.span, format!("unknown type `{name}`"), "types are int, bool, str, list<T>, Option<T>, Result<T, E>, game::Entity, and your structs and enums");
                         Ty::Error
                     }
                 },
@@ -2443,7 +2443,7 @@ impl<'a> Checker<'a> {
             Ty::List(t) => (**t).clone(),
             Ty::Error => Ty::Error,
             Ty::Entity => {
-                self.error_hint(iter.span, "cannot iterate over an `EntityId`", "an entity is exactly one: use it directly (`tp(name, ...)`) or act on it with `as`");
+                self.error_hint(iter.span, "cannot iterate over an `Entity`", "an entity is exactly one: use it directly (`tp(name, ...)`) or act on it with `as`");
                 Ty::Error
             }
             other => {
@@ -2480,7 +2480,7 @@ impl<'a> Checker<'a> {
     fn selector_operand(&mut self, e: &'a ast::Expr) -> Expr {
         let h = self.expr(e, None);
         if !matches!(h.ty, Ty::Selector | Ty::Entity | Ty::Error) {
-            let msg = format!("expected a `selector` or an `EntityId`, found `{}`", self.tn(&h.ty));
+            let msg = format!("expected a `selector` or an `Entity`, found `{}`", self.tn(&h.ty));
             self.error(h.span, msg);
         }
         h

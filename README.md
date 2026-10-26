@@ -51,7 +51,7 @@ Copy the folder (or zip) into `<world>/datapacks/` and `/reload`. To remove ever
 * A project is a directory with a `Slab.toml` (name, namespace, description, build options) and its code in `src/`; `src/main.slab` is the entry point. `import a::b;` loads `src/a/b.slab`; items are private unless `pub`. `slab new NAME` creates one, `slab init` turns an existing flat folder into one.
 * Variables work inside commands (`tp(@s, x, y, z)`, `xs[i]`, `effect::give(@s, "speed", secs * 20)`) - the compiler uses Minecraft's macro functions for you - and in text: `print(f"{name} has {n} points")`.
 * `int`/`bool` are stored on the scoreboard, `str`, `list<T>` and structs in command storage. Recursion, `for`, `while`, `loop`, `break`, `continue` all work.
-* Variables can hold entities (`let boss: EntityId = summon(..)`, `let me = @p`) and act on them (`tp(boss, ..)`, `as boss { }`, `points[boss] += 1`); commands that act on the world return whether they worked, so `if !tp(boss, 0, 70, 0) { .. }` catches a missing target.
+* Variables can hold entities (`let boss: Entity = summon(..)`, `let me = @p`) and act on them (`tp(boss, ..)`, `as boss { }`, `points[boss] += 1`); commands that act on the world return whether they worked, so `if !tp(boss, 0, 70, 0) { .. }` catches a missing target.
 * `#[load]`, `#[tick]` and `#[every(N)]` register functions; `as`/`at`/`in`/`positioned`/... blocks map to `/execute`.
 * Errors point at the exact file and line; the compiler checks the whole program before writing anything.
 

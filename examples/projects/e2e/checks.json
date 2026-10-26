@@ -717,10 +717,6 @@
   "expect": "has 9 [e2e]"
  },
  {
-  "cmd": "scoreboard players get #g.r_pos_fetch e2e",
-  "expect": "has 1 [e2e]"
- },
- {
   "cmd": "scoreboard players get #g.r_pos_alive e2e",
   "expect": "has 1 [e2e]"
  },

@@ -90,7 +90,7 @@ Enum values can be constants and global initialisers when their payload is const
 
 ## How they are stored
 
-A value is a compound in command storage: `{t: <variant index>, f0: .., f1: ..}`. `t` is the index in declaration order (`None` is 0 and `Some` 1; `Ok` is 0 and `Err` 1); the payload values are `f0`, `f1`, ... as NBT (an `int` is an int tag, a `bool` is 0 or 1, an `EntityId` is its id). A unit variant is `{t:0}`. See `docs/lang/compiled-output.md` ("Enums") for the commands a program produces, and `docs/lang/codegen.md` for the rest of the mechanism. Enums are `Data` values like lists and structs: copied when assigned, and removed from storage when the function that owns them ends.
+A value is a compound in command storage: `{t: <variant index>, f0: .., f1: ..}`. `t` is the index in declaration order (`None` is 0 and `Some` 1; `Ok` is 0 and `Err` 1); the payload values are `f0`, `f1`, ... as NBT (an `int` is an int tag, a `bool` is 0 or 1, an `Entity` is its id). A unit variant is `{t:0}`. See `docs/lang/compiled-output.md` ("Enums") for the commands a program produces, and `docs/lang/codegen.md` for the rest of the mechanism. Enums are `Data` values like lists and structs: copied when assigned, and removed from storage when the function that owns them ends.
 
 ## What comes next
 
