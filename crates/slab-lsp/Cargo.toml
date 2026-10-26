@@ -30,5 +30,5 @@ bin-dir = "slab-{ version }-windows-x86_64/{ bin }{ binary-ext }"
 
 [dependencies]
 slab = { package = "slab-lang", path = "../..", version = "0.1.0" }
-lsp-server = "0.7"
+lsp-server = "0.10"
 serde_json = "1"
