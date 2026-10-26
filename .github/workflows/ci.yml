@@ -44,5 +44,5 @@ jobs:
           cache-dependency-path: editors/vscode/package-lock.json
       - run: npm ci
       - run: npm run compile
-      # the package must be accepted by the marketplace tooling (icon, manifest, ignore rules)
+      # the .vsix must build (icon, manifest, ignore rules)
       - run: npm run package

@@ -29,6 +29,16 @@ data packs (see `README.md` in the repository root).
   module items after `a::`; enum variants and functions after `Type::`; types after `: `.
 * **Outline** of every file: functions, structs, globals, consts, objectives.
 
+## Install
+
+This extension is **not** on the VS Code Marketplace or Open VSX: we could not publish it there
+because of difficulties working with both. Download the `.vsix` for your system from the
+[latest release](https://github.com/HeavyLvy/slab/releases/latest)
+(`slab-vscode-win32-x64-<version>.vsix`, `slab-vscode-darwin-arm64-<version>.vsix`,
+`slab-vscode-linux-x64-<version>.vsix`, or the plain `slab-vscode-<version>.vsix`), then in VS Code
+open the Extensions view, click the `...` menu and choose **Install from VSIX...**, or run
+`code --install-extension <file>.vsix`. The slab install script does this for you.
+
 ## Setup
 
 The Windows (x64), macOS (Apple silicon) and Linux (x64) versions of the extension contain the

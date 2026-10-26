@@ -4,6 +4,8 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ## [Unreleased]
 
+- The VS Code extension is distributed only as `.vsix` files attached to each release; publishing to the VS Code Marketplace and Open VSX was dropped. The installation instructions explain installing a `.vsix`.
+
 ## [0.1.0] - 2026-10-25
 
 The first public release.

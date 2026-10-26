@@ -2,8 +2,9 @@
 # matches the versions in the repository, builds `slab` and `slab-lsp` for three platforms, the
 # VS Code extension (one package per platform with the language server inside, and a universal
 # one without), and creates the GitHub release with the changelog section as its notes.
-# Then it publishes to the VS Code Marketplace, Open VSX and crates.io, each only if its token
-# is set as a repository secret (VSCE_PAT, OVSX_PAT, CARGO_REGISTRY_TOKEN; see CONTRIBUTING.md).
+# The extension is distributed only as .vsix files attached to the release (it is not published to
+# the VS Code Marketplace or Open VSX). Last, it publishes the crates to crates.io when the
+# CARGO_REGISTRY_TOKEN repository secret is set (see CONTRIBUTING.md).
 name: release
 
 on:
@@ -120,13 +121,6 @@ jobs:
           flag=""
           case "$version" in *-*) flag="--prerelease" ;; esac
           gh release create "$GITHUB_REF_NAME" dist/* --title "slab $version" --notes-file notes.md $flag
-
-  publish-extension:
-    needs: [check, release]
-    uses: ./.github/workflows/publish-extension.yml
-    with:
-      tag: ${{ github.ref_name }}
-    secrets: inherit
 
   publish-crates:
     needs: [check, release]

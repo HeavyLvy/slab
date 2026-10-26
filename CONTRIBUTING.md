@@ -46,15 +46,9 @@ Versions follow [Semantic Versioning](https://semver.org/): `MAJOR.MINOR.PATCH`,
 
 To release: on `main`, make a commit "Release X.Y.Z" that sets the version in those files, runs `cargo build` to update `Cargo.lock`, and renames `[Unreleased]` to `[X.Y.Z] - date` in the changelog (with a new empty `[Unreleased]` above it and the link lines at the bottom updated). Once CI is green, `git tag -a vX.Y.Z -m "slab X.Y.Z" && git push origin vX.Y.Z`. The `release` workflow checks that the tag matches the files and is on `main`, builds `slab` and `slab-lsp` for Linux, macOS (Apple silicon) and Windows plus the extension (`.vsix`), and publishes a GitHub release with the changelog section as its notes. Version tags are never moved or deleted; a bad release is fixed by a new patch version.
 
-A release can publish more than the GitHub release page (the extension is not on any store yet, and the first release will tell you whether the others work), each part only when its token is set as a repository secret (Settings -> Secrets and variables -> Actions, or `gh secret set NAME`):
+A release also publishes `slab-lang` and `slab-lsp` to crates.io, but only when the repository secret `CARGO_REGISTRY_TOKEN` is set (a token from <https://crates.io/settings/tokens> with the *publish-new* and *publish-update* scopes; add it with `gh secret set CARGO_REGISTRY_TOKEN`). Without it that step is skipped.
 
-| Secret | Publishes | Where the token comes from |
-|---|---|---|
-| `VSCE_PAT` | the VS Code extension to the Marketplace | an Azure DevOps personal access token with the *Marketplace: Manage* scope for all accessible organizations, for the publisher `HeavyLvy` created at <https://marketplace.visualstudio.com/manage> |
-| `OVSX_PAT` | the same packages to Open VSX | an access token from <https://open-vsx.org/user-settings/tokens> (sign in with GitHub, sign the publisher agreement, then `npx ovsx create-namespace HeavyLvy -p <token>` once) |
-| `CARGO_REGISTRY_TOKEN` | `slab-lang` and `slab-lsp` to crates.io | a token from <https://crates.io/settings/tokens> with the *publish-new* and *publish-update* scopes |
-
-The extension is published as one package per platform with the language server inside (Linux x64, macOS arm64, Windows x64) plus a universal one that finds `slab-lsp` on `PATH`. To publish a release's extension again, run the `publish-extension` workflow by hand with the tag.
+**The VS Code extension is not published to the VS Code Marketplace or Open VSX.** Getting accounts and tokens working with both proved too much trouble, so the extension is distributed only as `.vsix` files attached to each GitHub release: one per platform with the language server inside (Linux x64, macOS arm64, Windows x64) plus a universal one that finds `slab-lsp` on `PATH`. The install scripts install it for users, and the documentation explains installing it by hand. Do not add store publishing back without a plan for the credentials.
 
 `main` is protected: it takes no force pushes, and CI (`rust` and `extension`) has to pass on pull requests.
 
