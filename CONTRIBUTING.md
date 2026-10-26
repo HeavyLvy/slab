@@ -35,6 +35,19 @@ A feature usually touches: the grammar doc, parser, checker, `codegen` (and `low
 
 If generated commands change, run `UPDATE_DOCS=1 cargo test --test compiled_output` and review the diff of `docs/lang/compiled-output.md`.
 
+## Releases and versioning
+
+Versions follow [Semantic Versioning](https://semver.org/): `MAJOR.MINOR.PATCH`, tagged `vMAJOR.MINOR.PATCH` (a pre-release is `v0.2.0-rc.1`). What counts as the public interface: the language (syntax and meaning of `.slab` code), the `slab` command line and `Slab.toml`, and the standard library. The commands in a generated pack are not, but a pack must keep working on the Minecraft versions it targets.
+
+- While the major version is 0, a **minor** bump may break the language, the CLI or `Slab.toml`, and a **patch** only fixes bugs. From 1.0 on, breaking changes need a major bump.
+- Supporting a new Minecraft version (a new default `minecraft` target) is a minor bump.
+- `slab`, `slab-lsp` and the VS Code extension share one version. It is written in `Cargo.toml`, `crates/slab-lsp/Cargo.toml` and `editors/vscode/package.json` (and `Cargo.lock`), and `tests/version.rs` fails when they differ.
+- Every user-visible change gets a line under `## [Unreleased]` in `CHANGELOG.md`.
+
+To release: on `main`, make a commit "Release X.Y.Z" that sets the version in those files, runs `cargo build` to update `Cargo.lock`, and renames `[Unreleased]` to `[X.Y.Z] - date` in the changelog (with a new empty `[Unreleased]` above it and the link lines at the bottom updated). Once CI is green, `git tag -a vX.Y.Z -m "slab X.Y.Z" && git push origin vX.Y.Z`. The `release` workflow checks that the tag matches the files and is on `main`, builds `slab` and `slab-lsp` for Linux, macOS (Apple silicon) and Windows plus the extension (`.vsix`), and publishes a GitHub release with the changelog section as its notes. Version tags are never moved or deleted; a bad release is fixed by a new patch version.
+
+`main` is protected: it takes no force pushes, and CI (`rust` and `extension`) has to pass on pull requests.
+
 ## Pull requests
 
 Small, focused changes with tests are easiest to review. Say what you ran. By contributing you agree your work is licensed under the [Apache License 2.0](LICENSE).
