@@ -1094,6 +1094,8 @@ pub enum Command {
     Tellraw { targets: Selector, message: Text },
     Kill(Option<Selector>),
     Summon { entity: Arg<ResourceLocation>, pos: Option<Pos>, nbt: Option<Compound> },
+    /// `particle <name> [<pos>]`: a particle without options (`campfire_signal_smoke`, not `dust{..}`).
+    Particle { name: Arg<ResourceLocation>, pos: Option<Pos> },
     Setblock { pos: Pos, block: BlockState, mode: Option<SetblockMode> },
     /// `gamerule <rule> [<value>]`; no value queries.
     Gamerule { rule: ResourceLocation, value: Option<GameRuleValue> },
@@ -1329,6 +1331,7 @@ impl Check for Command {
                 pos.check()?;
                 nbt.check()
             }
+            Command::Particle { pos, .. } => pos.check(),
             Command::Setblock { pos, block, .. } => {
                 pos.check_block()?;
                 block.check()
@@ -1401,6 +1404,13 @@ impl fmt::Display for Command {
                     }
                 }
                 Ok(())
+            }
+            Command::Particle { name, pos } => {
+                write!(f, "particle {name}")?;
+                match pos {
+                    Some(p) => write!(f, " {p}"),
+                    None => Ok(()),
+                }
             }
             Command::Setblock { pos, block, mode } => {
                 write!(f, "setblock {pos} {block}")?;
@@ -1657,6 +1667,10 @@ mod tests {
         let in_exec = Command::execute().clause(Clause::Summon(h(0))).run(Command::say("x"));
         assert_eq!(in_exec.render_line(), "$execute summon $(h0) run say x");
         assert_eq!(Command::Say(h(0)).render_line(), "$say $(h0)");
+        let spark = Command::Particle { name: rl("campfire_signal_smoke").into(), pos: None };
+        assert_eq!(spark.to_string(), "particle minecraft:campfire_signal_smoke");
+        let at = Command::Particle { name: Arg::Hole(Hole(0)), pos: Some(Pos::local(0.0, 1.0, 0.0)) };
+        assert_eq!(at.render_line(), "$particle $(h0) ^ ^1 ^");
         assert!(Command::Say(h(0)).check().is_ok());
         assert_eq!(Command::Run(h(0)).render_line(), "$$(h0)");
         assert_eq!(Command::Run(Arg::Lit("time set day".into())).render_line(), "time set day");

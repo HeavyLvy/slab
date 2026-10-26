@@ -509,6 +509,74 @@
   "expect": "has 1 [e2e]"
  },
  {
+  "cmd": "scoreboard players get #g.r_rot_yaw e2e",
+  "expect": "has 900000 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_rot_pitch e2e",
+  "expect": "has -302500 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_rot_wrap e2e",
+  "expect": "has 900000 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_rot_wrap_neg e2e",
+  "expect": "has -900000 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_rot_clamp e2e",
+  "expect": "has -900000 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_rot_face e2e",
+  "expect": "has 1 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_mv_local_x e2e",
+  "expect": "has 45000 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_mv_local_z e2e",
+  "expect": "has 65000 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_mv_left_z e2e",
+  "expect": "has 50000 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_mv_up_y e2e",
+  "expect": "has 805000 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_mv_by_x e2e",
+  "expect": "has 55000 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_mv_by_y e2e",
+  "expect": "has 795000 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_vel_x e2e",
+  "expect": "has 1000 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_vel_y e2e",
+  "expect": "has 2000 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_vel_z e2e",
+  "expect": "has -3000 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_push_x e2e",
+  "expect": "has 1500 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_push_z e2e",
+  "expect": "has 0 [e2e]"
+ },
+ {
   "cmd": "scoreboard players get #g.r_be_handle e2e",
   "expect": "has 95 [e2e]"
  },

@@ -3233,8 +3233,8 @@ impl<'a> Checker<'a> {
                         self.error_hint(sp, format!("invalid tag name {t:?}"), "tags may only contain letters, digits and _ - . +");
                     }
             }
-            "effect.give" | "summon" | "setblock" => {
-                let idx = if name == "effect.give" { 1 } else if name == "summon" { 0 } else { 3 };
+            "effect.give" | "summon" | "setblock" | "particle" => {
+                let idx = if name == "effect.give" { 1 } else if name == "summon" || name == "particle" { 0 } else { 3 };
                 if let Some((id, sp)) = s(idx)
                     && let Err(e) = ResourceLocation::parse(&id) {
                         self.error(sp, format!("invalid id: {}", e.message()));

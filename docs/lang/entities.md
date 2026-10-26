@@ -84,6 +84,10 @@ A handle is a plain integer: copying it copies the reference, and nothing happen
 
 `as e at e { .. }` is what you write most often. `be e { .. }` is the same thing (`execute as e at @s`: after `as`, `@s` is the entity, so `at @s` is its position) with `e` written and looked up once. A value that is an `Entity` is found through its id, which costs a macro call, so `be e` is also half the work of `as e at e`. It is a clause like the others and chains: `be e positioned ~ ~1 ~ { .. }`, and it takes a selector too: `be @e[tag=boss] { .. }`.
 
+## `^` coordinates and who they are relative to
+
+`tp(target, ^ ^ ^5)` is Minecraft's own command: `^` (and `~`) are measured from **whoever runs it** (the function's `@s`, or the console), not from `target`. So `tp(marker, ^, ^, ^5)` does not move the marker five blocks along where *it* looks. Either run the command as the entity, `be marker { tp(@s, ^, ^, ^5); }`, or call `marker.move_local(0, 0, 5)`. `particle(kind, ^, ^1, ^)` is the same: it draws relative to where the code runs, so put it inside `be`.
+
 ## Reading an entity: the methods of `Entity`
 
 There is one type, `Entity`, and every value of it has the same methods: a variable that holds an entity is a handle (an id), and each method looks the entity up when it is called, so it always sees the entity as it is *now*, and a method on a dead entity returns `Err` or `false`. The methods are ordinary slab code in `game.slab` (ctrl+click the names in the editor) over [`run_command`](stdlib.md), in one `impl Entity` block:
@@ -95,6 +99,15 @@ There is one type, `Entity`, and every value of it has the same methods: a varia
 | `e.position() -> Result<Vec3i, ()>` | three `run_command(f"data get entity {sel} Pos[0]")` (`[1]`, `[2]`), rounded **down** to whole blocks; `Err(())` when the entity is gone |
 | `e.position_near()`, `e.position_far()` | the position with decimals (`docs/lang/doubles.md`) |
 | `e.teleport_near(p)`, `e.teleport_far(p)` | move it to a position with decimals |
+| `e.rotation() -> Result<Rotation, ()>` | where it looks: `yaw` (0 south, 90 west, -90 east, 180 north) and `pitch` (-90 up, 90 down), as `NearDouble`s (`Rotation[0]`, `[1]` read at scale 100000) |
+| `e.set_rotation(yaw, pitch)` | `rotate`. A yaw outside -180..180 is wrapped (the game would keep `540` as it is); the game clamps the pitch itself |
+| `e.face(other)` | turn towards another entity (`rotate .. facing entity ..`) |
+| `e.move_local(left, up, forward)` | move along its **own** axes like `^left ^up ^forward`: `forward` is the way it faces, and it keeps its rotation |
+| `e.move_by(dx, dy, dz)` | move by a distance on the world axes (`~dx ~dy ~dz`) |
+| `e.velocity() -> Result<NearVec3, ()>` | `Motion`, in blocks per tick |
+| `e.set_velocity(v)`, `e.push(by)` | set it, or add to it (`data merge entity .. {Motion:[..]}`). The game refuses players: `Err(())` |
+
+`NearVec3` has `+`, `-`, unary `-` and `* NearDouble`, so `e.push(direction * speed)` works.
 
 ```slab
 let cow = summon("minecraft:cow", 4, 70, -6);

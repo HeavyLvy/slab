@@ -1520,6 +1520,11 @@ impl<'a> Gen<'a> {
                 let block = self.str_arg(&args[3], holes, ResourceLocation::parse)?;
                 Command::Setblock { pos, block: datapack::BlockState::new(block), mode: None }
             }
+            "particle" => {
+                let name = self.str_arg(&args[0], holes, ResourceLocation::parse)?;
+                let pos = if args.len() == 4 { Some(self.pos(&args[1..4], holes)?) } else { None };
+                Command::Particle { name, pos }
+            }
             "summon" => {
                 let id = self.str_arg(&args[0], holes, ResourceLocation::parse)?;
                 let pos = if args.len() == 4 { Some(self.pos(&args[1..4], holes)?) } else { None };

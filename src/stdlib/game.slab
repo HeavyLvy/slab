@@ -42,6 +42,13 @@ pub fn setblock(x: Coord, y: Coord, z: Coord, block: str) -> bool;
 #[intrinsic("summon", 1)]
 pub fn summon(kind: str, x: Coord, y: Coord, z: Coord) -> Entity;
 
+/// Show a particle (`"minecraft:campfire_signal_smoke"`, or `"end_rod"`) at the coordinates, or
+/// where the command runs when they are left out; `^ ^1 ^` is one block above, `~ ~1 ~` too.
+/// `true` when a player could see it. Particles that take options (`dust`, `block`) and the
+/// spread, speed and count arguments are not available yet: use `run_command` for those.
+#[intrinsic("particle", 1)]
+pub fn particle(kind: str, x: Coord, y: Coord, z: Coord) -> bool;
+
 /// Run any command, written as text without the leading `/`: `run_command("time set day")`.
 /// The text may be computed at run time. `Ok(n)` carries the command's result (what `/execute
 /// store result` would store: the value of `data get`, the number of entities `kill` killed, ...)
@@ -62,6 +69,31 @@ pub struct NearVec3 {
     x: NearDouble,
     y: NearDouble,
     z: NearDouble,
+}
+
+/// Where an entity looks: yaw (0 south, 90 west, -90 east, 180 north) and pitch (-90 up, 90 down).
+pub struct Rotation {
+    yaw: NearDouble,
+    pitch: NearDouble,
+}
+
+impl NearVec3 {
+    pub fn add(self, o: NearVec3) -> NearVec3 {
+        return NearVec3 { x: self.x + o.x, y: self.y + o.y, z: self.z + o.z };
+    }
+
+    pub fn sub(self, o: NearVec3) -> NearVec3 {
+        return NearVec3 { x: self.x - o.x, y: self.y - o.y, z: self.z - o.z };
+    }
+
+    pub fn neg(self) -> NearVec3 {
+        return NearVec3 { x: -self.x, y: -self.y, z: -self.z };
+    }
+
+    /// Every component times a number.
+    pub fn mul(self, k: NearDouble) -> NearVec3 {
+        return NearVec3 { x: self.x * k, y: self.y * k, z: self.z * k };
+    }
 }
 
 /// A position with 6 decimals, as `position_far` reads it.
@@ -95,29 +127,34 @@ impl Entity {
         return Ok(Vec3i { x: x.unwrap(), y: y.unwrap(), z: z.unwrap() });
     }
 
-    /// One coordinate with 4 decimals: `data get` with the scale 100000, rounded to ten-thousandths
-    /// (the product is a floating-point multiplication that can land just under the integer, so
-    /// reading ten-thousandths directly would sometimes be one too low).
-    fn near_axis(self, axis: int) -> Result<NearDouble, ()> {
-        let read = run_command(f"data get entity {self.selector()} Pos[{axis}] 100000");
+    /// One number of the entity's data with 4 decimals (`Pos[0]`, `Motion[1]`, `Rotation[0]`):
+    /// `data get` with the scale 100000, rounded to ten-thousandths (the product is a
+    /// floating-point multiplication that can land just under the integer, so reading
+    /// ten-thousandths directly would sometimes be one too low).
+    fn near_read(self, path: str) -> Result<NearDouble, ()> {
+        let read = run_command(f"data get entity {self.selector()} {path} 100000");
         if read.is_err() { return Err(()); }
         let n = read.unwrap();
-        // the game stops counting at the largest `int`: that coordinate is out of this type's range
+        // the game stops counting at the largest `int`: that number is out of this type's range
         if n > 2147483000 { return Err(()); }
         if n < 0 - 2147483000 { return Err(()); }
         return Ok(NearDouble::from_units((n + 5) / 10));
     }
 
-    /// Where the entity is, with 4 decimals, read straight from the world. `Err(())` when it is
-    /// gone or more than 21,474 blocks from the origin (use `position_far` there).
-    pub fn position_near(self) -> Result<NearVec3, ()> {
-        let x = self.near_axis(0);
-        let y = self.near_axis(1);
-        let z = self.near_axis(2);
+    fn near_vec(self, name: str) -> Result<NearVec3, ()> {
+        let x = self.near_read(f"{name}[0]");
+        let y = self.near_read(f"{name}[1]");
+        let z = self.near_read(f"{name}[2]");
         if x.is_err() { return Err(()); }
         if y.is_err() { return Err(()); }
         if z.is_err() { return Err(()); }
         return Ok(NearVec3 { x: x.unwrap(), y: y.unwrap(), z: z.unwrap() });
+    }
+
+    /// Where the entity is, with 4 decimals, read straight from the world. `Err(())` when it is
+    /// gone or more than 21,474 blocks from the origin (use `position_far` there).
+    pub fn position_near(self) -> Result<NearVec3, ()> {
+        return self.near_vec("Pos");
     }
 
     /// Where the entity is, with 6 decimals, anywhere in the world. The game cannot hand out
@@ -149,6 +186,62 @@ impl Entity {
         if fy.is_err() { return Err(()); }
         if fz.is_err() { return Err(()); }
         return Ok(FarVec3 { x: far_coordinate(x, fx.unwrap()), y: far_coordinate(y, fy.unwrap()), z: far_coordinate(z, fz.unwrap()) });
+    }
+
+    /// Which way the entity faces. `Err(())` when it is gone.
+    pub fn rotation(self) -> Result<Rotation, ()> {
+        let yaw = self.near_read("Rotation[0]");
+        let pitch = self.near_read("Rotation[1]");
+        if yaw.is_err() { return Err(()); }
+        if pitch.is_err() { return Err(()); }
+        return Ok(Rotation { yaw: yaw.unwrap(), pitch: pitch.unwrap() });
+    }
+
+    /// Turn the entity: yaw in degrees (0 faces south, 90 west, -90 east, 180 north), pitch
+    /// from -90 (up) to 90 (down). A yaw outside -180 to 180 is wrapped into it.
+    pub fn set_rotation(self, yaw: NearDouble, pitch: NearDouble) -> Result<int, ()> {
+        // the game keeps whatever yaw it is given (540 stays 540), so wrap it here
+        let turn = yaw.units() % 3600000;
+        let mut wrapped = turn;
+        if turn >= 1800000 { wrapped = turn - 3600000; }
+        return run_command(f"rotate {self.selector()} {NearDouble::from_units(wrapped).text()} {pitch.text()}");
+    }
+
+    /// Turn the entity to look at another entity (its feet).
+    pub fn face(self, other: Entity) -> Result<int, ()> {
+        return run_command(f"rotate {self.selector()} facing entity {other.selector()}");
+    }
+
+    /// Move the entity along its own axes, like `^left ^up ^forward` in a command: `forward` is
+    /// the way it faces (so `e.move_local(0, 0, 5)` goes five blocks ahead), `left` and `up`
+    /// are to its left and above it. It keeps its rotation. `tp(e, ^ ^ ^5)` would measure from
+    /// whoever runs the command, not from `e`.
+    pub fn move_local(self, left: NearDouble, up: NearDouble, forward: NearDouble) -> Result<int, ()> {
+        return run_command(f"execute as {self.selector()} at @s run tp @s ^{left.text()} ^{up.text()} ^{forward.text()}");
+    }
+
+    /// Move the entity by a distance along the world axes (`~dx ~dy ~dz`): x is east, y up, z south.
+    pub fn move_by(self, dx: NearDouble, dy: NearDouble, dz: NearDouble) -> Result<int, ()> {
+        return run_command(f"execute as {self.selector()} at @s run tp @s ~{dx.text()} ~{dy.text()} ~{dz.text()}");
+    }
+
+    /// The entity's velocity in blocks per tick (`Motion`). It changes every tick for anything
+    /// the game moves (gravity, friction). `Err(())` when it is gone.
+    pub fn velocity(self) -> Result<NearVec3, ()> {
+        return self.near_vec("Motion");
+    }
+
+    /// Set the velocity, in blocks per tick. The game does not allow this for players
+    /// (`Err(())`), only for other entities.
+    pub fn set_velocity(self, v: NearVec3) -> Result<int, ()> {
+        return run_command("data merge entity " + self.selector() + " {Motion:[" + v.x.text() + "d," + v.y.text() + "d," + v.z.text() + "d]}");
+    }
+
+    /// Add to the velocity (a push). Not for players, like `set_velocity`.
+    pub fn push(self, by: NearVec3) -> Result<int, ()> {
+        let now = self.velocity();
+        if now.is_err() { return Err(()); }
+        return self.set_velocity(now.unwrap() + by);
     }
 
     /// Move the entity to a position with decimals. `Ok` when it moved.

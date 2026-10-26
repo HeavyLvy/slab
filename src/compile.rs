@@ -628,6 +628,26 @@ mod tests {
     }
 
     #[test]
+    fn particle_is_a_typed_command_with_optional_coordinates() {
+        let c = build_main("fn f(kind: str) { particle(\"campfire_signal_smoke\"); particle(\"end_rod\", ^, ^1, ^); particle(kind, ~, ~, ~); }");
+        let f = fn_text(&c, "t:f");
+        assert!(f.contains("particle minecraft:campfire_signal_smoke\n"), "{f}");
+        assert!(f.contains("particle minecraft:end_rod ^ ^1 ^\n"), "{f}");
+        assert!(fn_text(&c, "t:f/m0").contains("$particle $(h0) ~ ~ ~"), "{}", fn_text(&c, "t:f/m0"));
+        assert!(build_err("fn f() { particle(\"Bad Id\"); }").contains("invalid id"));
+    }
+
+    #[test]
+    fn entity_movement_methods_are_slab_code_over_run_command() {
+        let c = build_main("fn f(e: Entity) { e.move_local(0, 0, 5); e.set_rotation(90, 0); }");
+        // the library functions are generated because they are called, and nothing else of Entity is
+        for used in ["game__entity__move_local", "game__entity__set_rotation"] {
+            assert!(c.pack.function(&ResourceLocation::parse(&format!("t:{used}")).unwrap()).is_some(), "{used}");
+        }
+        assert!(c.pack.function(&ResourceLocation::parse("t:game__entity__set_velocity").unwrap()).is_none());
+    }
+
+    #[test]
     fn be_is_as_and_at_with_one_lookup() {
         let c = build_main("fn f(e: Entity) { be e { tp(@s, ~, ~1, ~); } be @a[tag=x] positioned ~ ~2 ~ { say(\"hi\"); } }");
         let m = fn_text(&c, "t:f/m0");

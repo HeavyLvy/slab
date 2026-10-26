@@ -173,6 +173,23 @@ global r_dbl_edge_frac: int = 0;
 global r_dbl_edge_near_err: int = 0;
 global r_be_handle: int = 0;
 global r_be_selector: int = 0;
+global r_rot_yaw: int = 0;
+global r_rot_pitch: int = 0;
+global r_rot_wrap: int = 0;
+global r_rot_wrap_neg: int = 0;
+global r_rot_clamp: int = 0;
+global r_rot_face: int = 0;
+global r_mv_local_x: int = 0;
+global r_mv_local_z: int = 0;
+global r_mv_left_z: int = 0;
+global r_mv_up_y: int = 0;
+global r_mv_by_x: int = 0;
+global r_mv_by_y: int = 0;
+global r_vel_x: int = 0;
+global r_vel_y: int = 0;
+global r_vel_z: int = 0;
+global r_push_x: int = 0;
+global r_push_z: int = 0;
 global r_cmd_value: int = 0;
 global r_cmd_ok: int = 0;
 global r_cmd_err: int = 0;
@@ -404,6 +421,7 @@ fn world_test() {
 
     entity_test();
     double_world_test();
+    motion_world_test();
     string_test();
     selector_test();
     equality_test();
@@ -658,6 +676,85 @@ fn double_world_test() {
     let en = edge.position_near();
     if en.is_err() { r_dbl_edge_near_err = 1; }
     kill(edge);
+}
+
+// Rotation, movement along the entity's own axes (`^`), velocity and pushes: methods of `Entity`.
+// Everything happens at x 5..7, z 5..15, inside the force-loaded chunk 0 0.
+fn motion_world_test() {
+    let m = summon("minecraft:marker", 6, 80, 6);
+    m.set_rotation(90, -30.25);
+    let turned = m.rotation();
+    if turned.is_ok() {
+        let look = turned.unwrap();
+        r_rot_yaw = look.yaw.units();
+        r_rot_pitch = look.pitch.units();
+    }
+    // a yaw outside -180..180 is wrapped; the game clamps the pitch itself
+    m.set_rotation(450, 0);
+    let wrapped = m.rotation();
+    if wrapped.is_ok() { r_rot_wrap = wrapped.unwrap().yaw.units(); }
+    m.set_rotation(270, 0);
+    let wrapped_neg = m.rotation();
+    if wrapped_neg.is_ok() { r_rot_wrap_neg = wrapped_neg.unwrap().yaw.units(); }
+    m.set_rotation(0, -100);
+    let clamped = m.rotation();
+    if clamped.is_ok() { r_rot_clamp = clamped.unwrap().pitch.units(); }
+
+    // facing west (yaw 90): forward is -x, so 2 ahead moves from x 6.5 to 4.5; the rotation stays
+    m.set_rotation(90, 0);
+    m.move_local(0, 0, 2);
+    let moved = m.position_near();
+    if moved.is_ok() {
+        let at_ = moved.unwrap();
+        r_mv_local_x = at_.x.units();
+        r_mv_local_z = at_.z.units();
+    }
+    // `left` is to the entity's left: -1.5 is 1.5 to the right, which is north (-z) for a west-facing entity
+    m.move_local(-1.5, 0.5, 0);
+    let side = m.position_near();
+    if side.is_ok() {
+        let at_ = side.unwrap();
+        r_mv_left_z = at_.z.units();
+        r_mv_up_y = at_.y.units();
+    }
+    m.move_by(1, -1, 0);
+    let shifted = m.position_near();
+    if shifted.is_ok() {
+        let at_ = shifted.unwrap();
+        r_mv_by_x = at_.x.units();
+        r_mv_by_y = at_.y.units();
+    }
+
+    // turn towards another entity: it stands to the south and a little east, so the yaw is a small negative number
+    let other = summon("minecraft:marker", 6, 80, 14);
+    m.face(other);
+    let looking = m.rotation();
+    if looking.is_ok() {
+        let yaw = looking.unwrap().yaw.units();
+        if yaw < 0 {
+            if yaw > -200000 { r_rot_face = 1; }
+        }
+    }
+
+    m.set_velocity(game::NearVec3 { x: 0.1, y: 0.2, z: -0.3 });
+    let v = m.velocity();
+    if v.is_ok() {
+        let now = v.unwrap();
+        r_vel_x = now.x.units();
+        r_vel_y = now.y.units();
+        r_vel_z = now.z.units();
+    }
+    m.push(game::NearVec3 { x: 0.05, y: 0, z: 0.3 });
+    let pushed = m.velocity();
+    if pushed.is_ok() {
+        let now = pushed.unwrap();
+        r_push_x = now.x.units();
+        r_push_z = now.z.units();
+    }
+    // the particle command is accepted (nobody is near to see it, so it reports false)
+    particle("minecraft:end_rod", ~, ~1, ~);
+    kill(m);
+    kill(other);
 }
 
 // `run_command`: a command written as text, with the outcome as a `Result<int, ()>`.
