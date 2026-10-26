@@ -30,7 +30,7 @@ pub fn keyword(k: Kw) -> &'static str {
         Kw::At => "```slab\nat @s { ... }\n```\n`/execute at`: runs the block at the position (and dimension) of each matching entity.",
         Kw::Be => "```slab\nbe e { ... }\n```\nShorthand for `as e at @s { ... }`: runs the block as the entity `e`, at its position. `e` is a selector or an entity value, and is looked up once. It chains with the other clauses: `be e positioned ~ ~1 ~ { ... }`.",
         Kw::Positioned => "```slab\npositioned x y z { ... }\n```\n`/execute positioned`: runs the block at a position. Coordinates are integers, variables, or `~`/`^` offsets.",
-        Kw::Rotated => "```slab\nrotated yaw pitch { ... }\n```\n`/execute rotated`: runs the block with a rotation.",
+        Kw::Rotated => "```slab\nrotated yaw pitch { ... }\n```\n`/execute rotated`: runs the block with a rotation. `rotated as e { }` takes the rotation of an entity instead, which is what makes `^` coordinates follow *its* facing: `as marker at @p rotated as @s { tp(@s, ^, ^, ^5); }` puts the marker five blocks in front of the nearest player along the marker's own direction.",
         Kw::Facing => "```slab\nfacing x y z { ... }\n```\n`/execute facing`: runs the block turned towards a position.",
         Kw::Align => "```slab\nalign xz { ... }\n```\n`/execute align`: snaps the position to whole blocks on the named axes.",
         Kw::Anchored => "```slab\nanchored eyes { ... }\n```\n`/execute anchored`: sets whether `^` coordinates start at the feet or the eyes.",

@@ -88,6 +88,16 @@ A handle is a plain integer: copying it copies the reference, and nothing happen
 
 `tp(target, ^ ^ ^5)` is Minecraft's own command: `^` (and `~`) are measured from **whoever runs it** (the function's `@s`, or the console), not from `target`. So `tp(marker, ^, ^, ^5)` does not move the marker five blocks along where *it* looks. Either run the command as the entity, `be marker { tp(@s, ^, ^, ^5); }`, or call `marker.move_local(0, 0, 5)`. `particle(kind, ^, ^1, ^)` is the same: it draws relative to where the code runs, so put it inside `be`.
 
+A ring that follows a player is the same idea each tick: the markers keep their own direction (set once with `set_rotation`), and a context block puts each one in front of the player along that direction (`examples/slab/ring.slab`):
+
+```slab
+as @e[tag=$MARKER_TAG] at @p rotated as @s {   // at the player, but facing the way the marker does
+    tp(@s, ^, ^, ^5);                           // five blocks ahead of the player, along that facing
+}
+```
+
+`at @p` alone would give every marker the *player's* rotation, and all of them the same direction.
+
 ## Reading an entity: the methods of `Entity`
 
 There is one type, `Entity`, and every value of it has the same methods: a variable that holds an entity is a handle (an id), and each method looks the entity up when it is called, so it always sees the entity as it is *now*, and a method on a dead entity returns `Err` or `false`. The methods are ordinary slab code in `game.slab` (ctrl+click the names in the editor) over [`run_command`](stdlib.md), in one `impl Entity` block:

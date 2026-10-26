@@ -219,7 +219,7 @@ impl Walker<'_> {
             StmtKind::Context { clauses, body } => {
                 for c in clauses {
                     match &c.kind {
-                        ast::CtxKind::As(e) | ast::CtxKind::At(e) | ast::CtxKind::Be(e) => self.expr(e, Role::Plain),
+                        ast::CtxKind::As(e) | ast::CtxKind::At(e) | ast::CtxKind::Be(e) | ast::CtxKind::RotatedAs(e) => self.expr(e, Role::Plain),
                     ast::CtxKind::In(_) => {}
                     ast::CtxKind::Positioned(es) | ast::CtxKind::Facing(es) => {
                         for e in es {
@@ -451,7 +451,7 @@ fn stmt<'a>(s: &'a ast::Stmt, f: &mut impl FnMut(&'a ast::Expr)) {
         StmtKind::Context { clauses, body } => {
             for c in clauses {
                 match &c.kind {
-                    ast::CtxKind::As(e) | ast::CtxKind::At(e) | ast::CtxKind::Be(e) => visit(e, f),
+                    ast::CtxKind::As(e) | ast::CtxKind::At(e) | ast::CtxKind::Be(e) | ast::CtxKind::RotatedAs(e) => visit(e, f),
                     ast::CtxKind::In(_) => {}
                     ast::CtxKind::Positioned(es) | ast::CtxKind::Facing(es) => {
                         for e in es {
@@ -619,7 +619,7 @@ fn visit_hir_stmt(s: &HirStmt, offset: usize, best: &mut Option<(u32, HirExpr)>)
         HirStmt::Context { clauses, body } => {
             for c in clauses {
                 match c {
-                    shir::CtxClause::As(e) | shir::CtxClause::At(e) => visit_hir_expr(e, offset, best),
+                    shir::CtxClause::As(e) | shir::CtxClause::At(e) | shir::CtxClause::RotatedAs(e) => visit_hir_expr(e, offset, best),
                     shir::CtxClause::In(_) | shir::CtxClause::Align(_) | shir::CtxClause::Anchored(_) => {}
                     shir::CtxClause::Positioned(es) | shir::CtxClause::Facing(es) => {
                         for e in es {

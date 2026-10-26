@@ -148,6 +148,7 @@ pub enum CtxClause {
     In(String),
     Positioned([Expr; 3]),
     Rotated([Expr; 2]),
+    RotatedAs(Expr),
     Facing([Expr; 3]),
     /// Axes in x, y, z order, e.g. `"xz"`.
     Align(String),
@@ -378,7 +379,7 @@ impl Stmt {
             Stmt::Context { clauses, body } => {
                 for c in clauses {
                     match c {
-                        CtxClause::As(e) | CtxClause::At(e) => e.calls(out),
+                        CtxClause::As(e) | CtxClause::At(e) | CtxClause::RotatedAs(e) => e.calls(out),
                         CtxClause::Positioned(es) | CtxClause::Facing(es) => es.iter().for_each(|e| e.calls(out)),
                         CtxClause::Rotated(es) => es.iter().for_each(|e| e.calls(out)),
                         CtxClause::In(_) | CtxClause::Align(_) | CtxClause::Anchored(_) => {}

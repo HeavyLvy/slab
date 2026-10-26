@@ -205,6 +205,8 @@ pub enum CtxKind {
     In(Expr),
     Positioned([Expr; 3]),
     Rotated([Expr; 2]),
+    /// `rotated as e`: the rotation of an entity.
+    RotatedAs(Expr),
     Facing([Expr; 3]),
     /// `align xz`: the axes as written.
     Align(Ident),

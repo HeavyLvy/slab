@@ -1517,6 +1517,7 @@ impl<'a> Gen<'a> {
         Some(match c {
             h::CtxClause::As(e) => Clause::As(self.target(e, holes)?),
             h::CtxClause::At(e) => Clause::At(self.target(e, holes)?),
+            h::CtxClause::RotatedAs(e) => Clause::RotatedAs(self.target(e, holes)?),
             h::CtxClause::In(s) => Clause::In(ResourceLocation::parse(s).ok()?),
             h::CtxClause::Positioned(es) => Clause::Positioned(self.checked_pos(es, holes)?),
             h::CtxClause::Facing(es) => Clause::Facing(self.checked_pos(es, holes)?),

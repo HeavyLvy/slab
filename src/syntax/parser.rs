@@ -924,6 +924,10 @@ impl Parser {
                 Kw::In => CtxKind::In(self.expr_operand()?),
                 Kw::Positioned => CtxKind::Positioned([self.expr_operand()?, self.expr_operand()?, self.expr_operand()?]),
                 Kw::Facing => CtxKind::Facing([self.expr_operand()?, self.expr_operand()?, self.expr_operand()?]),
+                Kw::Rotated if self.at_kw(Kw::As) => {
+                    self.next();
+                    CtxKind::RotatedAs(self.expr_operand()?)
+                }
                 Kw::Rotated => CtxKind::Rotated([self.expr_operand()?, self.expr_operand()?]),
                 Kw::Align => CtxKind::Align(self.ident("axes such as `xz`")?),
                 Kw::Anchored => CtxKind::Anchored(self.ident("`eyes` or `feet`")?),
@@ -1436,6 +1440,14 @@ mod tests {
         assert!(matches!(els.as_deref(), Some(Else::If(inner)) if matches!(inner.kind, StmtKind::IfLet { .. })));
         // no `;` needed after a match statement
         assert_eq!(func("fn f() { match o { _ => {} } a(); }").body.stmts.len(), 2);
+    }
+
+    #[test]
+    fn rotated_as_takes_an_entity() {
+        let StmtKind::Context { clauses, .. } = first_stmt("as @e at @p rotated as @s { a(); }") else { panic!("a context block") };
+        assert!(matches!(&clauses[2].kind, CtxKind::RotatedAs(e) if sx(e) == "@s[]"), "{clauses:?}");
+        let StmtKind::Context { clauses, .. } = first_stmt("rotated 90 0 { a(); }") else { panic!() };
+        assert!(matches!(&clauses[0].kind, CtxKind::Rotated(_)));
     }
 
     #[test]

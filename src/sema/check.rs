@@ -2555,6 +2555,7 @@ impl<'a> Checker<'a> {
             K::Positioned([x, y, z]) => CtxClause::Positioned([self.coord_operand(x), self.coord_operand(y), self.coord_operand(z)]),
             K::Facing([x, y, z]) => CtxClause::Facing([self.coord_operand(x), self.coord_operand(y), self.coord_operand(z)]),
             K::Rotated([a, b]) => CtxClause::Rotated([self.coord_operand(a), self.coord_operand(b)]),
+            K::RotatedAs(e) => CtxClause::RotatedAs(self.selector_operand(e)),
             K::Align(axes) => {
                 let s = axes.name.as_str();
                 let valid = !s.is_empty() && s.chars().all(|ch| matches!(ch, 'x' | 'y' | 'z')) && s.chars().collect::<HashSet<_>>().len() == s.len();

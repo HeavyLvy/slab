@@ -722,7 +722,7 @@ impl LocalWalker<'_> {
             ast::StmtKind::Context { clauses, body } => {
                 for c in clauses {
                     match &c.kind {
-                        ast::CtxKind::As(e) | ast::CtxKind::At(e) | ast::CtxKind::Be(e) => self.expr(e),
+                        ast::CtxKind::As(e) | ast::CtxKind::At(e) | ast::CtxKind::Be(e) | ast::CtxKind::RotatedAs(e) => self.expr(e),
                         ast::CtxKind::In(_) => {}
                         ast::CtxKind::Positioned(es) | ast::CtxKind::Facing(es) => {
                             for e in es {

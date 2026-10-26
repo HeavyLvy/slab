@@ -1,0 +1,44 @@
+import std;
+import game;
+
+global rotations: int = 360;
+global MARKER_TAG: str = "test-maker";
+
+// Makes the markers of the ring. They only need a tag and a direction (their yaw): `follow` puts
+// each one in the right place around the player every tick.
+task fn create_ring(entity: game::Entity) {
+    let mut current_rotation: int = 0;
+
+    while current_rotation < rotations {
+        be entity {
+            let marker = game::summon("minecraft:marker");   // summoned at the entity
+            game::tag::add(marker, MARKER_TAG);
+            marker.set_rotation(std::NearDouble::from_int(current_rotation), 0);
+        }
+        current_rotation += 4;
+    }
+}
+
+#[tick]
+fn follow() {
+    // every marker goes to the nearest player (`at @p`), then five blocks along its own direction
+    // (`rotated as @s` makes `^` follow the marker's yaw instead of the player's)
+    as @e[tag=$MARKER_TAG] at @p rotated as @s {
+        game::tp(@s, ^, ^, ^5);
+        be @s {
+            game::particle("minecraft:snowflake");
+        }
+    }
+}
+
+#[load]
+fn load() {
+    for marker in @e[tag=$MARKER_TAG] {
+        game::kill(marker);
+    }
+
+    for player in @p {
+        std::print(f"Player: {player}");
+        start create_ring(player);
+    }
+}

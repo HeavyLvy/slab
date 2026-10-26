@@ -94,6 +94,7 @@ context_stmt := ctx_clause+ block
 ctx_clause   := 'as' operand | 'at' operand | 'be' operand | 'in' operand
               | 'positioned' operand operand operand
               | 'rotated' operand operand
+              | 'rotated' 'as' operand        // the rotation of an entity
               | 'facing' operand operand operand
               | 'align' IDENT                // x, y, z or a combination: xz, xyz
               | 'anchored' IDENT             // eyes | feet

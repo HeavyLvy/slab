@@ -808,6 +808,13 @@ mod tests {
     }
 
     #[test]
+    fn rotated_as_makes_local_coordinates_follow_that_entitys_facing() {
+        let c = build_main("fn f() { as @e[tag=ring] at @p rotated as @s { tp(@s, ^, ^, ^5); } }");
+        assert!(fn_text(&c, "t:f").contains("execute as @e[tag=ring] at @p rotated as @s run function t:f/b0"), "{}", fn_text(&c, "t:f"));
+        assert!(fn_text(&c, "t:f/b0").contains("teleport @s ^ ^ ^5"));
+    }
+
+    #[test]
     fn be_is_as_and_at_with_one_lookup() {
         let c = build_main("fn f(e: Entity) { be e { tp(@s, ~, ~1, ~); } be @a[tag=x] positioned ~ ~2 ~ { say(\"hi\"); } }");
         let m = fn_text(&c, "t:f/m0");
