@@ -1102,3 +1102,18 @@ fn decimal_literal_errors() {
     one_error(&in_fn("let a: NearDouble = 1.5; print(a / 2);"), "cannot apply `/`");
     one_error(&in_fn("let a: NearDouble = 1.5; let b = a + 1.5; let c: int = a; print(b.floor() + c);"), "expected `int`, found `NearDouble`");
 }
+
+// ------------------------------------------------------------------ tasks
+
+#[test]
+fn tasks_are_started_not_called() {
+    ok("task fn work(n: int) { let mut i = 0; while i < n { i += 1; } } #[load] fn boot() { start work(100); }");
+    ok("task fn a() { start b(); } task fn b() { return; }");
+    one_error("task fn work() {} fn f() { work(); }", "is a task");
+    one_error("task fn work() {} fn f() { let x = work(); }", "is a task");
+    one_error("task fn work(n: int) {} fn f() { start work(); }", "takes 1 argument");
+    one_error("task fn work(n: int) {} fn f() { start work(\"x\"); }", "expected `int`, found `str`");
+    one_error("fn plain() {} fn f() { start plain(); }", "ordinary function");
+    one_error("task fn work() -> int { return 1; }", "returns nothing");
+    one_error("#[load] task fn work() {}", "cannot be an entry point");
+}

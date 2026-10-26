@@ -145,6 +145,7 @@ struct Lower<'a> {
     out: Vec<Command>,
     /// The `LoopInfo` seen just before the `While` being lowered.
     pending_loop: Option<ir::LoopInfo>,
+    pending_block: Option<u32>,
     info: LowerInfo,
 }
 
@@ -154,6 +155,8 @@ pub struct LowerInfo {
     /// The function holding each loop's body (the loop is that function calling itself), with
     /// what the front end knew about the loop.
     pub loops: HashMap<ResourceLocation, ir::LoopInfo>,
+    /// Task slices by number: the function of a sliced loop's trip, or of a state block.
+    pub slices: HashMap<u32, ResourceLocation>,
 }
 
 /// Compiles an IR program into a validated-on-write data pack.
@@ -195,6 +198,7 @@ pub fn lower_with_info(program: &Program) -> R<(DataPack, LowerInfo)> {
         f: FnState::new(""),
         out: Vec::new(),
         pending_loop: None,
+        pending_block: None,
         info: LowerInfo::default(),
     };
     for f in &program.functions {
@@ -300,7 +304,7 @@ fn collect_calls(stmts: &[Stmt], out: &mut Vec<String>) {
                 collect_calls_expr(value, out);
                 args.iter().for_each(|(_, e)| collect_calls_expr(e, out));
             }
-            Stmt::Return(None) | Stmt::Command(_) | Stmt::Remove { .. } | Stmt::LoopInfo(_) => {}
+            Stmt::Return(None) | Stmt::Command(_) | Stmt::Remove { .. } | Stmt::LoopInfo(_) | Stmt::BlockInfo(_) | Stmt::Suspend => {}
         }
     }
 }
@@ -349,7 +353,7 @@ fn collect_data_locals(stmts: &[Stmt], out: &mut Vec<String>) {
 
 fn may_return(stmts: &[Stmt]) -> bool {
     stmts.iter().any(|s| match s {
-        Stmt::Return(_) => true,
+        Stmt::Return(_) | Stmt::Suspend => true,
         Stmt::If { then, els, .. } => may_return(then) || may_return(els),
         Stmt::While { body, .. } => may_return(body),
         _ => false,
@@ -1492,6 +1496,8 @@ impl<'a> Lower<'a> {
             Stmt::Return(value) => self.lower_return(value.as_ref())?,
             Stmt::If { cond, then, els } => self.lower_if(cond, then, els)?,
             Stmt::LoopInfo(info) => self.pending_loop = Some(info.clone()),
+            Stmt::BlockInfo(id) => self.pending_block = Some(*id),
+            Stmt::Suspend => self.emit(Command::return_value(1)),
             Stmt::While { cond, body } => self.lower_while(cond, body)?,
         }
         Ok(())
@@ -1786,6 +1792,9 @@ impl<'a> Lower<'a> {
                 self.free_int(t);
             }
             let blk = self.block(|s, _| s.lower_stmts(then))?;
+            if let Some(id) = self.pending_block.take() {
+                self.info.slices.insert(id, blk.clone());
+            }
             return self.call_block(&tests, &blk, may_return(then));
         }
         // With an else branch the test is stored first: the `then` block may change what the
@@ -1842,6 +1851,9 @@ impl<'a> Lower<'a> {
             Ok(())
         })?;
         if let Some(info) = info {
+            if let Some(slice) = info.slice {
+                self.info.slices.insert(slice, blk.clone());
+            }
             self.info.loops.insert(blk.clone(), info);
         }
         self.call_block(&[], &blk, may_return(body))

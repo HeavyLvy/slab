@@ -192,6 +192,7 @@ impl Walker<'_> {
                     }
                 }
             }
+            StmtKind::Start(call) => self.expr(call, Role::Plain),
             StmtKind::IfLet { pat, value, then, els } => {
                 self.pattern(pat);
                 self.expr(value, Role::Plain);
@@ -425,6 +426,7 @@ fn stmt<'a>(s: &'a ast::Stmt, f: &mut impl FnMut(&'a ast::Expr)) {
                 }
             }
         }
+        StmtKind::Start(call) => visit(call, f),
         StmtKind::IfLet { value, then, els, .. } => {
             visit(value, f);
             block(then, f);
@@ -634,6 +636,11 @@ fn visit_hir_stmt(s: &HirStmt, offset: usize, best: &mut Option<(u32, HirExpr)>)
             visit_hir_block(body, offset, best);
         }
         HirStmt::Block(b) => visit_hir_block(b, offset, best),
+        HirStmt::Start { args, .. } => {
+            for a in args {
+                visit_hir_expr(a, offset, best);
+            }
+        }
         HirStmt::Expr(e) => visit_hir_expr(e, offset, best),
     }
 }

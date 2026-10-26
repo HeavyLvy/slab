@@ -13,6 +13,8 @@
 //!   would need macros;
 //! * `#[every(N)]` becomes a counter global and a tick function.
 
+mod task;
+
 use std::collections::{BTreeSet, HashMap, HashSet};
 
 use crate::datapack::{self, Anchor, Axes, Clause, Command, Compound, Coord, Effect, HolderName, Hole, Nbt, NbtPath, Num, Pos, ResourceLocation, Rotation, ScoreHolder, Selector, TagAction, Word};
@@ -33,6 +35,11 @@ pub struct GenOptions<'a> {
     pub pack_id: String,
     /// Set `max_command_sequence_length` to this when the pack loads (`[build] command-limit`).
     pub command_limit: Option<i32>,
+    /// Commands a task may use per tick before it suspends (`[build] task-budget`).
+    pub task_budget: i32,
+    /// What one trip of a task's sliced loop (or one task state) costs, by slice number; filled
+    /// in by a second code generation pass once the first has been measured (`compile.rs`).
+    pub slice_costs: HashMap<u32, u64>,
 }
 
 /// Translates a checked program. Errors are things the language accepts but the backend cannot
@@ -183,6 +190,11 @@ struct Gen<'a> {
     /// The command that puts the old command limit back, for `_uninstall`.
     limit_restore: Option<Command>,
     command_limit: Option<i32>,
+    task_budget: i32,
+    slice_costs: HashMap<u32, u64>,
+    next_slice: u32,
+    /// While generating a `task fn`: the state machine being built (`codegen/task.rs`).
+    task: Option<task::TaskCtx>,
     assigned_globals: HashSet<h::GlobalId>,
     /// Entry points and the global that says whether a run reached its end (`_watchdog`).
     watched: Vec<(String, String)>,
@@ -230,6 +242,10 @@ impl<'a> Gen<'a> {
             trips_hint: None,
             limit_restore: None,
             command_limit: opts.command_limit,
+            task_budget: opts.task_budget,
+            slice_costs: opts.slice_costs.clone(),
+            next_slice: 0,
+            task: None,
             assigned_globals: assigned_globals(hir),
             watched: Vec::new(),
             origins: HashMap::new(),
@@ -375,6 +391,20 @@ impl<'a> Gen<'a> {
         }
     }
 
+    /// A function that something starts without a caller to notice trouble (an entry point, a
+    /// task's slice): `name` sets a flag, runs `name__run` (the real body) and clears the flag.
+    /// The game stops a function chain after 65,536 commands without saying so; a body that was
+    /// stopped never reaches the last line, so `_watchdog` finds the flag still set.
+    fn guarded(&mut self, display: &str, name: String, params: Vec<ir::Param>, body: Vec<ir::Stmt>, entry: Option<ir::Entry>, out: &mut Vec<ir::Function>) {
+        let run = unique(&mut self.used_fns, format!("{name}__run"));
+        let flag = unique(&mut self.used_globals, format!("{name}__cut"));
+        self.extra_globals.push(ir::Global { name: flag.clone(), kind: ir::Kind::Int, init: ir::Expr::Int(0) });
+        let set = |v: i32| ir::Stmt::Assign { target: ir::VarRef::Global(flag.clone()), value: ir::Expr::Int(v) };
+        out.push(ir::Function { name: run.clone(), params: Vec::new(), ret: None, body, entry: None });
+        out.push(ir::Function { name, params, ret: None, body: vec![set(1), ir::Stmt::Expr(ir::Expr::call(&run, vec![])), set(0)], entry });
+        self.watched.push((display.to_owned(), flag));
+    }
+
     /// `_watchdog`, run every tick: tells the players when an entry point was cut off by the
     /// command limit (its flag is still set) and counts the reports in `_cutoffs`.
     fn watchdog(&mut self) {
@@ -436,6 +466,9 @@ impl<'a> Gen<'a> {
     }
 
     fn function(&mut self, idx: usize, out: &mut Vec<ir::Function>) {
+        if self.hir.fns[idx].task {
+            return self.task_function(idx, out);
+        }
         let f = &self.hir.fns[idx];
         self.cur_fn = idx;
         self.used = HashSet::new();
@@ -451,16 +484,7 @@ impl<'a> Gen<'a> {
             _ => None,
         };
         if f.entry.is_some() && !f.std {
-            // The game stops a function chain after 65,536 commands without saying so. An entry
-            // point sets a flag before its body and clears it after; a flag still set later means
-            // the body never reached its end (`_watchdog` reports it).
-            let run = unique(&mut self.used_fns, format!("{name}__run"));
-            let flag = unique(&mut self.used_globals, format!("{name}__cut"));
-            self.extra_globals.push(ir::Global { name: flag.clone(), kind: ir::Kind::Int, init: ir::Expr::Int(0) });
-            let set = |v: i32| ir::Stmt::Assign { target: ir::VarRef::Global(flag.clone()), value: ir::Expr::Int(v) };
-            out.push(ir::Function { name: run.clone(), params: Vec::new(), ret: None, body, entry: None });
-            out.push(ir::Function { name: name.clone(), params, ret: None, body: vec![set(1), ir::Stmt::Expr(ir::Expr::call(&run, vec![])), set(0)], entry });
-            self.watched.push((f.name.clone(), flag));
+            self.guarded(&f.name, name.clone(), params, body, entry, out);
             self.origins.insert(name.clone(), (self.hir.files[f.module], f.span));
         } else {
             out.push(ir::Function { name: name.clone(), params, ret: (f.ret != Ty::Unit).then(|| kind_of(&f.ret)), body, entry });
@@ -598,7 +622,16 @@ impl<'a> Gen<'a> {
             h::Stmt::Return(value) => {
                 let v = value.as_ref().map(|e| self.expr(e));
                 self.flush(out);
+                // leaving a task for good: it is no longer running
+                if let Some(t) = &self.task {
+                    out.push(ir::Stmt::Assign { target: ir::VarRef::Global(t.running.clone()), value: ir::Expr::Int(0) });
+                }
                 out.push(ir::Stmt::Return(v));
+            }
+            h::Stmt::Start { func, args } => {
+                let args = args.iter().map(|a| self.expr(a)).collect();
+                self.flush(out);
+                out.push(ir::Stmt::Expr(ir::Expr::Call(self.fn_names[func.0].clone(), args)));
             }
             h::Stmt::Break => {
                 if let Some(Some(b)) = self.loops.last().map(|l| l.brk.clone()) {
@@ -712,7 +745,7 @@ impl<'a> Gen<'a> {
     /// The marker the lowering attaches to the `While` that follows it.
     fn loop_info(&self, trips: Option<u64>, head: Span) -> ir::Stmt {
         let file = self.hir.files[self.hir.fns[self.cur_fn].module];
-        ir::Stmt::LoopInfo(ir::LoopInfo { trips, origin: Some((file, head)) })
+        ir::Stmt::LoopInfo(ir::LoopInfo { trips, origin: Some((file, head)), slice: None })
     }
 
     fn while_loop(&mut self, cond: &h::Expr, body: &h::Block, out: &mut Vec<ir::Stmt>) {

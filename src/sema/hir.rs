@@ -112,6 +112,8 @@ pub struct FnDef {
     pub span: Span,
     /// Declared in the embedded standard library: only generated when something calls it.
     pub std: bool,
+    /// A `task fn`: runs a slice per tick; started with `Stmt::Start`.
+    pub task: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Default)]
@@ -133,6 +135,8 @@ pub enum Stmt {
     Break,
     Continue,
     Context { clauses: Vec<CtxClause>, body: Block },
+    /// `start task(args);`
+    Start { func: FuncId, args: Vec<Expr> },
     Block(Block),
     Expr(Expr),
 }
@@ -383,6 +387,10 @@ impl Stmt {
                 body.calls(out);
             }
             Stmt::Block(b) => b.calls(out),
+            Stmt::Start { func, args } => {
+                out.push(*func);
+                args.iter().for_each(|a| a.calls(out));
+            }
             Stmt::Expr(e) => e.calls(out),
         }
     }

@@ -1,5 +1,6 @@
 //! The whole pipeline: project files -> parse -> check -> HIR -> IR -> data pack.
 
+use std::collections::HashMap;
 use std::path::Path;
 
 use crate::codegen;
@@ -26,6 +27,8 @@ pub struct Options {
     /// Set the game's `max_command_sequence_length` to this when the pack loads (`--command-limit`;
     /// default: `Slab.toml`, else leave it alone).
     pub command_limit: Option<i32>,
+    /// Commands a `task fn` may use per tick (`--task-budget`; default: `Slab.toml`, else 30,000).
+    pub task_budget: Option<i32>,
 }
 
 pub struct Compiled {
@@ -186,12 +189,22 @@ pub fn compile(entry: &Path, opts: &Options) -> Result<Compiled, CompileError> {
     let pack_id = opts.pack_id.clone().or_else(|| manifest.as_ref().and_then(|m| m.pack_id.clone())).unwrap_or_else(|| format!("file/{namespace}"));
 
     let command_limit = opts.command_limit.or(manifest.as_ref().and_then(|m| m.command_limit));
-    let gen_opts = codegen::GenOptions { sources: &project.sources, abort_on_unwrap, pack_id, command_limit };
-    let program = match codegen::generate(&checked.hir, &namespace, &description, &gen_opts) {
-        Ok(p) => p,
-        Err(errors) => return Err(CompileError::Source { sources: project.sources, errors, warnings: checked.warnings }),
+    let task_budget = opts.task_budget.or(manifest.as_ref().and_then(|m| m.task_budget)).unwrap_or(30_000);
+    let mut gen_opts = codegen::GenOptions { sources: &project.sources, abort_on_unwrap, pack_id, command_limit, task_budget, slice_costs: HashMap::new() };
+    let generate_and_lower = |gen_opts: &codegen::GenOptions| -> Result<(crate::ir::Program, DataPack, lower::LowerInfo), CompileError> {
+        let program = codegen::generate(&checked.hir, &namespace, &description, gen_opts).map_err(|errors| CompileError::Source { sources: project.sources.clone(), errors, warnings: checked.warnings.clone() })?;
+        let (pack, info) = lower::lower_with_info(&program).map_err(|e| CompileError::Backend(format!("the backend rejected the program: {e}")))?;
+        Ok((program, pack, info))
     };
-    let (mut pack, info) = lower::lower_with_info(&program).map_err(|e| CompileError::Backend(format!("the backend rejected the program: {e}")))?;
+    let (mut program, mut pack, mut info) = generate_and_lower(&gen_opts)?;
+    if !info.slices.is_empty() {
+        // a task suspends when its budget of commands is spent, so it has to know what each trip of
+        // its loops and each of its states cost: measure them in the first pack and generate again
+        // with the numbers (only constants change, so the costs stay the same)
+        let none = HashMap::new();
+        gen_opts.slice_costs = info.slices.iter().map(|(n, id)| (*n, cost::estimate(&pack, &none, id).high)).collect();
+        (program, pack, info) = generate_and_lower(&gen_opts)?;
+    }
     pack.set_target(target);
     let mut too_long = limit_warnings(&pack, &info, &program, &namespace, &project.sources, command_limit.map_or(cost::LIMIT, |l| l.max(0) as u64));
     let problems = pack.validate();
@@ -755,6 +768,24 @@ mod tests {
         let c = build_main("#[load] fn boot() { say(\"hi\"); }");
         assert!(c.pack.function(&ResourceLocation::parse("t:_limit_setup").unwrap()).is_none());
         assert!(fn_text(&c, "t:_init").contains("function t:boot"));
+    }
+
+    #[test]
+    fn a_task_is_a_state_machine_that_suspends_when_its_budget_is_spent() {
+        let c = build_main("task fn work(n: int) { let mut i = 0; while i < n { i += 1; } say(\"done\"); } #[load] fn boot() { start work(100000); }");
+        // `start` stores the arguments, resets the state and asks for the first slice; it does not run anything itself
+        let start = fn_text(&c, "t:work");
+        assert!(start.contains("#g.work__arg_n t") && start.contains("#g.work__state t 0") && start.contains("#g.work__running t 1"), "{start}");
+        assert!(start.contains("schedule function t:work__step 1t"), "{start}");
+        // the step is guarded like an entry point, and the body asks for the next tick when its budget is gone
+        assert!(fn_text(&c, "t:work__step").contains("function t:work__step__run"));
+        let all: String = c.pack.functions().filter(|(id, _)| id.path().starts_with("work__step__run")).map(|(_, f)| f.render()).collect();
+        assert!(all.contains("schedule function t:work__step 1t") && all.contains("return 1"), "{all}");
+        assert!(all.contains("scoreboard players remove") || all.contains("scoreboard players operation"), "{all}");
+        // the loop is in a block of its own, so a resumed task does not run its set-up again
+        assert!(c.pack.function(&ResourceLocation::parse("t:_watchdog").unwrap()).is_some());
+        // a task cannot be entered any other way
+        assert!(build_err("task fn work() {} #[load] fn boot() { work(); }").contains("is a task"));
     }
 
     #[test]

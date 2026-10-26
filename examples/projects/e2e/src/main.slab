@@ -192,6 +192,14 @@ global r_push_x: int = 0;
 global r_push_z: int = 0;
 global r_overrun_armed: int = 1;
 global r_overrun_done: int = 0;
+global r_task_count: int = 0;
+global r_task_count_done: int = 0;
+global r_task_cells: int = 0;
+global r_task_hits: int = 0;
+global r_task_grid_done: int = 0;
+global r_task_early: int = 0;
+global r_task_restart: int = 0;
+global r_task_ring_done: int = 0;
 global r_cmd_value: int = 0;
 global r_cmd_ok: int = 0;
 global r_cmd_err: int = 0;
@@ -439,12 +447,14 @@ fn world_test() {
     entity_test();
     double_world_test();
     motion_world_test();
+    start marker_ring(summon("minecraft:marker", 8, 80, 8), 200);
     string_test();
     selector_test();
     equality_test();
     enum_test();
     impl_test();
     command_test();
+    start_pure_tasks();
     match_test();
     double_test();
 
@@ -772,6 +782,77 @@ fn motion_world_test() {
     particle("minecraft:end_rod", ~, ~1, ~);
     kill(m);
     kill(other);
+}
+
+// Tasks: loops that take many ticks. Each of these needs far more than the 65,536 commands a tick
+// allows, so it only finishes because it runs a slice per tick.
+task fn count_to(n: int) {
+    let mut i = 0;
+    while i < n {
+        i += 1;
+    }
+    r_task_count = i;
+    r_task_count_done = 1;
+}
+
+task fn grid() {
+    let mut cells = 0;
+    let mut hits = 0;
+    for x in 0..40 {
+        if x == 25 { break; }
+        let mut z = 0;
+        while z < 30 {
+            z += 1;
+            cells += 1;
+            if z == 21 { continue; }
+            hits += 1;
+        }
+    }
+    r_task_cells = cells;
+    r_task_hits = hits;
+    r_task_grid_done = 1;
+}
+
+task fn stop_early(limit: int) {
+    let mut i = 0;
+    while i < 100000 {
+        i += 1;
+        if i >= limit {
+            r_task_early = i;
+            return;
+        }
+    }
+    r_task_early = 0 - 1;
+}
+
+task fn restart_probe(n: int) {
+    let mut i = 0;
+    while i < n { i += 1; }
+    r_task_restart = i;
+}
+
+// More than one tick of work with the library calls an entity needs: 200 markers in a ring.
+task fn marker_ring(center: Entity, count: int) {
+    let mut i = 0;
+    while i < count {
+        be center {
+            let marker = summon("minecraft:marker");
+            tag::add(marker, "tring");
+            marker.set_rotation(NearDouble::from_int(i * 2), 0);
+            marker.move_local(0, 0, 3);
+        }
+        i += 1;
+    }
+    r_task_ring_done = 1;
+}
+
+fn start_pure_tasks() {
+    start count_to(30000);
+    start grid();
+    start stop_early(40000);
+    // starting a task that is still waiting for its next slice begins it over
+    start restart_probe(10);
+    start restart_probe(30000);
 }
 
 // `run_command`: a command written as text, with the outcome as a `Result<int, ()>`.

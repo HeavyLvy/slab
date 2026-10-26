@@ -29,6 +29,7 @@ minecraft = "26.3"               # the game version the pack is for (default: th
 abort-on-unwrap = false          # a failed unwrap() also runs `datapack disable`
 pack-id = "file/my_game"         # the pack that command disables
 command-limit = 1000000          # raise the game's commands-per-tick limit (default: leave it at 65536)
+task-budget = 30000              # commands a `task fn` uses per tick before it waits for the next (default 30000)
 ```
 
 Only this part of TOML is read (tables, `key = "text" | true | false | 123`, `#` comments). A key the compiler does not know is an error with its line, so a typo cannot be ignored silently. The namespace is `namespace`, else `name` with every character that is not a letter or digit turned into `_` and lowercased (`My-Game` is `my_game`). The command line wins over the file (`--namespace`, `--description`, `--abort-on-unwrap`, `--pack-id`).

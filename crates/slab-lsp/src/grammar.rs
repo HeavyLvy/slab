@@ -45,6 +45,7 @@ pub fn tm_language() -> Value {
             { "include": "#relative-coordinate" },
             { "include": "#control-keywords" },
             { "include": "#context-keywords" },
+            { "include": "#task-keywords" },
             { "include": "#boolean-keywords" },
             { "include": "#builtins" },
             { "include": "#builtin-modules" },
@@ -208,6 +209,15 @@ fn repository() -> Map<String, Value> {
         json!({
             "match": keyword_alternation(KwClass::Control),
             "name": "keyword.control.slab",
+        }),
+    );
+    // `task fn` and `start name(..)` are words only in these positions, so `start` stays usable as a name
+    r.insert(
+        "task-keywords".into(),
+        json!({
+            "comment": "task fn, and start before a task's name: contextual, not reserved",
+            "match": r"\b(?:task(?=\s+fn\b)|start(?=\s+[A-Za-z_]))",
+            "name": "keyword.declaration.slab",
         }),
     );
     r.insert(

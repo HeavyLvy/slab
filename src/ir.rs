@@ -140,6 +140,13 @@ pub enum Stmt {
     /// Appends a Data value to the list at `target.path`.
     Append { target: VarRef, path: NbtPath, value: Expr },
     If { cond: Expr, then: Vec<Stmt>, els: Vec<Stmt> },
+    /// Leaves the function without cleaning up (`Return` drops the function's stored locals, this
+    /// keeps them): a task slice that will be continued by a scheduled call. Like `Return`, it
+    /// propagates out of nested blocks.
+    Suspend,
+    /// Names the `If` that follows it (the lowering records which function its `then` block is,
+    /// so the cost of a task state can be measured); generates nothing.
+    BlockInfo(u32),
     /// Describes the `While` that follows it (the lowering records it for the cost estimate);
     /// generates nothing.
     LoopInfo(LoopInfo),
@@ -185,6 +192,9 @@ pub struct LoopInfo {
     pub trips: Option<u64>,
     /// The source file and span of the loop's head, for messages.
     pub origin: Option<(usize, Span)>,
+    /// A loop of a task that may suspend after any trip: its number, so the cost of one trip can
+    /// be measured and the budget per tick set (`codegen::task`).
+    pub slice: Option<u32>,
 }
 
 #[derive(Clone, Debug, PartialEq)]

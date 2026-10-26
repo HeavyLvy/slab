@@ -63,6 +63,9 @@
       "include": "#context-keywords"
     },
     {
+      "include": "#task-keywords"
+    },
+    {
       "include": "#boolean-keywords"
     },
     {
@@ -358,6 +361,11 @@
     "string-escape": {
       "match": "\\\\u\\{[0-9a-fA-F_]+\\}|\\\\[ntr0\\\\\"']",
       "name": "constant.character.escape.slab"
+    },
+    "task-keywords": {
+      "comment": "task fn, and start before a task's name: contextual, not reserved",
+      "match": "\\b(?:task(?=\\s+fn\\b)|start(?=\\s+[A-Za-z_]))",
+      "name": "keyword.declaration.slab"
     }
   },
   "scopeName": "source.slab"

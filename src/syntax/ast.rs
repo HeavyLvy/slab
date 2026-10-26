@@ -69,6 +69,8 @@ pub struct FnDecl {
     /// The first parameter is a bare `self` (only meaningful inside an `impl`); it is also
     /// `params[0]`, typed `Self`.
     pub has_self: bool,
+    /// `task fn`: its loops run a slice per tick (`docs/lang/tasks.md`); started with `start`.
+    pub is_task: bool,
 }
 
 /// `impl<T> Name<T> { methods }`: functions attached to a type.
@@ -166,6 +168,8 @@ pub enum StmtKind {
     /// `target` is a name, a field access or an index expression.
     Assign { target: Expr, op: AssignOp, value: Expr },
     If { cond: Expr, then: Block, els: Option<Box<Else>> },
+    /// `start name(args);`: launches a task.
+    Start(Expr),
     /// `if let pattern = value { .. } else { .. }`
     IfLet { pat: Pattern, value: Expr, then: Block, els: Option<Box<Else>> },
     While { cond: Expr, body: Block },

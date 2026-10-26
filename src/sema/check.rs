@@ -244,6 +244,8 @@ struct Checker<'a> {
     generic_scope: Vec<String>,
     /// Names every module sees without importing them (`Option`, `Some`, ...), from `std`.
     prelude_values: HashMap<String, ValueSym>,
+    /// Checking the call of a `start` statement (the only place a task may be called).
+    starting: bool,
     prelude_types: HashMap<String, Ty>,
     impls: Vec<ImplInfo<'a>>,
     methods: Vec<MethodInfo<'a>>,
@@ -306,6 +308,7 @@ impl<'a> Checker<'a> {
             enum_names: Vec::new(),
             generic_scope: Vec::new(),
             prelude_values: HashMap::new(),
+            starting: false,
             prelude_types: HashMap::new(),
             impls: Vec::new(),
             methods: Vec::new(),
@@ -1568,6 +1571,17 @@ impl<'a> Checker<'a> {
             } else {
                 self.entry_of(attrs, f, !params.is_empty(), &ret)
             };
+            if f.is_task {
+                if self.fns[fi].self_ty.is_some() {
+                    self.error(f.name.span, "a method cannot be a task");
+                }
+                if ret != Ty::Unit {
+                    self.error(f.name.span, format!("task `{}` returns nothing: it may run over many ticks, so there is nobody to wait for a value", f.name.name));
+                }
+                if entry.is_some() {
+                    self.error_hint(f.name.span, format!("task `{}` cannot be an entry point", f.name.name), "start it from a `#[load]` or `#[tick]` function: `start name(..);`");
+                }
+            }
             self.self_ty = None;
             self.fns[fi].params = params;
             self.fns[fi].ret = ret;
@@ -1990,6 +2004,7 @@ impl<'a> Checker<'a> {
             entry: self.fns[idx].entry,
             span: self.fns[idx].span,
             std: self.mods[self.fns[idx].module].std,
+            task: decl.is_task,
         });
     }
 
@@ -2134,6 +2149,24 @@ impl<'a> Checker<'a> {
             }
             K::Context { clauses, body } => self.context_stmt(clauses, body),
             K::Block(b) => Stmt::Block(self.block(b)),
+            K::Start(call) => {
+                let ast::ExprKind::Call { callee, args } = &call.kind else { return Stmt::Expr(Expr::error(call.span)) };
+                self.starting = true;
+                let e = self.call(callee, args, None, call.span);
+                self.starting = false;
+                match e.kind {
+                    ExprKind::Call { func, args } if self.fns[func.0].decl.is_task => Stmt::Start { func, args },
+                    ExprKind::Call { .. } => {
+                        self.error_hint(call.span, "`start` launches a task, and this is an ordinary function", "call it normally, or declare it `task fn`");
+                        Stmt::Expr(Expr::error(call.span))
+                    }
+                    ExprKind::Error => Stmt::Expr(Expr::error(call.span)),
+                    _ => {
+                        self.error(call.span, "`start` needs a call of a task: `start name(args);`");
+                        Stmt::Expr(Expr::error(call.span))
+                    }
+                }
+            }
             K::IfLet { pat, value, then, els } => {
                 let scrut = self.match_scrutinee(value);
                 let arms = vec![
@@ -3124,6 +3157,11 @@ impl<'a> Checker<'a> {
         let params = self.fns[id.0].params.clone();
         let ret = self.fns[id.0].ret.clone();
         let name = self.fns[id.0].decl.name.name.clone();
+        if self.fns[id.0].decl.is_task && !self.starting {
+            self.error_hint(span, format!("`{name}` is a task: it runs over several ticks, so it is not called"), format!("start it with `start {name}(..);`"));
+            self.args_for_errors(args);
+            return Expr::error(span);
+        }
         if args.len() != params.len() {
             let takes = format!("{} argument{}", params.len(), if params.len() == 1 { "" } else { "s" });
             self.arity_error(&format!("function `{name}`"), takes, args.len(), span);

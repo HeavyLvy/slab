@@ -878,6 +878,51 @@
   "matches": "\\[e2e\\].*\\[pts\\]|\\[pts\\].*\\[e2e\\]"
  },
  {
+  "cmd": "scoreboard players get #g.r_task_count e2e",
+  "expect": "has 30000 [e2e]",
+  "wait": 6
+ },
+ {
+  "cmd": "scoreboard players get #g.r_task_count_done e2e",
+  "expect": "has 1 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_task_cells e2e",
+  "expect": "has 750 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_task_hits e2e",
+  "expect": "has 725 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_task_grid_done e2e",
+  "expect": "has 1 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_task_early e2e",
+  "expect": "has 40000 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_task_restart e2e",
+  "expect": "has 30000 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.r_task_ring_done e2e",
+  "expect": "has 1 [e2e]"
+ },
+ {
+  "cmd": "execute if entity @e[tag=tring]",
+  "expect": "Count: 200"
+ },
+ {
+  "cmd": "scoreboard players get #g._cutoffs e2e",
+  "expect": "has 1 [e2e]"
+ },
+ {
+  "cmd": "scoreboard players get #g.count_to__running e2e",
+  "expect": "has 0 [e2e]"
+ },
+ {
   "cmd": "function e2e:_uninstall"
  },
  {

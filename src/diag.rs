@@ -66,6 +66,7 @@ impl fmt::Display for Diagnostic {
 
 impl std::error::Error for Diagnostic {}
 
+#[derive(Clone)]
 pub struct SourceFile {
     pub name: String,
     pub text: String,
@@ -124,7 +125,7 @@ impl SourceFile {
 }
 
 /// All source files of a compilation, indexed by [`Diagnostic::file`].
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct SourceMap {
     pub files: Vec<SourceFile>,
 }

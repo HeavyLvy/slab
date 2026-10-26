@@ -55,7 +55,7 @@ import_decl := 'import' IDENT ('::' IDENT)* ['as' IDENT] ';'    // the module a/
              | 'import' IDENT ('::' IDENT)* '::' '{' IDENT (',' IDENT)* [','] '}' ';'   // items
 attr        := '#' '[' IDENT ( '(' [expr (',' expr)* [',']] ')' )? ']'
 
-fn_decl     := 'fn' IDENT '(' [param (',' param)* [',']] ')' ['->' type] block
+fn_decl     := ['task'] 'fn' IDENT '(' [param (',' param)* [',']] ')' ['->' type] block
 param       := IDENT ':' type
 global_decl := 'global' IDENT ':' type '=' expr ';'
 const_decl  := 'const'  IDENT ':' type '=' expr ';'
@@ -70,10 +70,11 @@ objective_decl := 'objective' IDENT '=' expr ';'        // expr: criteria string
 type        := [IDENT '::'] IDENT [ '<' type (',' type)* '>' ]   // int, bool, str, list<int>, Player, util::Point
 
 block       := '{' stmt* '}'
-stmt        := let_stmt | if_stmt | if_let_stmt | match_expr [';'] | while_stmt | loop_stmt | for_stmt
+stmt        := let_stmt | start_stmt | if_stmt | if_let_stmt | match_expr [';'] | while_stmt | loop_stmt | for_stmt
              | 'return' [expr] ';' | 'break' ';' | 'continue' ';'
              | context_stmt | block
              | expr ( assign_op expr )? ';'
+start_stmt  := 'start' call ';'          // `start` and `task` are words only here (before a name / before `fn`), not reserved
 let_stmt    := 'let' ['mut'] IDENT [':' type] '=' expr ';'
 assign_op   := '=' | '+=' | '-=' | '*=' | '/=' | '%='     // target: name, field access or index
 if_stmt     := 'if' expr block ['else' (if_stmt | block)]

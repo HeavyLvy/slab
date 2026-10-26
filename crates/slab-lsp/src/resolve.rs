@@ -311,6 +311,13 @@ impl ProjectState {
         let text = file.text.get(t.span.start as usize..t.span.end as usize)?;
         match &t.tok {
             Tok::Kw(k) => Some(crate::help::keyword(*k).to_owned()),
+            Tok::Ident(w) if matches!(w.as_str(), "task" | "start") => {
+                // only where the word means something: `task fn`, `start name`
+                let rest = file.text.get(t.span.end as usize..)?.trim_start();
+                let next = rest.chars().next()?;
+                let applies = if w == "task" { rest.starts_with("fn") && !rest[2..].starts_with(|c: char| c.is_alphanumeric() || c == '_') } else { next.is_alphabetic() || next == '_' };
+                applies.then(|| crate::help::contextual(w)).flatten().map(str::to_owned)
+            }
             Tok::Selector { var, args } => {
                 if let Some((raw, span)) = args
                     && let Some(h) = crate::selector::key_hover(raw, span.start as usize, offset)

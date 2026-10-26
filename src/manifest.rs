@@ -11,6 +11,7 @@
 //! [build]
 //! abort-on-unwrap = false     # a failed unwrap() also runs `datapack disable`
 //! pack-id = "file/my_pack"    # the pack that command disables
+//! task-budget = 30000         # commands a `task fn` may use per tick before it waits for the next
 //! command-limit = 1000000     # raise the game's limit of commands per tick (see docs/lang/codegen.md)
 //! ```
 //!
@@ -34,6 +35,7 @@ pub struct Manifest {
     pub abort_on_unwrap: Option<bool>,
     pub pack_id: Option<String>,
     pub command_limit: Option<i32>,
+    pub task_budget: Option<i32>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -103,6 +105,13 @@ impl Manifest {
                         return Err(at("`command-limit` must be between 1 and 2147483647".into()));
                     }
                     m.command_limit = Some(n as i32);
+                }
+                ("build", "task-budget") => {
+                    let Value::Int(n) = value else { return Err(at(format!("`task-budget` must be a number, not {}", value.kind()))) };
+                    if !(100..=i64::from(i32::MAX)).contains(&n) {
+                        return Err(at("`task-budget` must be between 100 and 2147483647 commands per tick".into()));
+                    }
+                    m.task_budget = Some(n as i32);
                 }
                 ("build", "abort-on-unwrap") => {
                     want(value.clone(), "true or false")?;

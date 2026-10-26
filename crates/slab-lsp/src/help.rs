@@ -39,6 +39,15 @@ pub fn keyword(k: Kw) -> &'static str {
     }
 }
 
+/// `task` (before `fn`) and `start` (before a task's name): words only there, so they are not keywords.
+pub fn contextual(word: &str) -> Option<&'static str> {
+    Some(match word {
+        "task" => "```slab\ntask fn ring(center: Entity) {\n    let mut i = 0;\n    while i < 360 { ...; i += 1; }\n    print(\"done\");\n}\n```\nA function that may take many ticks. The game stops a function after 65,536 commands in one tick, so a task runs its loops in slices: after about 30,000 commands (`task-budget` in `Slab.toml`) it waits for the next tick and carries on where it was, and the code after a loop runs when the loop is done. Launch it with `start ring(player);`, which returns at once. One run at a time: starting it again begins it over. A task returns nothing and cannot be called, only started.",
+        "start" => "```slab\nstart ring(player);\n```\nLaunches a `task fn` and returns at once; the task runs from the next tick, a slice per tick, until it finishes. Starting a task that is still running begins it over.",
+        _ => return None,
+    })
+}
+
 /// What an attribute does.
 pub fn attribute(name: &str) -> Option<&'static str> {
     Some(match name {

@@ -67,7 +67,7 @@ fn starts_stmt(t: &Tok) -> bool {
 
 /// Tokens that begin an item.
 fn starts_item(t: &Tok) -> bool {
-    matches!(t, Tok::Kw(Kw::Fn | Kw::Struct | Kw::Enum | Kw::Impl | Kw::Global | Kw::Const | Kw::Objective | Kw::Import | Kw::Pub) | Tok::Hash)
+    matches!(t, Tok::Ident(w) if w == "task") || matches!(t, Tok::Kw(Kw::Fn | Kw::Struct | Kw::Enum | Kw::Impl | Kw::Global | Kw::Const | Kw::Objective | Kw::Import | Kw::Pub) | Tok::Hash)
 }
 
 fn is_ctx_kw(t: &Tok) -> bool {
@@ -363,6 +363,12 @@ impl Parser {
                 ItemKind::Import(self.import_decl()?)
             }
             Tok::Kw(Kw::Fn) => ItemKind::Fn(self.fn_decl()?),
+            Tok::Ident(w) if w == "task" && self.peek_at(1) == &Tok::Kw(Kw::Fn) => {
+                self.next();
+                let mut f = self.fn_decl()?;
+                f.is_task = true;
+                ItemKind::Fn(f)
+            }
             Tok::Kw(Kw::Global) => {
                 self.next();
                 ItemKind::Global(self.var_decl()?)
@@ -382,7 +388,7 @@ impl Parser {
                 self.expect_semi()?;
                 ItemKind::Objective { name, criteria }
             }
-            _ => return self.unexpected("an item (`fn`, `global`, `const`, `struct`, `enum`, `impl`, `objective` or `import`)"),
+            _ => return self.unexpected("an item (`fn`, `task`, `global`, `const`, `struct`, `enum`, `impl`, `objective` or `import`)"),
         };
         Ok(Item { attrs, public, kind, span: start.to(self.prev_span()) })
     }
@@ -447,10 +453,10 @@ impl Parser {
         if self.at(&Tok::Semi) {
             // `fn f(..) -> T;`: implemented by the compiler (`#[intrinsic]`)
             let semi = self.expect_semi()?;
-            return Ok(FnDecl { name, params, ret, body: Block { stmts: Vec::new(), span: semi }, has_body: false, has_self });
+            return Ok(FnDecl { name, params, ret, body: Block { stmts: Vec::new(), span: semi }, has_body: false, has_self, is_task: false });
         }
         let body = self.block()?;
-        Ok(FnDecl { name, params, ret, body, has_body: true, has_self })
+        Ok(FnDecl { name, params, ret, body, has_body: true, has_self, is_task: false })
     }
 
     /// `name: type, ...` up to (not including) `end`.
@@ -651,6 +657,15 @@ impl Parser {
                 self.let_rest(name, mutable)
             }
             Tok::Kw(Kw::If) => return self.if_stmt(),
+            Tok::Ident(w) if w == "start" && matches!(self.peek_at(1), Tok::Ident(_)) => {
+                self.next();
+                let call = self.expr(FREE)?;
+                if !matches!(call.kind, ExprKind::Call { .. }) {
+                    return Err(Diagnostic::new("`start` needs a call: `start name(args);`", call.span));
+                }
+                self.expect_semi()?;
+                StmtKind::Start(call)
+            }
             Tok::Kw(Kw::Match) => {
                 // a `match` statement needs no `;`
                 let e = self.match_expr()?;
@@ -1429,6 +1444,18 @@ mod tests {
         assert_eq!(clauses.len(), 2);
         assert!(matches!(&clauses[0].kind, CtxKind::Be(e) if sx(e) == "e"));
         assert!(matches!(&clauses[1].kind, CtxKind::Positioned(_)));
+    }
+
+    #[test]
+    fn tasks_and_start() {
+        let f = func("task fn ring(c: int) { start ring(1); }");
+        assert!(f.is_task);
+        assert!(matches!(&f.body.stmts[0].kind, StmtKind::Start(e) if matches!(e.kind, ExprKind::Call { .. })));
+        assert!(!func("fn plain() {}").is_task);
+        assert!(err("fn f() { start work + 1; }").message.contains("`start` needs a call"));
+        // `task` is part of the item, so attributes still go in front of it
+        let p = ok("#[load] pub task fn t() {}");
+        assert!(matches!(&p.items[0].kind, ItemKind::Fn(f) if f.is_task) && p.items[0].public);
     }
 
     #[test]
