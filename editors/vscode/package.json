@@ -88,7 +88,7 @@
     "vsix": "npm run package && code --install-extension \"$(ls -t slab-vscode-*.vsix | head -n 1)\""
   },
   "devDependencies": {
-    "@types/node": "^22",
+    "@types/node": "^26",
     "@types/vscode": "^1.84.0",
     "@vscode/vsce": "^3",
     "esbuild": "^0.28.2",
