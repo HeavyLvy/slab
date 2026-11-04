@@ -8,6 +8,7 @@
 - [The language](guide/language.md)
 - [Structs, enums and match](guide/data.md)
 - [Talking to Minecraft](guide/minecraft.md)
+- [Testing in a real server](guide/testing.md)
 - [Going deeper]()
   - [Projects and modules](lang/modules.md)
   - [Enums, Option and Result](lang/enums.md)

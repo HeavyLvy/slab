@@ -1,0 +1,6 @@
+[project]
+name = "tested"
+description = "A small pack with tests, run by `slab test`"
+
+[test]
+timeout = 30

@@ -16,6 +16,10 @@
 //!
 //! [lint]
 //! naming = "warn"             # "warn" (default) or "off": warn about names that break the conventions
+//!
+//! [test]
+//! accept-eula = false         # true: you agree to the Minecraft EULA, so `slab test` may download the server
+//! timeout = 60                # seconds one test may take
 //! ```
 //!
 //! The source code lives in `src/`, and `src/main.slab` is the root module. Only the part of TOML
@@ -41,6 +45,10 @@ pub struct Manifest {
     pub task_budget: Option<i32>,
     /// `[lint] naming`: warn about names that break the conventions (default on).
     pub naming: Option<bool>,
+    /// `[test] accept-eula`: agree to the Minecraft EULA so `slab test` may download the server.
+    pub accept_eula: Option<bool>,
+    /// `[test] timeout`: seconds one test may take (default 60).
+    pub test_timeout: Option<i32>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -75,8 +83,8 @@ impl Manifest {
             if let Some(rest) = line.strip_prefix('[') {
                 let Some(t) = rest.strip_suffix(']') else { return Err(at("a table header ends with `]`".into())) };
                 let t = t.trim();
-                if !matches!(t, "project" | "build" | "lint") {
-                    return Err(at(format!("unknown table `[{t}]` (the tables are `[project]`, `[build]` and `[lint]`)")));
+                if !matches!(t, "project" | "build" | "lint" | "test") {
+                    return Err(at(format!("unknown table `[{t}]` (the tables are `[project]`, `[build]`, `[lint]` and `[test]`)")));
                 }
                 table = t.to_owned();
                 continue;
@@ -122,6 +130,18 @@ impl Manifest {
                     want(value.clone(), "true or false")?;
                     let Value::Bool(b) = value else { unreachable!() };
                     m.abort_on_unwrap = Some(b);
+                }
+                ("test", "accept-eula") => {
+                    want(value.clone(), "true or false")?;
+                    let Value::Bool(b) = value else { unreachable!() };
+                    m.accept_eula = Some(b);
+                }
+                ("test", "timeout") => {
+                    let Value::Int(n) = value else { return Err(at(format!("`timeout` must be a number, not {}", value.kind()))) };
+                    if !(1..=3600).contains(&n) {
+                        return Err(at("`timeout` must be between 1 and 3600 seconds".into()));
+                    }
+                    m.test_timeout = Some(n as i32);
                 }
                 ("lint", "naming") => {
                     want(value.clone(), "a string")?;

@@ -1,0 +1,86 @@
+// A small pack with tests. Run them on a real Minecraft server with `slab test`.
+import std::*;
+import game::*;
+import test::*;
+
+objective points = "dummy";
+
+global ticks: int = 0;
+
+#[tick]
+fn count_ticks() {
+    ticks += 1;
+}
+
+/// Summon `n` guards in a row and tag them.
+fn spawn_guards(n: int) {
+    let mut i = 0;
+    while i < n {
+        let guard = summon("minecraft:zombie", i * 2, -60, 0);
+        tag::add(guard, "guard");
+        i += 1;
+    }
+}
+
+fn count_guards() -> int {
+    let mut n = 0;
+    for _guard in @e[tag=guard] {
+        n += 1;
+    }
+    return n;
+}
+
+fn dismiss_guards() {
+    kill(@e[tag=guard]);
+}
+
+#[test]
+fn guards_are_summoned_and_tagged() {
+    assert_eq(count_guards(), 0, "no guards before anyone summons them");
+    spawn_guards(3);
+    assert_eq(count_guards(), 3, "three guards after spawning three");
+}
+
+#[test]
+fn guards_can_be_dismissed() {
+    spawn_guards(2);
+    wait(5);
+    assert(exists(@e[tag=guard]), "the guards are still there after 5 ticks");
+    dismiss_guards();
+    wait(2);
+    assert(!exists(@e[tag=guard]), "no guards after dismissing them");
+}
+
+#[test]
+fn each_test_starts_in_an_empty_world() {
+    // the guards of the other tests were removed before this one started
+    assert_eq(count_guards(), 0, "no guards left over");
+    assert(run_command("execute if block 0 -61 0 minecraft:grass_block").is_ok(), "the ground is grass");
+}
+
+#[test]
+fn ticks_pass_while_a_test_waits() {
+    let before = ticks;
+    wait(20);
+    let passed = ticks - before;
+    assert(passed >= 19 && passed <= 21, "about 20 ticks went by while waiting 20 ticks");
+}
+
+#[test]
+fn blocks_can_be_placed_and_read_back() {
+    assert(setblock(0, -60, 0, "minecraft:stone"), "setblock reports success");
+    assert(run_command("execute if block 0 -60 0 minecraft:stone").is_ok(), "the stone is there");
+}
+
+#[test]
+fn a_test_may_change_a_score() {
+    assert(run_command("scoreboard players get #nobody tested").is_err(), "nobody has a score yet");
+    run_command("scoreboard players set #nobody tested 4");
+    assert(run_command("scoreboard players get #nobody tested").is_ok(), "now they have");
+}
+
+#[test]
+fn the_score_of_the_test_before_is_gone() {
+    // each test starts with the pack as it is after loading: scoreboards are reset too
+    assert(run_command("scoreboard players get #nobody tested").is_err(), "the score did not leak into this test");
+}

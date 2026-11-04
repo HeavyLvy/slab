@@ -4,6 +4,7 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ## [Unreleased]
 
+- `slab test`: write `#[test]` functions in slab and run them on a real Minecraft server that slab sets up (a flat world, reset before every test). Tests can `wait` for ticks, use `assert`, `assert_eq` and `fail` from the new `test` module, and fail when the server logs an error. Needs Java 25+; the server is downloaded once from Mojang after you accept the EULA. `[test]` in `Slab.toml`, a Testing guide, and typed `fill`, `forceload` and `stop` commands.
 - The VS Code extension is distributed only as `.vsix` files attached to each release; publishing to the VS Code Marketplace and Open VSX was dropped. The installation instructions explain installing a `.vsix`.
 
 ## [0.1.0] - 2026-10-25

@@ -18,6 +18,10 @@ command-limit = 1000000
 
 [lint]
 naming = "warn"                  # or "off"
+
+[test]
+accept-eula = false
+timeout = 60
 ```
 
 ## `[project]`
@@ -38,6 +42,13 @@ naming = "warn"                  # or "off"
 | `pack-id` | The pack that command disables. Default `file/<namespace>`. |
 | `task-budget` | Commands a [`task fn`](../lang/tasks.md) may use per tick before it waits for the next. 100 or more; default 30000. |
 | `command-limit` | Raise the game's `max_command_sequence_length` (65,536 by default) to this when the pack loads; `_uninstall` puts the old value back. See [Tasks](../lang/tasks.md) and [Projects and modules](../lang/modules.md). It is a rule of the whole world. |
+
+## `[test]`
+
+| Key | Meaning |
+|---|---|
+| `accept-eula` | `true`: you accept the [Minecraft EULA](https://aka.ms/MinecraftEULA), so `slab test` may download the server. Default `false`. |
+| `timeout` | Seconds one test may take, 1 to 3600. Default 60. |
 
 ## `[lint]`
 

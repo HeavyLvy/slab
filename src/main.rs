@@ -12,6 +12,7 @@ const USAGE: &str = "usage:
   slab build [PATH] [options]   compile a project to a data pack
   slab check [PATH]             parse and type-check a project, reporting errors and warnings
   slab fmt [PATH...] [options]  format source files in place (a project, a directory or files)
+  slab test [PATH] [options]    run the project's #[test] functions on a real Minecraft server
   slab parse <file.slab>        parse one file and print its syntax tree
   slab --version                print the version
 
@@ -19,6 +20,15 @@ A project is a directory with a Slab.toml and its code in src/, where src/main.s
 module. PATH is that directory, or any directory inside it (default: .), or the path of main.slab.
 Other .slab files are modules: `import a::b;` loads src/a/b.slab. (A bare directory with a
 main.slab and no Slab.toml also works.)
+
+test options (needs Java 25+; the server is downloaded once from Mojang):
+  --accept-eula          you accept the Minecraft EULA (https://aka.ms/MinecraftEULA), needed to download the server
+  --filter TEXT          only the tests whose name contains TEXT
+  --list                 list the tests without running them
+  --timeout SECS         seconds one test may take (default 60, or [test] timeout in Slab.toml)
+  --java PATH            the Java to run the server with
+  --jar PATH             use this server jar instead of downloading one
+  -v, --verbose          show the server log of every test
 
 fmt options:
   --check                change nothing; list the files that are not formatted and exit with 1
@@ -58,6 +68,7 @@ fn main() -> ExitCode {
             _ => usage_error("`slab check` takes at most one path"),
         },
         "fmt" => fmt(rest),
+        "test" => test(rest),
         "parse" => match rest {
             [path] => parse_file(path),
             _ => usage_error("`slab parse` takes one file"),
@@ -246,6 +257,51 @@ fn build_once(b: &BuildArgs) -> ExitCode {
         println!("zipped: {}", zip.display());
     }
     ExitCode::SUCCESS
+}
+
+fn test(args: &[String]) -> ExitCode {
+    let mut opts = slab::testrun::Options { path: PathBuf::from("."), ..Default::default() };
+    let mut it = args.iter();
+    let mut path_given = false;
+    while let Some(a) = it.next() {
+        let mut value = |what: &str| it.next().cloned().ok_or_else(|| format!("`{a}` needs {what}"));
+        let result: Result<(), String> = match a.as_str() {
+            "--accept-eula" => {
+                opts.accept_eula = true;
+                Ok(())
+            }
+            "--list" => {
+                opts.list = true;
+                Ok(())
+            }
+            "-v" | "--verbose" => {
+                opts.verbose = true;
+                Ok(())
+            }
+            "--filter" => value("some text").map(|v| opts.filter = Some(v)),
+            "--java" => value("a path").map(|v| opts.java = Some(PathBuf::from(v))),
+            "--jar" => value("a path").map(|v| opts.jar = Some(PathBuf::from(v))),
+            "--timeout" => value("a number of seconds").and_then(|v| v.parse::<u64>().ok().filter(|n| *n >= 1).ok_or_else(|| format!("`--timeout` needs a whole number of seconds, not `{v}`"))).map(|v| opts.timeout = Some(v)),
+            flag if flag.starts_with('-') => Err(format!("unknown option `{flag}` for `slab test`")),
+            path if !path_given => {
+                opts.path = PathBuf::from(path);
+                path_given = true;
+                Ok(())
+            }
+            _ => Err("`slab test` takes at most one path".to_owned()),
+        };
+        if let Err(msg) = result {
+            return usage_error(&msg);
+        }
+    }
+    match slab::testrun::run(&opts) {
+        Ok(true) => ExitCode::SUCCESS,
+        Ok(false) => ExitCode::from(1),
+        Err(message) => {
+            eprintln!("error: {}", message.trim_start_matches("error: "));
+            ExitCode::from(1)
+        }
+    }
 }
 
 /// The `.slab` files under `path`: the file itself, or every file in the directory (a project's

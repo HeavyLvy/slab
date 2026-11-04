@@ -16,4 +16,8 @@ python3 tools/verify_pack.py target/zoo --run zoo:all "$@" >target/verify-zoo.lo
 python3 tools/verify_pack.py target/programs --run prog:run_all --checks target/programs.checks.json "$@" >target/verify-programs.log 2>&1 && echo "programs: OK" || { echo "programs: FAILED (target/verify-programs.log)"; status=1; }
 python3 tools/verify_pack.py target/e2e/e2e --setup "forceload add 0 0" "forceload add 29999984 0" --run e2e:world_test --checks examples/projects/e2e/checks.json "$@" >target/verify-e2e.log 2>&1 && echo "e2e:      OK" || { echo "e2e:      FAILED (target/verify-e2e.log)"; status=1; }
 python3 tools/verify_pack.py target/limit/limit --checks examples/projects/limit/checks.json "$@" >target/verify-limit.log 2>&1 && echo "limit:    OK" || { echo "limit:    FAILED (target/verify-limit.log)"; status=1; }
+# `slab test`: the #[test] functions of a project, run on a real server (needs Java 25+; the server
+# jar comes from target/mc when it is there, else it is downloaded once, which accepts the EULA)
+jar=(); [ -f target/mc/server-26.3.jar ] && jar=(--jar target/mc/server-26.3.jar)
+./target/debug/slab test examples/projects/tested --accept-eula ${jar[@]+"${jar[@]}"} "$@" >target/verify-tests.log 2>&1 && echo "tests:    OK" || { echo "tests:    FAILED (target/verify-tests.log)"; status=1; }
 exit $status

@@ -328,3 +328,29 @@ fn watch_rebuilds_when_a_source_file_changes_and_survives_errors() {
     let _ = child.wait();
     let _ = fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn slab_test_lists_tests_and_asks_for_the_eula_before_downloading_a_server() {
+    let list = slab(&["test", example("tested").to_str().unwrap(), "--list"]);
+    let out = String::from_utf8_lossy(&list.stdout);
+    assert!(list.status.success(), "{}", String::from_utf8_lossy(&list.stderr));
+    assert!(out.contains("guards_are_summoned_and_tagged") && out.contains("main.slab:"), "{out}");
+    let filtered = slab(&["test", example("tested").to_str().unwrap(), "--list", "--filter", "dismissed"]);
+    let out = String::from_utf8_lossy(&filtered.stdout);
+    assert!(out.contains("guards_can_be_dismissed") && !out.contains("guards_are_summoned"), "{out}");
+
+    // with an empty cache and no agreement, nothing is downloaded
+    let cache = scratch("eula");
+    fs::create_dir_all(&cache).unwrap();
+    let o = Command::new(env!("CARGO_BIN_EXE_slab")).args(["test", example("tested").to_str().unwrap()]).env("SLAB_CACHE_DIR", &cache).env_remove("SLAB_ACCEPT_EULA").env_remove("SLAB_SERVER_JAR").output().unwrap();
+    let err = String::from_utf8_lossy(&o.stderr);
+    assert_eq!(o.status.code(), Some(1), "{err}");
+    assert!(err.contains("Minecraft EULA") && err.contains("--accept-eula"), "{err}");
+    assert!(!cache.join("mc").exists());
+    let _ = fs::remove_dir_all(&cache);
+
+    // a project without tests says so and succeeds
+    let none = slab(&["test", example("hello").to_str().unwrap()]);
+    assert!(none.status.success());
+    assert!(String::from_utf8_lossy(&none.stdout).contains("no tests found"));
+}

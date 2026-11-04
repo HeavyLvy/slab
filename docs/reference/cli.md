@@ -6,6 +6,7 @@ slab init                     make the current directory a project (moves .slab 
 slab build [PATH] [options]   compile a project to a data pack
 slab check [PATH]             parse and type-check a project, reporting errors and warnings
 slab fmt [PATH...] [options]  format source files in place
+slab test [PATH] [options]    run the project's #[test] functions on a real Minecraft server
 slab parse <file.slab>        parse one file and print its syntax tree
 slab --version                print the version
 ```
@@ -53,6 +54,26 @@ Rewrites `.slab` files in the canonical layout described in [Style and naming](s
 | `--stdin` | Read one file from standard input and write it formatted to standard output. This is what editors use. |
 
 A file with a syntax error is reported and left as it is. The language server offers the same formatting as "Format Document".
+
+## `slab test`
+
+```text
+slab test [PATH] [--filter TEXT] [--list] [--timeout SECS] [--java PATH] [--jar PATH] [--accept-eula] [-v]
+```
+
+Builds the project **with its `#[test]` functions**, starts a real Minecraft server in `build/test-server/`, runs each test in a reset world and reports which passed. Needs Java 25 or newer, and downloads the server jar from Mojang once, which means accepting the [Minecraft EULA](https://aka.ms/MinecraftEULA) (`--accept-eula`, `SLAB_ACCEPT_EULA=1`, or `accept-eula = true` under `[test]` in `Slab.toml`). Exit code 1 when a test fails. The [Testing guide](../guide/testing.md) explains how tests are written and what a test starts in.
+
+| Option | Meaning |
+|---|---|
+| `--filter TEXT` | only the tests whose name contains `TEXT` |
+| `--list` | list the tests without running them (no Java or server needed) |
+| `--timeout SECS` | seconds one test may take (default 60, or `timeout` under `[test]`) |
+| `--java PATH` | the Java to run the server with (default: `$JAVA`, `$JAVA_HOME`, then `java` on `PATH`) |
+| `--jar PATH` | use this server jar instead of the downloaded one (or `$SLAB_SERVER_JAR`) |
+| `--accept-eula` | you accept the Minecraft EULA |
+| `-v`, `--verbose` | show the server's log lines of every test |
+
+`$SLAB_CACHE_DIR` moves the folder where the server jar is kept.
 
 ## `slab new` and `slab init`
 

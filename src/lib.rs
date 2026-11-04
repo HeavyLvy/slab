@@ -15,6 +15,7 @@ pub mod lower;
 pub mod manifest;
 pub mod project;
 pub mod sema;
+pub mod testrun;
 pub mod stdlib;
 pub mod stdref;
 pub mod syntax;
