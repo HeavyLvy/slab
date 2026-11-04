@@ -28,6 +28,11 @@ test options (needs Java 25+; the server is downloaded once from Mojang):
   --timeout SECS         seconds one test may take (default 60, or [test] timeout in Slab.toml)
   --java PATH            the Java to run the server with
   --jar PATH             use this server jar instead of downloading one
+  --seed N               the world seed (default 0, or [test] seed); the same seed, the same run
+  --realtime             let game time pass by itself (default: it is stepped, so it does not depend on speed)
+  --hold                 after the tests, keep the server running for you, with a console
+  --serve                start the server with the pack and no tests, for you to join and use
+  --port N               the server port (--hold/--serve use 25565 when it is free)
   -v, --verbose          show the server log of every test
 
 fmt options:
@@ -278,6 +283,20 @@ fn test(args: &[String]) -> ExitCode {
                 opts.verbose = true;
                 Ok(())
             }
+            "--realtime" => {
+                opts.realtime = true;
+                Ok(())
+            }
+            "--hold" => {
+                opts.hold = true;
+                Ok(())
+            }
+            "--serve" => {
+                opts.serve = true;
+                Ok(())
+            }
+            "--seed" => value("a number").and_then(|v| v.parse::<i64>().map_err(|_| format!("`--seed` needs a whole number, not `{v}`"))).map(|v| opts.seed = Some(v)),
+            "--port" => value("a port number").and_then(|v| v.parse::<u16>().ok().filter(|p| *p >= 1024).ok_or_else(|| format!("`--port` needs a port from 1024 to 65535, not `{v}`"))).map(|v| opts.port = Some(v)),
             "--filter" => value("some text").map(|v| opts.filter = Some(v)),
             "--java" => value("a path").map(|v| opts.java = Some(PathBuf::from(v))),
             "--jar" => value("a path").map(|v| opts.jar = Some(PathBuf::from(v))),

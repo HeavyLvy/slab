@@ -354,3 +354,16 @@ fn slab_test_lists_tests_and_asks_for_the_eula_before_downloading_a_server() {
     assert!(none.status.success());
     assert!(String::from_utf8_lossy(&none.stdout).contains("no tests found"));
 }
+
+#[test]
+fn slab_test_checks_its_options() {
+    let bad = |args: &[&str]| {
+        let o = slab(args);
+        assert_eq!(o.status.code(), Some(2), "{args:?}");
+        String::from_utf8_lossy(&o.stderr).into_owned()
+    };
+    assert!(bad(&["test", "--seed", "x"]).contains("--seed"));
+    assert!(bad(&["test", "--port", "80"]).contains("1024"));
+    assert!(bad(&["test", "--timeout", "0"]).contains("--timeout"));
+    assert!(bad(&["test", "--bogus"]).contains("unknown option"));
+}

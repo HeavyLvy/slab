@@ -138,6 +138,54 @@ The exit code is 0 when every test passed and 1 otherwise, so `slab test` can ru
 - run: slab test --accept-eula
 ```
 
+## The same run every time
+
+A problem you cannot repeat is a problem you cannot fix, so `slab test` takes the things it can
+control out of the picture:
+
+* **The world:** a flat world with a fixed **seed** (`--seed N`, or `seed` under `[test]`; default 0), the
+  sun at noon, clear weather, difficulty normal, no natural spawning.
+* **Random numbers:** before each test every random sequence starts over, so `random value 1..100 my_sequence`
+  gives the same numbers in the same order every time.
+* **Time:** while a test runs, the game is **frozen** and slab moves it forward a few ticks at a time
+  (`tick sprint`), as fast as the server can. So a test sees the same ticks whether the computer is fast
+  or slow or busy, and a test that waits 20 ticks takes a fraction of a second. `--realtime` lets time
+  run by itself instead (ticks then depend on the speed of the machine).
+* **The start:** the pack and the arena are reset before every test, as described above.
+
+What is not controlled is the game's own randomness in mobs' behaviour (where a zombie decides to
+walk). If a test depends on it, make the test not depend on it, for instance with `/random` sequences
+in your own code, or by checking the outcome and not the path.
+
+## Looking at it yourself
+
+When a test fails, the report ends with the command to see it for yourself:
+
+```text
+slab test --filter ticks_pass_while_a_test_waits --hold
+```
+
+`--hold` runs the tests and then **keeps the server running**. slab prints an address
+(`localhost:25565`): join it from Minecraft Java (multiplayer, direct connection, any name; you start
+in creative mode and can fly) and look at the world the test left. `--serve` starts the same server with
+your pack and **no tests**, to experiment in.
+
+The terminal where `slab test` runs is the server's console. What you type goes to the game
+(`time query gametime`, `summon minecraft:zombie 0 -60 0`, `scoreboard players get ...`), and lines
+starting with `!` are slab's own:
+
+| | |
+|---|---|
+| `!tests` | list the tests |
+| `!run NAME` | reset the world and the pack, then run the test whose name contains `NAME` |
+| `!reset` | reset the world and the pack, as before every test |
+| `!step N` | let `N` ticks pass (time stands still while you look, unless `--realtime`) |
+| `!freeze` / `!unfreeze` | stop / run time |
+| `!quit` | stop the server (so does Ctrl-D) |
+
+Every run also leaves its server in `build/test-server/`: `logs/latest.log` has everything the game
+said, and the world is there to open. It is replaced by the next run.
+
 ## What it cannot do yet
 
 There are **no players** on this server, so code that needs one (`@a`, `@p`, inventories, anything a

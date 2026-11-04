@@ -20,6 +20,7 @@
 //! [test]
 //! accept-eula = false         # true: you agree to the Minecraft EULA, so `slab test` may download the server
 //! timeout = 60                # seconds one test may take
+//! seed = 0                    # the world seed of the test server
 //! ```
 //!
 //! The source code lives in `src/`, and `src/main.slab` is the root module. Only the part of TOML
@@ -49,6 +50,8 @@ pub struct Manifest {
     pub accept_eula: Option<bool>,
     /// `[test] timeout`: seconds one test may take (default 60).
     pub test_timeout: Option<i32>,
+    /// `[test] seed`: the world seed of the test server.
+    pub test_seed: Option<i64>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -135,6 +138,10 @@ impl Manifest {
                     want(value.clone(), "true or false")?;
                     let Value::Bool(b) = value else { unreachable!() };
                     m.accept_eula = Some(b);
+                }
+                ("test", "seed") => {
+                    let Value::Int(n) = value else { return Err(at(format!("`seed` must be a number, not {}", value.kind()))) };
+                    m.test_seed = Some(n);
                 }
                 ("test", "timeout") => {
                     let Value::Int(n) = value else { return Err(at(format!("`timeout` must be a number, not {}", value.kind()))) };

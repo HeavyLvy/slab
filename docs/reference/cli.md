@@ -58,7 +58,8 @@ A file with a syntax error is reported and left as it is. The language server of
 ## `slab test`
 
 ```text
-slab test [PATH] [--filter TEXT] [--list] [--timeout SECS] [--java PATH] [--jar PATH] [--accept-eula] [-v]
+slab test [PATH] [--filter TEXT] [--list] [--timeout SECS] [--seed N] [--realtime] [--hold | --serve] [--port N]
+               [--java PATH] [--jar PATH] [--accept-eula] [-v]
 ```
 
 Builds the project **with its `#[test]` functions**, starts a real Minecraft server in `build/test-server/`, runs each test in a reset world and reports which passed. Needs Java 25 or newer, and downloads the server jar from Mojang once, which means accepting the [Minecraft EULA](https://aka.ms/MinecraftEULA) (`--accept-eula`, `SLAB_ACCEPT_EULA=1`, or `accept-eula = true` under `[test]` in `Slab.toml`). Exit code 1 when a test fails. The [Testing guide](../guide/testing.md) explains how tests are written and what a test starts in.
@@ -68,6 +69,11 @@ Builds the project **with its `#[test]` functions**, starts a real Minecraft ser
 | `--filter TEXT` | only the tests whose name contains `TEXT` |
 | `--list` | list the tests without running them (no Java or server needed) |
 | `--timeout SECS` | seconds one test may take (default 60, or `timeout` under `[test]`) |
+| `--seed N` | the world seed (default 0, or `seed` under `[test]`): the same seed gives the same run |
+| `--realtime` | let game time pass by itself; by default it stands still and is advanced by slab, see [Testing](../guide/testing.md#the-same-run-every-time) |
+| `--hold` | after the tests, keep the server running for you, with a console |
+| `--serve` | start the server with your pack and no tests, for you to join and use |
+| `--port N` | the server port (with `--hold`/`--serve`, 25565 when it is free) |
 | `--java PATH` | the Java to run the server with (default: `$JAVA`, `$JAVA_HOME`, then `java` on `PATH`) |
 | `--jar PATH` | use this server jar instead of the downloaded one (or `$SLAB_SERVER_JAR`) |
 | `--accept-eula` | you accept the Minecraft EULA |

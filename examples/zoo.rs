@@ -224,6 +224,9 @@ fn misc() -> Function {
     f.push(Command::Forceload(Forceload::Query(None)));
     f.push(Command::Forceload(Forceload::Query(Some(ColumnPos::block(0, 0)))));
     f.push(Command::Forceload(Forceload::Remove(ColumnPos::block(-16, -16), Some(ColumnPos::block(15, 15)))));
+    f.push(Command::RandomResetAll);
+    f.push(Command::TimeSetMarker(word("noon")));
+    f.push(Command::WeatherClear);
     f.push(Command::Gamerule { rule: rl("advance_time"), value: None });
     f.push(Command::Gamerule { rule: rl("advance_time"), value: Some(GameRuleValue::Bool(true)) });
     f.push(Command::Gamerule { rule: rl("random_tick_speed"), value: Some(GameRuleValue::Int(3)) });

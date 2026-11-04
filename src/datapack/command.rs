@@ -854,6 +854,14 @@ pub enum SetblockMode {
     Strict,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Tick {
+    Freeze,
+    Unfreeze,
+    /// Run this many ticks as fast as possible, then freeze again.
+    Sprint(u32),
+}
+
 /// How `fill` treats the blocks already there.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FillMode {
@@ -1145,6 +1153,14 @@ pub enum Command {
     /// `fill <from> <to> <block> [<mode>]`
     Fill { from: Pos, to: Pos, block: BlockState, mode: Option<FillMode> },
     Forceload(Forceload),
+    /// `tick freeze|unfreeze|sprint <n>`: the console's way to control time (a function may not use `/tick`).
+    Tick(Tick),
+    /// `random reset *`: every named random sequence starts over.
+    RandomResetAll,
+    /// `time set <marker>` for the marker of the clock: `noon`, `day`, `night`, `midnight`.
+    TimeSetMarker(Word),
+    /// `weather clear`
+    WeatherClear,
     /// `stop`: ends the server. Only for the console (`slab test`); not in the zoo, which it would end.
     Stop,
     /// `gamerule <rule> [<value>]`; no value queries.
@@ -1442,7 +1458,7 @@ impl Check for Command {
                 block.check()
             }
             Command::Forceload(fl) => fl.check(),
-            Command::Stop => Ok(()),
+            Command::Stop | Command::RandomResetAll | Command::WeatherClear | Command::Tick(_) | Command::TimeSetMarker(_) => Ok(()),
             Command::Gamerule { .. } => Ok(()),
             Command::Effect(e) => e.check(),
             Command::Teleport { targets, dest } => {
@@ -1556,6 +1572,12 @@ impl fmt::Display for Command {
             }
             Command::Forceload(fl) => write!(f, "forceload {fl}"),
             Command::Stop => f.write_str("stop"),
+            Command::Tick(Tick::Freeze) => f.write_str("tick freeze"),
+            Command::Tick(Tick::Unfreeze) => f.write_str("tick unfreeze"),
+            Command::Tick(Tick::Sprint(n)) => write!(f, "tick sprint {n}"),
+            Command::RandomResetAll => f.write_str("random reset *"),
+            Command::TimeSetMarker(m) => write!(f, "time set {m}"),
+            Command::WeatherClear => f.write_str("weather clear"),
             Command::Gamerule { rule, value } => {
                 write!(f, "gamerule {rule}")?;
                 match value {
@@ -1893,6 +1915,9 @@ mod tests {
         assert_eq!(Command::Forceload(fl).to_string(), "forceload add -16 -16 15 15");
         assert_eq!(Command::Forceload(Forceload::RemoveAll).to_string(), "forceload remove all");
         assert_eq!(Command::Stop.to_string(), "stop");
+        assert_eq!(Command::Tick(Tick::Sprint(10)).to_string(), "tick sprint 10");
+        assert_eq!(Command::Tick(Tick::Freeze).to_string(), "tick freeze");
+        assert_eq!((Command::RandomResetAll.to_string(), Command::WeatherClear.to_string(), Command::TimeSetMarker(word("noon")).to_string()), ("random reset *".to_owned(), "weather clear".to_owned(), "time set noon".to_owned()));
         assert_eq!(Command::Forceload(Forceload::Query(None)).to_string(), "forceload query");
         assert!(Command::Forceload(Forceload::Add(ColumnPos { x: Coord::Abs(0.5), z: Coord::Abs(0.0) }, None)).check().is_err());
         let gr = Command::Gamerule { rule: rl("advance_time"), value: Some(GameRuleValue::Bool(false)) };

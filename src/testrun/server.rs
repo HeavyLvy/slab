@@ -87,6 +87,11 @@ impl Server {
         lines
     }
 
+    /// The next log line, if one comes within `timeout`.
+    pub fn next_line(&mut self, timeout: Duration) -> Option<String> {
+        self.lines.recv_timeout(timeout).ok()
+    }
+
     pub fn alive(&mut self) -> bool {
         matches!(self.child.try_wait(), Ok(None))
     }

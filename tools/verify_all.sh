@@ -20,4 +20,7 @@ python3 tools/verify_pack.py target/limit/limit --checks examples/projects/limit
 # jar comes from target/mc when it is there, else it is downloaded once, which accepts the EULA)
 jar=(); [ -f target/mc/server-26.3.jar ] && jar=(--jar target/mc/server-26.3.jar)
 ./target/debug/slab test examples/projects/tested --accept-eula ${jar[@]+"${jar[@]}"} "$@" >target/verify-tests.log 2>&1 && echo "tests:    OK" || { echo "tests:    FAILED (target/verify-tests.log)"; status=1; }
+# the console of --serve: slab's own commands and the game's, the server stopped by !quit
+printf '!tests\n!run guards_are_summoned\ntime query gametime\n!quit\n' | ./target/debug/slab test examples/projects/tested --accept-eula --serve --port 25777 ${jar[@]+"${jar[@]}"} "$@" >target/verify-serve.log 2>&1 \
+    && grep -q "guards_are_summoned_and_tagged" target/verify-serve.log && grep -q "end guards_are_summoned_and_tagged" target/verify-serve.log && echo "serve:    OK" || { echo "serve:    FAILED (target/verify-serve.log)"; status=1; }
 exit $status

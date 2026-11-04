@@ -28,6 +28,25 @@ pub fn setup() -> Vec<String> {
     ]
 }
 
+/// What makes the world the same every time: the sun at noon, clear weather, and every random
+/// sequence (`random value .. <sequence>`) starting over.
+pub fn fix_world() -> Vec<String> {
+    vec![render(Command::RandomResetAll), render(Command::TimeSetMarker(word("noon"))), render(Command::WeatherClear)]
+}
+
+pub fn freeze() -> String {
+    render(Command::Tick(Tick::Freeze))
+}
+
+pub fn unfreeze() -> String {
+    render(Command::Tick(Tick::Unfreeze))
+}
+
+/// Run `n` ticks as fast as the server can, then stand still again.
+pub fn sprint(n: u32) -> String {
+    render(Command::Tick(Tick::Sprint(n)))
+}
+
 /// Says `ready` once the middle of the arena is loaded.
 pub fn ready_probe(word: &str) -> String {
     render(Execute::new().if_(Condition::Loaded(Pos::block(0, GROUND + 1, 0))).run(Command::say(word)))
@@ -61,6 +80,7 @@ mod tests {
         assert_eq!(s[0], "gamerule minecraft:advance_time false");
         assert_eq!(s[3], "forceload add -16 -16 15 15");
         assert_eq!(ready_probe("hi"), "execute if loaded 0 -60 0 run say hi");
+        assert_eq!((fix_world()[0].as_str(), sprint(10).as_str(), freeze().as_str()), ("random reset *", "tick sprint 10", "tick freeze"));
         let c = clean_arena();
         assert_eq!(c[0], "fill -8 -60 -8 8 3 8 minecraft:air");
         assert_eq!(c[1], "fill -8 -61 -8 8 -61 8 minecraft:grass_block");
