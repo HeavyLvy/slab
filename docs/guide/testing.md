@@ -225,6 +225,14 @@ starting with `!` are slab's own:
 Every run also leaves its server in `build/test-server/`: `logs/latest.log` has everything the game
 said, and the world is there to open. It is replaced by the next run.
 
+## How well it is tested
+
+`slab test` is new. It is checked against a real Minecraft 26.3 server on **Linux** (with Java 27, and CI uses
+Java 25), and not yet on macOS or Windows, where Java discovery, `curl`, or process handling could behave
+differently. The server's `--realtime` mode is much less exercised than the default stepped one. Please report
+problems, with the output of `slab test -v` and the server's `build/test-server/logs/latest.log`, at
+<https://github.com/HeavyLvy/slab/issues>.
+
 ## What it cannot do yet
 
 There are **no players** on this server, so code that needs one (`@a`, `@p`, inventories, anything a

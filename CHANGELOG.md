@@ -6,6 +6,7 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ## [0.2.0] - 2026-11-03
 
+- **`slab test` is new and has so far been checked on Linux only**; macOS and Windows reports are welcome.
 - `slab test`: write `#[test]` functions in slab and run them on a real Minecraft server that slab sets up (a flat world, reset before every test). Tests can `wait` for ticks, use `assert`, `assert_eq` and `fail` from the new `testing` module, and fail when the server logs an error. Needs Java 25+; the server is downloaded once from Mojang after you accept the EULA. `[test]` in `Slab.toml`, a Testing guide, and typed `fill`, `forceload`, `stop`, `tick`, `random reset`, `time set` and `weather clear` commands.
 - Failed commands: the game does not log commands that fail inside functions (checked on a real server), so `strict_commands` is how a test sees them, including run-time built commands the game rejected. `strict-commands = true` under `[test]` (or `--strict-commands`) makes every test strict, and `#[test(lenient)]` opts one out.
 - `#[test(strict_commands)]` makes a test fail when a command whose result is ignored fails (Minecraft does not log those), with the file and line; `#[test(max_commands(N))]` limits the commands one tick may run during that test. Both are per test.
