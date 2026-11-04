@@ -216,6 +216,14 @@ fn misc() -> Function {
         f.push(Command::Setblock { pos: Pos::block(0, -60, 0), block: BlockState::new(rl("oak_stairs")).prop(word("facing"), word("north")), mode });
     }
     f.push(Command::Setblock { pos: Pos::rel(0.0, 1.0, 0.0), block: BlockState::new(rl("chest")).nbt(Compound::new().with("CustomName", "Zoo Chest")), mode: None });
+    for mode in [None, Some(FillMode::Destroy), Some(FillMode::Hollow), Some(FillMode::Keep), Some(FillMode::Outline), Some(FillMode::Replace)] {
+        f.push(Command::Fill { from: Pos::block(0, -60, 0), to: Pos::block(2, -59, 2), block: BlockState::new(rl("stone")), mode });
+    }
+    f.push(Command::Forceload(Forceload::Add(ColumnPos::block(0, 0), None)));
+    f.push(Command::Forceload(Forceload::Add(ColumnPos::block(-16, -16), Some(ColumnPos::block(15, 15)))));
+    f.push(Command::Forceload(Forceload::Query(None)));
+    f.push(Command::Forceload(Forceload::Query(Some(ColumnPos::block(0, 0)))));
+    f.push(Command::Forceload(Forceload::Remove(ColumnPos::block(-16, -16), Some(ColumnPos::block(15, 15)))));
     f.push(Command::Gamerule { rule: rl("advance_time"), value: None });
     f.push(Command::Gamerule { rule: rl("advance_time"), value: Some(GameRuleValue::Bool(true)) });
     f.push(Command::Gamerule { rule: rl("random_tick_speed"), value: Some(GameRuleValue::Int(3)) });

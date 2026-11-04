@@ -45,6 +45,35 @@ impl Coord {
     }
 }
 
+/// A position in the horizontal plane, `x z` (the `column_pos` argument of `forceload`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ColumnPos {
+    pub x: Coord,
+    pub z: Coord,
+}
+
+impl ColumnPos {
+    /// Block coordinates, such as `ColumnPos::block(-16, 15)`.
+    pub fn block(x: i32, z: i32) -> Self {
+        ColumnPos { x: Coord::Abs(f64::from(x)), z: Coord::Abs(f64::from(z)) }
+    }
+
+    pub fn check(&self) -> Result<()> {
+        for c in [self.x, self.z] {
+            if c.value().is_some_and(|v| v.fract() != 0.0) {
+                bail!("a column position needs whole numbers, got {c}");
+            }
+        }
+        Ok(())
+    }
+}
+
+impl fmt::Display for ColumnPos {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{} {}", self.x, self.z)
+    }
+}
+
 /// A 3D position, used for both `vec3` and `block_pos` arguments. Block positions
 /// additionally need integer components: use [`Pos::check_block`].
 #[derive(Clone, Copy, Debug, PartialEq)]

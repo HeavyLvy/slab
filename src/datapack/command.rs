@@ -854,6 +854,29 @@ pub enum SetblockMode {
     Strict,
 }
 
+/// How `fill` treats the blocks already there.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FillMode {
+    Destroy,
+    Hollow,
+    Keep,
+    Outline,
+    Replace,
+}
+
+/// `forceload add|remove|query`: keeps chunks loaded (docs/mc/02-commands-core.md section 7.6).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Forceload {
+    /// `forceload add <from> [<to>]`
+    Add(ColumnPos, Option<ColumnPos>),
+    /// `forceload remove <from> [<to>]`
+    Remove(ColumnPos, Option<ColumnPos>),
+    /// `forceload remove all`
+    RemoveAll,
+    /// `forceload query [<pos>]`
+    Query(Option<ColumnPos>),
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum GameRuleValue {
     Bool(bool),
@@ -1119,6 +1142,11 @@ pub enum Command {
     /// right after the name.
     Particle { name: Arg<ResourceLocation>, options: Option<Compound>, pos: Option<Pos>, spread: Option<ParticleSpread> },
     Setblock { pos: Pos, block: BlockState, mode: Option<SetblockMode> },
+    /// `fill <from> <to> <block> [<mode>]`
+    Fill { from: Pos, to: Pos, block: BlockState, mode: Option<FillMode> },
+    Forceload(Forceload),
+    /// `stop`: ends the server. Only for the console (`slab test`); not in the zoo, which it would end.
+    Stop,
     /// `gamerule <rule> [<value>]`; no value queries.
     Gamerule { rule: ResourceLocation, value: Option<GameRuleValue> },
     Effect(Effect),
@@ -1131,6 +1159,33 @@ pub enum Command {
     /// Escape hatch for commands the AST doesn't model yet. Only checked for line safety.
     /// Add a typed variant instead of leaning on this.
     Raw(String),
+}
+
+impl Forceload {
+    fn check(&self) -> Result<()> {
+        match self {
+            Forceload::Add(a, b) | Forceload::Remove(a, b) => {
+                a.check()?;
+                b.iter().try_for_each(ColumnPos::check)
+            }
+            Forceload::Query(Some(p)) => p.check(),
+            Forceload::Query(None) | Forceload::RemoveAll => Ok(()),
+        }
+    }
+}
+
+impl fmt::Display for Forceload {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Forceload::Add(a, None) => write!(f, "add {a}"),
+            Forceload::Add(a, Some(b)) => write!(f, "add {a} {b}"),
+            Forceload::Remove(a, None) => write!(f, "remove {a}"),
+            Forceload::Remove(a, Some(b)) => write!(f, "remove {a} {b}"),
+            Forceload::RemoveAll => f.write_str("remove all"),
+            Forceload::Query(None) => f.write_str("query"),
+            Forceload::Query(Some(p)) => write!(f, "query {p}"),
+        }
+    }
 }
 
 impl Command {
@@ -1381,6 +1436,13 @@ impl Check for Command {
                 pos.check_block()?;
                 block.check()
             }
+            Command::Fill { from, to, block, .. } => {
+                from.check_block()?;
+                to.check_block()?;
+                block.check()
+            }
+            Command::Forceload(fl) => fl.check(),
+            Command::Stop => Ok(()),
             Command::Gamerule { .. } => Ok(()),
             Command::Effect(e) => e.check(),
             Command::Teleport { targets, dest } => {
@@ -1481,6 +1543,19 @@ impl fmt::Display for Command {
                     None => Ok(()),
                 }
             }
+            Command::Fill { from, to, block, mode } => {
+                write!(f, "fill {from} {to} {block}")?;
+                match mode {
+                    Some(FillMode::Destroy) => f.write_str(" destroy"),
+                    Some(FillMode::Hollow) => f.write_str(" hollow"),
+                    Some(FillMode::Keep) => f.write_str(" keep"),
+                    Some(FillMode::Outline) => f.write_str(" outline"),
+                    Some(FillMode::Replace) => f.write_str(" replace"),
+                    None => Ok(()),
+                }
+            }
+            Command::Forceload(fl) => write!(f, "forceload {fl}"),
+            Command::Stop => f.write_str("stop"),
             Command::Gamerule { rule, value } => {
                 write!(f, "gamerule {rule}")?;
                 match value {
@@ -1811,6 +1886,15 @@ mod tests {
         assert_eq!(sb.to_string(), "setblock 0 64 0 minecraft:oak_stairs[facing=north] replace");
         let limit = Command::Gamerule { rule: rl("max_command_sequence_length"), value: Some(GameRuleValue::Hole(Hole(0))) };
         assert_eq!(limit.render_line(), "$gamerule minecraft:max_command_sequence_length $(h0)");
+        let fill = Command::Fill { from: Pos::block(-8, -60, -8), to: Pos::block(8, 3, 8), block: BlockState::new(rl("air")), mode: Some(FillMode::Replace) };
+        assert_eq!(fill.to_string(), "fill -8 -60 -8 8 3 8 minecraft:air replace");
+        assert!(Command::Fill { from: Pos::abs(0.5, 0.0, 0.0), to: Pos::block(1, 1, 1), block: BlockState::new(rl("air")), mode: None }.check().is_err());
+        let fl = Forceload::Add(ColumnPos::block(-16, -16), Some(ColumnPos::block(15, 15)));
+        assert_eq!(Command::Forceload(fl).to_string(), "forceload add -16 -16 15 15");
+        assert_eq!(Command::Forceload(Forceload::RemoveAll).to_string(), "forceload remove all");
+        assert_eq!(Command::Stop.to_string(), "stop");
+        assert_eq!(Command::Forceload(Forceload::Query(None)).to_string(), "forceload query");
+        assert!(Command::Forceload(Forceload::Add(ColumnPos { x: Coord::Abs(0.5), z: Coord::Abs(0.0) }, None)).check().is_err());
         let gr = Command::Gamerule { rule: rl("advance_time"), value: Some(GameRuleValue::Bool(false)) };
         assert_eq!(gr.to_string(), "gamerule minecraft:advance_time false");
         assert!(Command::Raw("/say hi".into()).check().is_err());
