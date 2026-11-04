@@ -164,7 +164,9 @@ pub fn run(opts: &Options) -> Result<bool, String> {
     let seed = opts.seed.or_else(|| manifest.as_ref().and_then(|m| m.test_seed)).unwrap_or(0);
     // checked first: it is the more basic requirement, and needs no Java
     let jar = fetch::server_jar(compiled.target.name, opts.jar.as_deref(), accepted)?;
-    if !accepted && !jar.starts_with(fetch::cache_root()) {
+    // a jar in our cache was downloaded after the EULA was accepted
+    let from_cache = jar.starts_with(fetch::cache_root());
+    if !accepted && !from_cache {
         return Err(format!("running a Minecraft server means accepting the Minecraft EULA ({}): pass `--accept-eula` to agree", fetch::EULA_URL));
     }
     // the server runs in its own folder, so the jar's path must not depend on where we are
@@ -173,7 +175,7 @@ pub fn run(opts: &Options) -> Result<bool, String> {
 
     let port = pick_port(opts.port, holding)?;
     let dir = compiled.project_dir.join("build").join("test-server");
-    prepare_server_dir(&dir, &compiled, accepted, seed, port, holding)?;
+    prepare_server_dir(&dir, &compiled, accepted || from_cache, seed, port, holding)?;
     let mode = if opts.realtime { "real time" } else { "stepped time" };
     println!(
         "running {} test{} of `{}` on Minecraft {} (seed {seed}, {mode}; server log: {})",
