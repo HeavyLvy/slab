@@ -143,6 +143,10 @@ fn load_inner(root_file: &Path, overlay: &Overlay, tolerant: bool) -> Result<(Pr
                 continue;
             }
             if loaded.contains_key(&key) || crate::stdlib::is_import_path(&key) {
+                // a file of the project with the name of a library module can never be reached
+                if crate::stdlib::is_import_path(&key) && module_file(&root, &segs).is_file() {
+                    diagnostics.push(Diagnostic::new(format!("`{key}` is a module of the standard library, so the file {}.slab next to it is never used", segs.join("/")), span).hint(format!("rename the file and import it by its new name (the library has the modules {})", crate::stdlib::MODULES.iter().map(|m| format!("`{}`", m.name)).collect::<Vec<_>>().join(", "))).in_file(file));
+                }
                 continue;
             }
             let target = module_file(&root, &segs);
@@ -294,5 +298,14 @@ mod tests {
         assert_eq!(p.root, d.0.join("src"), "modules are found next to src/main.slab");
         let bare = Dir::new("nosrc", &[("Slab.toml", "[project]\nname = \"p\"\n")]);
         assert!(find_root_file(&bare.0).unwrap_err().contains("expects the root module at"));
+    }
+
+    #[test]
+    fn a_file_named_like_a_library_module_is_an_error() {
+        let d = Dir::new("shadow", &[("main.slab", "import testing; fn main() {}"), ("testing.slab", "pub fn f() {}")]);
+        match load(&d.0.join("main.slab")) {
+            Err(LoadError::Invalid { diagnostics, .. }) => assert!(diagnostics[0].message.contains("module of the standard library"), "{}", diagnostics[0].message),
+            _ => panic!("expected an error"),
+        }
     }
 }

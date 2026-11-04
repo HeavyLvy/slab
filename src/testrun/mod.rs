@@ -287,15 +287,29 @@ fn prepare_server_dir(dir: &Path, compiled: &compile::Compiled, eula: bool, seed
     Ok(())
 }
 
+/// The same start for every test: the pack as it is after loading, the same sky, the same random
+/// numbers, an empty arena, and what the test asked for.
+fn start_state(server: &mut Server, test: &TestCase, reset: &ResourceLocation) {
+    server.send(&commands::call(reset));
+    for c in commands::fix_world().into_iter().chain(commands::clean_arena()) {
+        server.send(&c);
+    }
+    if test.strict_commands
+        && let Ok(on) = ResourceLocation::new(reset.namespace(), "_test_strict_on")
+    {
+        server.send(&commands::call(&on));
+    }
+    if let Some(n) = test.max_commands {
+        server.send(&commands::command_limit(n));
+    }
+}
+
 fn run_test(server: &mut Server, test: &TestCase, reset: &ResourceLocation, timeout: Duration, stepped: bool) -> Outcome {
     let started = Instant::now();
     let mut log = Vec::new();
     // the same start every time: the pack as it is after loading, the same sky, the same
     // random numbers, an empty arena
-    server.send(&commands::call(reset));
-    for c in commands::fix_world().into_iter().chain(commands::clean_arena()) {
-        server.send(&c);
-    }
+    start_state(server, test, reset);
     log.extend(server.sync(Duration::from_secs(20)));
 
     server.send(&commands::call(&test.function));
@@ -326,6 +340,9 @@ fn run_test(server: &mut Server, test: &TestCase, reset: &ResourceLocation, time
     // whatever the server printed right after the end belongs to the test too
     log.extend(server.sync(Duration::from_secs(10)));
 
+    if test.max_commands.is_some() {
+        server.send(&commands::command_limit(commands::DEFAULT_COMMAND_LIMIT));
+    }
     // a test that did not finish must not go on in the next one
     if let Ok(step) = ResourceLocation::new(test.function.namespace(), &format!("{}__step", test.function.path())) {
         server.send(&commands::clear_schedule(&step));
@@ -382,10 +399,7 @@ fn interact(server: &mut Server, tests: &[&TestCase], reset: &ResourceLocation, 
                     }
                     "!run" => match tests.iter().filter(|t| t.name.contains(arg)).collect::<Vec<_>>().as_slice() {
                         [t] => {
-                            server.send(&commands::call(reset));
-                            for c in commands::fix_world().into_iter().chain(commands::clean_arena()) {
-                                server.send(&c);
-                            }
+                            start_state(server, t, reset);
                             server.send(&commands::call(&t.function));
                         }
                         [] => println!("no test matches `{arg}` (`!tests` lists them)"),
@@ -417,6 +431,7 @@ fn short(project: &Path, at: &str) -> String {
 }
 
 fn report(test: &TestCase, at: &str, o: &Outcome, verbose: bool) {
+    let budget = test.max_commands;
     let secs = format!("{:.1}s", o.took.as_secs_f32());
     if o.passed() {
         println!("  ok      {}  ({secs})", test.name);
@@ -426,11 +441,18 @@ fn report(test: &TestCase, at: &str, o: &Outcome, verbose: bool) {
             println!("          did not finish: it never reached its end (a wait too long, or the server stopped it)");
         }
         for f in &o.failures {
-            println!("          assertion failed: {f}");
+            match f.strip_prefix("a command failed at ") {
+                Some(rest) => println!("          command failed: {rest}"),
+                None => println!("          assertion failed: {f}"),
+            }
         }
         for p in &o.problems {
             let mut lines = p.lines();
-            println!("          server logged: {}", lines.next().unwrap_or(""));
+            let first = lines.next().unwrap_or("");
+            println!("          server logged: {first}");
+            if let (true, Some(n)) = (first.contains("Command execution stopped"), budget) {
+                println!("                         (this test allows {n} commands per tick: `#[test(max_commands({n}))]`)");
+            }
             for l in lines {
                 println!("                         {l}");
             }

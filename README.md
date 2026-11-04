@@ -88,6 +88,7 @@ slab build --zip                 # also writes <name>.zip
 slab build -w -o /path/to/world/datapacks/my_pack   # rebuild into the world each time a source file is saved, then `/reload`
 slab check                       # type-check only
 slab fmt                         # format the source (--check for CI)
+slab test                        # run the #[test] functions on a real Minecraft server
 ```
 
 Copy the folder (or zip) into `<world>/datapacks/` and `/reload`. To remove everything the pack created (scoreboard, storage, summoned entities, added tags), run `/function <name>:_uninstall` and then `/datapack disable` it.
@@ -100,6 +101,7 @@ Copy the folder (or zip) into `<world>/datapacks/` and `/reload`. To remove ever
 * Errors point at the exact file and line; the compiler checks the whole program before writing anything.
 
 * `str` values can be joined with `+` and used in commands; `NearDouble`/`FarDouble` give decimal positions; `match`, `Option`/`Result` and enums are there; `task fn` runs long loops over many ticks.
+* `#[test]` functions run on a real Minecraft server that slab sets up (`slab test`): reset world, `wait` for ticks, assertions, errors in the server log fail the test, repeatable runs, and `--hold` to look at a failure yourself (see the Testing guide; needs Java 25).
 * `slab fmt` formats code, and names that break the naming conventions are warned about (see `docs/reference/style.md`).
 
 Limits worth knowing: no general `float` type yet, and one function call chain may run at most 65,536 commands per tick (Minecraft's limit; the compiler warns, and `task fn` spreads the work over ticks).

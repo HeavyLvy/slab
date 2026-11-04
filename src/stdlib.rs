@@ -22,7 +22,7 @@ pub const MODULES: &[StdModule] = &[
     StdModule { name: "std", path: "std.slab", source: include_str!("stdlib/std.slab") },
     StdModule { name: "game", path: "game.slab", source: include_str!("stdlib/game.slab") },
     StdModule { name: "game::tag", path: "game/tag.slab", source: include_str!("stdlib/game/tag.slab") },
-    StdModule { name: "test", path: "test.slab", source: include_str!("stdlib/test.slab") },
+    StdModule { name: "testing", path: "testing.slab", source: include_str!("stdlib/testing.slab") },
     StdModule { name: "game::effect", path: "game/effect.slab", source: include_str!("stdlib/game/effect.slab") },
 ];
 

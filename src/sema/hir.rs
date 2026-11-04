@@ -116,6 +116,16 @@ pub struct FnDef {
     pub task: bool,
     /// A `#[test]` (always also a `task`): only generated for `slab test`.
     pub test: bool,
+    pub test_opts: TestOpts,
+}
+
+/// What `#[test(..)]` asked for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub struct TestOpts {
+    /// Fail the test when a command whose result is ignored fails.
+    pub strict_commands: bool,
+    /// Allow only this many commands in one tick while the test runs.
+    pub max_commands: Option<u32>,
 }
 
 #[derive(Clone, Debug, PartialEq, Default)]

@@ -60,6 +60,13 @@ pub fn clean_arena() -> Vec<String> {
     vec![fill(GROUND + 1, GROUND + 64, "air"), fill(GROUND, GROUND, "grass_block"), fill(GROUND - 1, GROUND - 1, "dirt"), render(Command::Kill(Some(not_players.clone()))), render(Command::Kill(Some(not_players)))]
 }
 
+/// The most commands one tick may run (`max_command_sequence_length`); the game's own is 65,536.
+pub fn command_limit(n: u32) -> String {
+    render(Command::Gamerule { rule: rl("max_command_sequence_length"), value: Some(GameRuleValue::Int(i32::try_from(n).unwrap_or(i32::MAX))) })
+}
+
+pub const DEFAULT_COMMAND_LIMIT: u32 = 65_536;
+
 /// `function <id>`
 pub fn call(function: &ResourceLocation) -> String {
     render(Command::call(function.clone()))
@@ -81,6 +88,7 @@ mod tests {
         assert_eq!(s[3], "forceload add -16 -16 15 15");
         assert_eq!(ready_probe("hi"), "execute if loaded 0 -60 0 run say hi");
         assert_eq!((fix_world()[0].as_str(), sprint(10).as_str(), freeze().as_str()), ("random reset *", "tick sprint 10", "tick freeze"));
+        assert_eq!(command_limit(20000), "gamerule minecraft:max_command_sequence_length 20000");
         let c = clean_arena();
         assert_eq!(c[0], "fill -8 -60 -8 8 3 8 minecraft:air");
         assert_eq!(c[1], "fill -8 -61 -8 8 -61 8 minecraft:grass_block");

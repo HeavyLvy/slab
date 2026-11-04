@@ -164,6 +164,8 @@ struct FnSig<'a> {
     self_ty: Option<Ty>,
     /// For a method: its name qualified by the type, `Point::sum`.
     qual: Option<String>,
+    /// What `#[test(..)]` asked for.
+    test_opts: TestOpts,
 }
 
 /// What a method can be attached to.
@@ -586,7 +588,7 @@ impl<'a> Checker<'a> {
                     let id = FuncId(self.fns.len());
                     // Registered even when the name is a duplicate so bodies still get checked.
                     self.declare_value(&f.name, ValueSym::Fn(id), item.public);
-                    self.fns.push(FnSig { decl: f, attrs: &item.attrs, module: mi, params: Vec::new(), ret: Ty::Unit, entry: None, span: item.span, self_ty: None, qual: None });
+                    self.fns.push(FnSig { decl: f, attrs: &item.attrs, module: mi, params: Vec::new(), ret: Ty::Unit, entry: None, span: item.span, self_ty: None, qual: None, test_opts: TestOpts::default() });
                 }
                 ast::ItemKind::Const(d) => {
                     let idx = self.consts.len();
@@ -1003,7 +1005,7 @@ impl<'a> Checker<'a> {
                     continue;
                 }
                 let fid = FuncId(self.fns.len());
-                self.fns.push(FnSig { decl: f, attrs: &m.attrs, module: mi, params: Vec::new(), ret: Ty::Unit, entry: None, span: m.span, self_ty: Some(Ty::Error), qual: None });
+                self.fns.push(FnSig { decl: f, attrs: &m.attrs, module: mi, params: Vec::new(), ret: Ty::Unit, entry: None, span: m.span, self_ty: Some(Ty::Error), qual: None, test_opts: TestOpts::default() });
                 MethodBody::User(fid)
             };
             let idx = self.methods.len();
@@ -1579,6 +1581,8 @@ impl<'a> Checker<'a> {
                 self.entry_of(attrs, f, !params.is_empty(), &ret)
             };
             if is_test(attrs) {
+                let opts = self.test_options(attrs);
+                self.fns[fi].test_opts = opts;
                 if !params.is_empty() {
                     self.error(f.name.span, format!("test `{}` takes no parameters", f.name.name));
                 }
@@ -1605,6 +1609,25 @@ impl<'a> Checker<'a> {
             self.fns[fi].ret = ret;
             self.fns[fi].entry = entry;
         }
+    }
+
+    /// The options of `#[test(strict_commands, max_commands(20000))]`.
+    fn test_options(&mut self, attrs: &'a [ast::Attr]) -> TestOpts {
+        let mut opts = TestOpts::default();
+        for a in attrs.iter().filter(|a| a.name.name == "test") {
+            for arg in &a.args {
+                match &arg.kind {
+                    ast::ExprKind::Ident(name) if name == "strict_commands" => opts.strict_commands = true,
+                    ast::ExprKind::Call { callee, args } if matches!(&callee.kind, ast::ExprKind::Ident(name) if name == "max_commands") && args.len() == 1 => match self.const_expr(&args[0], Some(&Ty::Int)) {
+                        Some((ConstVal::Int(n), _)) if n >= 1 => opts.max_commands = Some(n as u32),
+                        Some(_) => self.error(args[0].span, "`max_commands` needs a number of commands from 1 to 2147483647"),
+                        None => {}
+                    },
+                    _ => self.error_hint(arg.span, "unknown option of #[test]", "the options are `strict_commands` and `max_commands(N)`, as in `#[test(strict_commands, max_commands(20000))]`"),
+                }
+            }
+        }
+        opts
     }
 
     fn entry_of(&mut self, attrs: &'a [ast::Attr], f: &'a ast::FnDecl, has_params: bool, ret: &Ty) -> Option<EntryKind> {
@@ -1636,12 +1659,7 @@ impl<'a> Checker<'a> {
                     }
                 }
                 // a test is not an entry point: the harness starts it (checked with the signature)
-                "test" => {
-                    if !a.args.is_empty() {
-                        self.error(a.span, "#[test] takes no arguments");
-                    }
-                    continue;
-                }
+                "test" => continue,
                 other => {
                     self.error_hint(a.name.span, format!("unknown attribute `{other}`"), "the attributes are #[load], #[tick], #[every(N)] and #[test]");
                     continue;
@@ -2031,6 +2049,7 @@ impl<'a> Checker<'a> {
             std: self.mods[self.fns[idx].module].std,
             task: decl.is_task || is_test(self.fns[idx].attrs),
             test: is_test(self.fns[idx].attrs),
+            test_opts: self.fns[idx].test_opts,
         });
     }
 

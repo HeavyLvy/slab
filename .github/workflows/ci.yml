@@ -30,6 +30,24 @@ jobs:
       # the code examples in the repository must stay formatted
       - run: cargo run -q -- fmt --check examples src/stdlib
 
+  # the #[test] functions of an example project, on a real Minecraft server (the server jar is
+  # downloaded from Mojang once and cached; running it means accepting the EULA)
+  server-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 25
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/slab
+          key: minecraft-server-26.3
+      - run: cargo run -q -- test examples/projects/tested --accept-eula
+
   extension:
     runs-on: ubuntu-latest
     defaults:

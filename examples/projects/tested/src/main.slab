@@ -1,7 +1,7 @@
 // A small pack with tests. Run them on a real Minecraft server with `slab test`.
 import std::*;
 import game::*;
-import test::*;
+import testing::*;
 
 objective points = "dummy";
 
@@ -83,4 +83,19 @@ fn a_test_may_change_a_score() {
 fn the_score_of_the_test_before_is_gone() {
     // each test starts with the pack as it is after loading: scoreboards are reset too
     assert(run_command("scoreboard players get #nobody tested").is_err(), "the score did not leak into this test");
+}
+
+#[test(strict_commands)]
+fn no_command_fails_while_guards_come_and_go() {
+    // `strict_commands`: a command whose result is ignored must work, or the test fails
+    let guard = summon("minecraft:zombie", 0, -60, 0);
+    tag::add(guard, "guard");
+    kill(guard);
+}
+
+#[test(max_commands(20000))]
+fn counting_guards_stays_within_a_budget() {
+    // `max_commands`: no tick of this test may run more than 20,000 commands
+    spawn_guards(3);
+    assert_eq(count_guards(), 3, "three guards");
 }

@@ -702,7 +702,7 @@ pub fn has(target: Target, name: const str) -> bool
 Whether every matching entity carries the tag. The tag must be known at compile time,
 because it becomes part of a selector.
 
-## `test`
+## `testing`
 
 
 

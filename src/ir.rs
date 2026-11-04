@@ -310,6 +310,10 @@ pub struct TestInfo {
     /// The function that starts it.
     pub function: String,
     pub origin: (usize, Span),
+    /// `#[test(strict_commands)]`
+    pub strict_commands: bool,
+    /// `#[test(max_commands(N))]`
+    pub max_commands: Option<u32>,
 }
 
 impl Program {

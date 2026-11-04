@@ -42,6 +42,10 @@ pub struct TestCase {
     pub function: ResourceLocation,
     /// `file:line` of the test, for reports.
     pub at: String,
+    /// `#[test(strict_commands)]`: a command that fails is a failure of the test.
+    pub strict_commands: bool,
+    /// `#[test(max_commands(N))]`: the most commands one tick may run during the test.
+    pub max_commands: Option<u32>,
 }
 
 pub struct Compiled {
@@ -267,7 +271,7 @@ pub fn compile(entry: &Path, opts: &Options) -> Result<Compiled, CompileError> {
         .filter_map(|t| {
             let function = ResourceLocation::new(&namespace, &t.function).ok()?;
             let at = project.sources.files.get(t.origin.0).map_or_else(String::new, |f| format!("{}:{}", f.name, f.line_col(t.origin.1.start as usize).0));
-            Some(TestCase { name: t.name.clone(), function, at })
+            Some(TestCase { name: t.name.clone(), function, at, strict_commands: t.strict_commands, max_commands: t.max_commands })
         })
         .collect();
     Ok(Compiled { pack, namespace, project_dir, target, notices: target.caveat().into_iter().collect(), warnings, sources: project.sources, tests })
@@ -354,7 +358,7 @@ mod tests {
     }
 
     fn build_tests(src: &str) -> Compiled {
-        let d = Dir::new("tt", &[("main.slab", &format!("{PRELUDE}import test::*; {src}"))]);
+        let d = Dir::new("tt", &[("main.slab", &format!("{PRELUDE}import testing::*; {src}"))]);
         match compile(&d.0, &Options { namespace: Some("t".into()), tests: true, ..Options::default() }) {
             Ok(c) => c,
             Err(e) => panic!("{}", e.render()),
@@ -364,7 +368,7 @@ mod tests {
     #[test]
     fn tests_are_only_built_for_slab_test_and_wait_splits_them_into_steps() {
         let src = "#[test] fn ring_closes() { let mut n = 0; n += 1; wait(20); assert_eq(n, 1, \"n\"); wait(5); assert(n == 1, \"still\"); }";
-        let plain = build_main(&format!("import test::*; {src} #[load] fn boot() {{}}"));
+        let plain = build_main(&format!("import testing::*; {src} #[load] fn boot() {{}}"));
         assert!(plain.tests.is_empty());
         assert!(plain.pack.function(&ResourceLocation::parse("t:ring_closes").unwrap()).is_none(), "a test is not part of a normal build");
 
@@ -379,9 +383,37 @@ mod tests {
     }
 
     #[test]
+    fn test_options_strict_commands_and_max_commands() {
+        // without strict_commands nothing is added to the commands
+        let plain = build_tests("fn helper() { kill(@e[tag=x]); } #[test] fn t1() { helper(); }");
+        let all = |c: &Compiled| c.pack.functions().map(|(_, f)| f.render()).collect::<Vec<_>>().join("\n");
+        assert!(!all(&plain).contains("a command failed"));
+        assert!(plain.pack.function(&ResourceLocation::parse("t:_test_strict_on").unwrap()).is_none());
+
+        let c = build_tests("fn helper() { kill(@e[tag=x]); } #[test(strict_commands, max_commands(20000))] fn t1() { helper(); }");
+        assert!(all(&c).contains("[slab-test] FAIL a command failed at main.slab:1: kill"), "{}", all(&c));
+        assert!(fn_text(&c, "t:_test_strict_on").contains("set #g._test_strict t 1"));
+        assert!(fn_text(&c, "t:_test_strict_off").contains("set #g._test_strict t 0"));
+        assert!(c.tests[0].strict_commands && c.tests[0].max_commands == Some(20000));
+        // a build without tests has none of it
+        let normal = build_main("import testing::*; fn helper() { kill(@e[tag=x]); } #[test(strict_commands)] fn t1() { helper(); }");
+        assert!(!all(&normal).contains("a command failed"));
+
+        let err = |src: &str| {
+            let d = Dir::new("to", &[("main.slab", &format!("{PRELUDE}import testing::*; {src}"))]);
+            match compile(&d.0, &Options { namespace: Some("t".into()), tests: true, ..Options::default() }) {
+                Ok(_) => panic!("expected an error"),
+                Err(e) => e.render(),
+            }
+        };
+        assert!(err("#[test(loud)] fn t1() {}").contains("unknown option of #[test]"));
+        assert!(err("#[test(max_commands(0))] fn t1() {}").contains("from 1 to"));
+    }
+
+    #[test]
     fn wait_and_test_are_checked() {
         let err = |src: &str| {
-            let d = Dir::new("te", &[("main.slab", &format!("{PRELUDE}import test::*; {src}"))]);
+            let d = Dir::new("te", &[("main.slab", &format!("{PRELUDE}import testing::*; {src}"))]);
             match compile(&d.0, &Options { namespace: Some("t".into()), tests: true, ..Options::default() }) {
                 Ok(_) => panic!("expected an error"),
                 Err(e) => e.render(),

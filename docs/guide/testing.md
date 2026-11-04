@@ -8,7 +8,7 @@ world you control.
 ```slab
 import std::*;
 import game::*;
-import test::*;
+import testing::*;
 
 #[test]
 fn zombie_is_summoned_and_removed() {
@@ -53,7 +53,7 @@ test result: ok. 1 passed
 A test is a function marked `#[test]` with no parameters. It can use everything your program can:
 call your functions, summon entities, place blocks, read scoreboards, run commands.
 
-| `test::` | |
+| `testing::` | |
 |---|---|
 | `assert(condition, "message")` | fails the test with the message unless the condition holds |
 | `assert_eq(actual, expected, "message")` | the same for two numbers; the report shows both |
@@ -65,6 +65,38 @@ call your functions, summon entities, place blocks, read scoreboards, run comman
   and in a [`task fn`](../lang/tasks.md), and not inside an `as`/`at`/`be` block. Without a `wait`,
   a test runs inside a single tick.
 * Tests run **one after the other**, in the order they are written.
+
+## Catching failed commands and heavy ticks
+
+Two options of `#[test(..)]`, each for one test at a time (nothing is checked for the others):
+
+```slab
+import std::*;
+import game::*;
+import testing::*;
+
+#[test(strict_commands, max_commands(20000))]
+fn the_guards_arrive() {
+    let guard = summon("minecraft:zombie", 0, -60, 0);
+    tag::add(guard, "guard");
+    assert(exists(guard), "the guard is there");
+}
+```
+
+* **`strict_commands`**: Minecraft does not log a command that fails inside a function (nobody to
+  `kill`, a tag that is already there, a block that did not change): it only counts as "failed", and
+  slab lets that pass unless you look at it. In a strict test, every command whose result your code
+  ignores must have worked, in the test **and in everything it calls**, or the test fails and says where:
+  `command failed: main.slab:6: kill`. Commands whose result you use (`let ok = kill(..)`,
+  `run_command(..).is_ok()`) are yours to judge and are never reported. Only a test with this option pays
+  for the extra checks, and only in the test build.
+* **`max_commands(N)`**: Minecraft stops a function chain after 65,536 commands in one tick, and **every test already fails
+  when that happens** (`Command execution stopped due to limit`). With this option the limit for this
+  test is `N` instead, so a function that should stay cheap fails the moment one tick costs more. The
+  count includes the test's own commands between two `wait`s. It does not change other tests.
+
+Combine them with a comma. They cannot hide a failure for other tests: each test starts with the strict
+check off and the normal command limit.
 
 ## The world a test starts in
 
@@ -85,7 +117,7 @@ Keep a test's blocks and entities inside the arena (x and z from -8 to 8). Your 
 ```slab
 import std::*;
 import game::*;
-import test::*;
+import testing::*;
 
 global ticks: int = 0;
 

@@ -64,6 +64,14 @@ pub fn generate(hir: &h::Hir, namespace: &str, description: &str, opts: &GenOpti
             }
         }
     }
+    if opts.tests && hir.fns.iter().any(|f| f.test && f.test_opts.strict_commands) {
+        let flag = unique(&mut g.used_globals, "_test_strict".to_owned());
+        g.extra_globals.push(ir::Global { name: flag.clone(), kind: ir::Kind::Int, init: ir::Expr::Int(0) });
+        for (name, on) in [("_test_strict_on", 1), ("_test_strict_off", 0)] {
+            g.extra_fns.push(ir::Function { name: name.to_owned(), params: Vec::new(), ret: None, body: vec![ir::Stmt::Assign { target: ir::VarRef::Global(flag.clone()), value: ir::Expr::Int(on) }], entry: None });
+        }
+        g.strict_flag = Some(flag);
+    }
     for i in (0..hir.fns.len()).filter(|&i| reached[i]) {
         g.function(i, &mut program.functions);
     }
@@ -71,7 +79,7 @@ pub fn generate(hir: &h::Hir, namespace: &str, description: &str, opts: &GenOpti
         for (i, f) in hir.fns.iter().enumerate().filter(|(_, f)| f.test) {
             let module = &hir.modules[f.module];
             let shown = if module == "main" { f.name.clone() } else { format!("{module}::{}", f.name) };
-            program.tests.push(ir::TestInfo { name: shown, function: g.fn_names[i].clone(), origin: (hir.files[f.module], f.span) });
+            program.tests.push(ir::TestInfo { name: shown, function: g.fn_names[i].clone(), origin: (hir.files[f.module], f.span), strict_commands: f.test_opts.strict_commands, max_commands: f.test_opts.max_commands });
         }
     }
     g.watchdog();
@@ -192,6 +200,9 @@ struct Gen<'a> {
     objective_names: Vec<String>,
     errors: Vec<Diagnostic>,
     extra_fns: Vec<ir::Function>,
+    /// In a build for `slab test` where a test asks for `strict_commands`: the global that is 1 while
+    /// such a test runs. Commands whose result is ignored then report when they fail.
+    strict_flag: Option<String>,
     extra_globals: Vec<ir::Global>,
     used_fns: HashSet<String>,
     /// How often the `while` about to be generated runs, when the source says (`while_trips`).
@@ -246,6 +257,7 @@ impl<'a> Gen<'a> {
             objective_names,
             errors: Vec::new(),
             extra_fns: Vec::new(),
+            strict_flag: None,
             extra_globals: Vec::new(),
             used_fns,
             trips_hint: None,
@@ -1603,6 +1615,17 @@ impl<'a> Gen<'a> {
             other => {
                 let mut holes = Holes::default();
                 match self.builtin_command(other, args, span, &mut holes) {
+                    // a build for tests where a test wants to hear about failed commands: keep the
+                    // success of the command, and say so when it is 0 while such a test runs
+                    Some(cmd) if self.strict_flag.is_some() && datapack::Check::check(&cmd).is_ok() => {
+                        self.flush(out);
+                        let ok = self.fresh("cmd_ok");
+                        let flag = self.strict_flag.clone().expect("checked above");
+                        out.push(ir::Stmt::Let { name: ok.clone(), kind: ir::Kind::Bool, init: Some(ir::Expr::CommandSuccess { command: Box::new(cmd), args: holes.args }) });
+                        let message = format!("[slab-test] FAIL a command failed at {}: {other}", self.location(span));
+                        let failed = ir::Expr::bin(ir::BinOp::And, ir::Expr::bin(ir::BinOp::Eq, ir::Expr::Global(flag), ir::Expr::Int(1)), ir::Expr::logical_not(ir::Expr::var(&ok)));
+                        out.push(ir::Stmt::If { cond: failed, then: vec![ir::Stmt::Command(Command::say(message))], els: Vec::new() });
+                    }
                     Some(cmd) => self.push_cmd(cmd, holes, span, out),
                     None => {
                         if !self.errors.is_empty() {

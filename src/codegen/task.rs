@@ -455,7 +455,11 @@ impl Gen<'_> {
         }
         let body = vec![
             ir::Stmt::If { cond: ir::Expr::bin(ir::BinOp::Eq, ir::Expr::Global(running.clone()), ir::Expr::Int(0)), then: vec![ir::Stmt::Return(None)], els: Vec::new() },
-            ir::Stmt::Let { name: budget, kind: ir::Kind::Int, init: Some(ir::Expr::Int(self.task_budget)) },
+            ir::Stmt::Let { name: budget, kind: ir::Kind::Int, init: Some(ir::Expr::Int(match self.hir.fns[idx].test_opts.max_commands {
+                // a test that allows few commands per tick must not spend them all on its own slices
+                Some(n) => self.task_budget.min((n / 2) as i32).max(1),
+                None => self.task_budget,
+            })) },
             ir::Stmt::While { cond: ir::Expr::Bool(true), body: trip },
         ];
         self.guarded(&f.name, step_name, Vec::new(), body, None, out);
