@@ -1,6 +1,6 @@
 [package]
 name = "slab-lsp"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 authors = ["HeavyLvy <90272914+HeavyLvy@users.noreply.github.com>"]
 license = "Apache-2.0"
@@ -29,6 +29,6 @@ pkg-fmt = "zip"
 bin-dir = "slab-{ version }-windows-x86_64/{ bin }{ binary-ext }"
 
 [dependencies]
-slab = { package = "slab-lang", path = "../..", version = "0.1.0" }
+slab = { package = "slab-lang", path = "../..", version = "0.2.0" }
 lsp-server = "0.7"
 serde_json = "1"
