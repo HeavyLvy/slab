@@ -1,11 +1,27 @@
+# One pull request per kind of dependency and month (not one per package), and no proposals for
+# the upgrades that need real work: see CONTRIBUTING.md.
 version: 2
 updates:
   - package-ecosystem: github-actions
     directory: /
     schedule: { interval: monthly }
+    groups:
+      actions: { patterns: ["*"] }
   - package-ecosystem: npm
     directory: /editors/vscode
     schedule: { interval: monthly }
+    groups:
+      npm: { patterns: ["*"] }
+    ignore:
+      # the types must not be newer than `engines.vscode` in package.json (raise both together, by hand)
+      - dependency-name: "@types/vscode"
+      # major versions that need changes to the code or the build setup
+      - dependency-name: typescript
+        update-types: ["version-update:semver-major"]
+      - dependency-name: vscode-languageclient
+        update-types: ["version-update:semver-major"]
   - package-ecosystem: cargo
     directory: /
     schedule: { interval: monthly }
+    groups:
+      cargo: { patterns: ["*"] }

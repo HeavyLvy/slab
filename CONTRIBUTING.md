@@ -52,6 +52,10 @@ A release also publishes `slab-lang` and `slab-lsp` to crates.io, but only when 
 
 `main` is protected: it takes no force pushes, and CI (`rust` and `extension`) has to pass on pull requests.
 
+## Dependency updates
+
+Dependabot opens at most one pull request a month for GitHub Actions, one for the extension's npm packages and one for the Rust crates. Merge one when CI is green. It is told not to propose `@types/vscode` (it must stay at the VS Code version in `engines.vscode`) or new major versions of `typescript` and `vscode-languageclient`, which need changes to the code or `tsconfig.json`: upgrade those by hand when there is a reason.
+
 ## Pull requests
 
 Small, focused changes with tests are easiest to review. Say what you ran. By contributing you agree your work is licensed under the [Apache License 2.0](LICENSE).
