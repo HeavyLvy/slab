@@ -32,6 +32,9 @@ pub struct Options {
     pub task_budget: Option<i32>,
     /// Also build the `#[test]` functions (`slab test`).
     pub tests: bool,
+    /// With `tests`: every test is strict about failed commands unless it says `lenient`
+    /// (`slab test --strict-commands`; default: `[test] strict-commands` in `Slab.toml`).
+    pub strict_commands: Option<bool>,
 }
 
 /// A `#[test]` of the built pack.
@@ -228,7 +231,7 @@ pub fn compile(entry: &Path, opts: &Options) -> Result<Compiled, CompileError> {
 
     let command_limit = opts.command_limit.or(manifest.as_ref().and_then(|m| m.command_limit));
     let task_budget = opts.task_budget.or(manifest.as_ref().and_then(|m| m.task_budget)).unwrap_or(30_000);
-    let mut gen_opts = codegen::GenOptions { sources: &project.sources, abort_on_unwrap, pack_id, command_limit, task_budget, slice_costs: HashMap::new(), tests: opts.tests };
+    let mut gen_opts = codegen::GenOptions { sources: &project.sources, abort_on_unwrap, pack_id, command_limit, task_budget, slice_costs: HashMap::new(), tests: opts.tests, strict_default: opts.strict_commands.or(manifest.as_ref().and_then(|m| m.test_strict)).unwrap_or(false) };
     let generate_and_lower = |gen_opts: &codegen::GenOptions| -> Result<(crate::ir::Program, DataPack, lower::LowerInfo), CompileError> {
         let program = codegen::generate(&checked.hir, &namespace, &description, gen_opts).map_err(|errors| CompileError::Source { sources: project.sources.clone(), errors, warnings: checked.warnings.clone() })?;
         let (pack, info) = lower::lower_with_info(&program).map_err(|e| CompileError::Backend(format!("the backend rejected the program: {e}")))?;
@@ -399,6 +402,14 @@ mod tests {
         let normal = build_main("import testing::*; fn helper() { kill(@e[tag=x]); } #[test(strict_commands)] fn t1() { helper(); }");
         assert!(!all(&normal).contains("a command failed"));
 
+        // the project can make every test strict, and a test can opt out
+        let d = Dir::new("ts", &[("main.slab", &format!("{PRELUDE}import testing::*; #[test] fn a() {{ kill(@s); }} #[test(lenient)] fn b() {{ kill(@s); }}"))]);
+        let strict = match compile(&d.0, &Options { namespace: Some("t".into()), tests: true, strict_commands: Some(true), ..Options::default() }) {
+            Ok(c) => c,
+            Err(e) => panic!("{}", e.render()),
+        };
+        assert_eq!(strict.tests.iter().map(|t| (t.name.as_str(), t.strict_commands)).collect::<Vec<_>>(), [("a", true), ("b", false)]);
+
         let err = |src: &str| {
             let d = Dir::new("to", &[("main.slab", &format!("{PRELUDE}import testing::*; {src}"))]);
             match compile(&d.0, &Options { namespace: Some("t".into()), tests: true, ..Options::default() }) {
@@ -408,6 +419,7 @@ mod tests {
         };
         assert!(err("#[test(loud)] fn t1() {}").contains("unknown option of #[test]"));
         assert!(err("#[test(max_commands(0))] fn t1() {}").contains("from 1 to"));
+        assert!(err("#[test(strict_commands, lenient)] fn t1() {}").contains("both"));
     }
 
     #[test]

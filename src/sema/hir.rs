@@ -124,6 +124,8 @@ pub struct FnDef {
 pub struct TestOpts {
     /// Fail the test when a command whose result is ignored fails.
     pub strict_commands: bool,
+    /// `#[test(lenient)]`: not strict even when the project asks for strict tests.
+    pub lenient: bool,
     /// Allow only this many commands in one tick while the test runs.
     pub max_commands: Option<u32>,
 }

@@ -58,7 +58,7 @@ A file with a syntax error is reported and left as it is. The language server of
 ## `slab test`
 
 ```text
-slab test [PATH] [--filter TEXT] [--list] [--timeout SECS] [--seed N] [--realtime] [--hold | --serve] [--port N]
+slab test [PATH] [--filter TEXT] [--list] [--timeout SECS] [--seed N] [--strict-commands] [--realtime] [--hold | --serve] [--port N]
                [--java PATH] [--jar PATH] [--accept-eula] [-v]
 ```
 
@@ -70,6 +70,7 @@ Builds the project **with its `#[test]` functions**, starts a real Minecraft ser
 | `--list` | list the tests without running them (no Java or server needed) |
 | `--timeout SECS` | seconds one test may take (default 60, or `timeout` under `[test]`) |
 | `--seed N` | the world seed (default 0, or `seed` under `[test]`): the same seed gives the same run |
+| `--strict-commands` | every test fails when a command whose result it ignores fails (or `strict-commands = true` under `[test]`); `#[test(lenient)]` opts one out |
 | `--realtime` | let game time pass by itself; by default it stands still and is advanced by slab, see [Testing](../guide/testing.md#the-same-run-every-time) |
 | `--hold` | after the tests, keep the server running for you, with a console |
 | `--serve` | start the server with your pack and no tests, for you to join and use |

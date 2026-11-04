@@ -48,6 +48,8 @@ pub struct Options {
     pub verbose: bool,
     /// The world seed (`--seed`, `[test] seed`; default 0).
     pub seed: Option<i64>,
+    /// Every test is strict about failed commands (`--strict-commands`).
+    pub strict_commands: bool,
     /// Let game time pass by itself instead of stepping it (`--realtime`).
     pub realtime: bool,
     /// After the tests, keep the server running for you (`--hold`).
@@ -80,10 +82,12 @@ const END_MARK: &str = "[slab-test] end ";
 
 /// What a log line says, without the time and thread (`[12:00:00] [Server thread/INFO]: text`).
 fn message(line: &str) -> &str {
-    match line.find("]: ") {
+    let text = match line.find("]: ") {
         Some(i) if line.starts_with('[') => &line[i + 3..],
         _ => line,
-    }
+    };
+    // what a command reports to the console comes as `System chat: <text>`
+    text.strip_prefix("System chat: ").unwrap_or(text)
 }
 
 /// Whether a log line is the game complaining: an error, or one of the messages it uses for
@@ -94,6 +98,8 @@ fn is_problem(line: &str) -> bool {
     }
     let text = message(line);
     line.contains("/ERROR]")
+        // `Failed to instantiate function ns:f: While instantiating macro ... caused error: ..`: a
+        // command built at run time (a macro) that the game rejected, or a missing macro argument
         || text.starts_with("Failed to")
         || text.starts_with("Couldn't")
         || text.contains("Exception")
@@ -134,7 +140,7 @@ fn analyse(lines: &[String], name: &str) -> (Vec<String>, Vec<String>, bool) {
 
 /// Builds the project's tests and runs them. `Ok(true)` when every test passed.
 pub fn run(opts: &Options) -> Result<bool, String> {
-    let compiled = compile::compile(&opts.path, &BuildOptions { tests: true, ..BuildOptions::default() }).map_err(|e| render_error(&e))?;
+    let compiled = compile::compile(&opts.path, &BuildOptions { tests: true, strict_commands: opts.strict_commands.then_some(true), ..BuildOptions::default() }).map_err(|e| render_error(&e))?;
     for w in &compiled.warnings {
         eprintln!("{}", compiled.sources.render(w));
     }
@@ -494,10 +500,10 @@ mod tests {
 
     #[test]
     fn what_counts_as_a_problem() {
-        for bad in ["[12:00:00] [Server thread/ERROR]: oops", "[12:00:00] [Server thread/INFO]: Failed to load function a:b", "[12:00:00] [main/WARN]: java.lang.NullPointerException", "[12:00:00] [Server thread/INFO]: Command execution stopped due to limit (executed 65536 commands)"] {
+        for bad in ["[12:00:00] [Server thread/ERROR]: oops", "[12:00:00] [Server thread/INFO]: Failed to load function a:b", "[12:00:00] [main/WARN]: java.lang.NullPointerException", "[12:00:00] [Server thread/INFO]: Command execution stopped due to limit (executed 65536 commands)", "[12:00:00] [Server thread/INFO]: System chat: Failed to instantiate function t:f: While instantiating macro t:f: Command 'summon minecraft:nope' caused error: Can't find element", "[12:00:00] [Server thread/INFO]: System chat: Failed to instantiate function t:f: Missing argument msg to function t:f"] {
             assert!(is_problem(bad), "{bad}");
         }
-        for fine in ["[12:00:00] [Server thread/INFO]: Killed Pig", "[12:00:00] [Server thread/WARN]: Can't keep up! Is the server overloaded?", "[12:00:00] [Server thread/INFO]: [Server] [slab-test] FAIL x", "\tat Foo.bar(Foo.java:1)"] {
+        for fine in ["[12:00:00] [Server thread/INFO]: Killed Pig", "[12:00:00] [Server thread/INFO]: System chat: No entity was found", "[12:00:00] [Server thread/INFO]: System chat: Running function t:f", "[12:00:00] [Server thread/WARN]: Can't keep up! Is the server overloaded?", "[12:00:00] [Server thread/INFO]: [Server] [slab-test] FAIL x", "\tat Foo.bar(Foo.java:1)"] {
             assert!(!is_problem(fine), "{fine}");
         }
     }

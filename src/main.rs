@@ -29,6 +29,7 @@ test options (needs Java 25+; the server is downloaded once from Mojang):
   --java PATH            the Java to run the server with
   --jar PATH             use this server jar instead of downloading one
   --seed N               the world seed (default 0, or [test] seed); the same seed, the same run
+  --strict-commands      every test fails when a command whose result it ignores fails (see #[test(lenient)])
   --realtime             let game time pass by itself (default: it is stepped, so it does not depend on speed)
   --hold                 after the tests, keep the server running for you, with a console
   --serve                start the server with the pack and no tests, for you to join and use
@@ -281,6 +282,10 @@ fn test(args: &[String]) -> ExitCode {
             }
             "-v" | "--verbose" => {
                 opts.verbose = true;
+                Ok(())
+            }
+            "--strict-commands" => {
+                opts.strict_commands = true;
                 Ok(())
             }
             "--realtime" => {

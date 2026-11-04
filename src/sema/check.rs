@@ -1618,14 +1618,21 @@ impl<'a> Checker<'a> {
             for arg in &a.args {
                 match &arg.kind {
                     ast::ExprKind::Ident(name) if name == "strict_commands" => opts.strict_commands = true,
+                    ast::ExprKind::Ident(name) if name == "lenient" => opts.lenient = true,
                     ast::ExprKind::Call { callee, args } if matches!(&callee.kind, ast::ExprKind::Ident(name) if name == "max_commands") && args.len() == 1 => match self.const_expr(&args[0], Some(&Ty::Int)) {
                         Some((ConstVal::Int(n), _)) if n >= 1 => opts.max_commands = Some(n as u32),
                         Some(_) => self.error(args[0].span, "`max_commands` needs a number of commands from 1 to 2147483647"),
                         None => {}
                     },
-                    _ => self.error_hint(arg.span, "unknown option of #[test]", "the options are `strict_commands` and `max_commands(N)`, as in `#[test(strict_commands, max_commands(20000))]`"),
+                    _ => self.error_hint(arg.span, "unknown option of #[test]", "the options are `strict_commands`, `lenient` and `max_commands(N)`, as in `#[test(strict_commands, max_commands(20000))]`"),
                 }
             }
+        }
+        if opts.strict_commands
+            && opts.lenient
+            && let Some(a) = attrs.iter().find(|a| a.name.name == "test")
+        {
+            self.error(a.span, "a test cannot be both `strict_commands` and `lenient`");
         }
         opts
     }

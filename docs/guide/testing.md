@@ -84,8 +84,8 @@ fn the_guards_arrive() {
 ```
 
 * **`strict_commands`**: Minecraft does not log a command that fails inside a function (nobody to
-  `kill`, a tag that is already there, a block that did not change): it only counts as "failed", and
-  slab lets that pass unless you look at it. In a strict test, every command whose result your code
+  `kill`, a tag that is already there, a block that did not change, a computed id that does not exist): it only
+  counts as "failed", and slab lets that pass unless you look at it. In a strict test, every command whose result your code
   ignores must have worked, in the test **and in everything it calls**, or the test fails and says where:
   `command failed: main.slab:6: kill`. Commands whose result you use (`let ok = kill(..)`,
   `run_command(..).is_ok()`) are yours to judge and are never reported. Only a test with this option pays
@@ -95,8 +95,11 @@ fn the_guards_arrive() {
   test is `N` instead, so a function that should stay cheap fails the moment one tick costs more. The
   count includes the test's own commands between two `wait`s. It does not change other tests.
 
-Combine them with a comma. They cannot hide a failure for other tests: each test starts with the strict
-check off and the normal command limit.
+Combine them with a comma. Each test starts with the normal command limit, and with the strict check on only if it asked.
+
+**Strict for every test:** if you want failed commands to fail *all* your tests, set `strict-commands = true` under `[test]`
+in `Slab.toml` (or run `slab test --strict-commands`). A test that really does expect a command to fail then says
+`#[test(lenient)]`. Commands whose result you use are never reported either way.
 
 ## The world a test starts in
 
@@ -148,9 +151,13 @@ A test fails when
 If the pack cannot even load (a function with a command the game rejects), no test is run and the
 errors are printed: that is the same kind of error, found before it could confuse a test.
 
-Be aware that Minecraft does **not** log everything: a command that fails inside a function (nobody
-has that score, a computed command that does not parse) just returns "failed" without a log line.
-Check what you care about: `run_command("...").is_ok()`, `exists(...)`, a score you read back.
+What reaches the log is only what the game chooses to write, and it writes **very little about commands that
+fail**. We checked on the server: a command that fails inside a function (nobody to `kill`, a score nobody has, a
+computed `summon` of an id that does not exist, a macro called without its argument) is **not logged at all**, and
+neither is a failure further down a call chain, however the function was started. The game only reports a failure
+that is the very command typed into the console. So the log cannot tell a test about failed commands, and you need
+[`strict_commands`](#catching-failed-commands-and-heavy-ticks), which looks at each command's own result and does catch
+all of those, including commands built at run time that the game rejected.
 
 ## The command line
 

@@ -42,6 +42,8 @@ pub struct GenOptions<'a> {
     pub slice_costs: HashMap<u32, u64>,
     /// Generate the `#[test]` functions too (`slab test`); otherwise they are left out.
     pub tests: bool,
+    /// Tests are strict about failed commands unless they say `lenient` (`slab test --strict-commands`).
+    pub strict_default: bool,
 }
 
 /// Translates a checked program. Errors are things the language accepts but the backend cannot
@@ -64,7 +66,7 @@ pub fn generate(hir: &h::Hir, namespace: &str, description: &str, opts: &GenOpti
             }
         }
     }
-    if opts.tests && hir.fns.iter().any(|f| f.test && f.test_opts.strict_commands) {
+    if opts.tests && hir.fns.iter().any(|f| f.test && is_strict(f, opts.strict_default)) {
         let flag = unique(&mut g.used_globals, "_test_strict".to_owned());
         g.extra_globals.push(ir::Global { name: flag.clone(), kind: ir::Kind::Int, init: ir::Expr::Int(0) });
         for (name, on) in [("_test_strict_on", 1), ("_test_strict_off", 0)] {
@@ -79,7 +81,7 @@ pub fn generate(hir: &h::Hir, namespace: &str, description: &str, opts: &GenOpti
         for (i, f) in hir.fns.iter().enumerate().filter(|(_, f)| f.test) {
             let module = &hir.modules[f.module];
             let shown = if module == "main" { f.name.clone() } else { format!("{module}::{}", f.name) };
-            program.tests.push(ir::TestInfo { name: shown, function: g.fn_names[i].clone(), origin: (hir.files[f.module], f.span), strict_commands: f.test_opts.strict_commands, max_commands: f.test_opts.max_commands });
+            program.tests.push(ir::TestInfo { name: shown, function: g.fn_names[i].clone(), origin: (hir.files[f.module], f.span), strict_commands: is_strict(f, opts.strict_default), max_commands: f.test_opts.max_commands });
         }
     }
     g.watchdog();
@@ -92,6 +94,11 @@ pub fn generate(hir: &h::Hir, namespace: &str, description: &str, opts: &GenOpti
         program.entities = Some(ir::EntityConfig { objective: g.id_objective(), owned_tag: g.owned_tag() });
     }
     if g.errors.is_empty() { Ok(program) } else { Err(g.errors) }
+}
+
+/// Whether a test fails when a command whose result it ignores fails.
+fn is_strict(f: &h::FnDef, default: bool) -> bool {
+    f.test_opts.strict_commands || (default && !f.test_opts.lenient)
 }
 
 fn sanitize(s: &str) -> String {

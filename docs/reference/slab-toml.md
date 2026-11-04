@@ -23,6 +23,7 @@ naming = "warn"                  # or "off"
 accept-eula = false
 timeout = 60
 seed = 0
+strict-commands = false
 ```
 
 ## `[project]`
@@ -51,6 +52,7 @@ seed = 0
 | `accept-eula` | `true`: you accept the [Minecraft EULA](https://aka.ms/MinecraftEULA), so `slab test` may download the server. Default `false`. |
 | `timeout` | Seconds one test may take, 1 to 3600. Default 60. |
 | `seed` | The world seed of the test server (a whole number). Default 0. |
+| `strict-commands` | `true`: every test fails when a command whose result it ignores fails (a test says `#[test(lenient)]` to opt out). Default `false`. See [Testing](../guide/testing.md#catching-failed-commands-and-heavy-ticks). |
 
 ## `[lint]`
 
