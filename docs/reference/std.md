@@ -702,6 +702,44 @@ pub fn has(target: Target, name: const str) -> bool
 Whether every matching entity carries the tag. The tag must be known at compile time,
 because it becomes part of a selector.
 
+## `test`
+
+
+
+### `wait`
+
+```slab
+pub fn wait(ticks: const int)
+```
+
+Let `ticks` game ticks pass (20 per second), then go on. The number must be written out.
+Only works in a `#[test]` or a `task fn`, and not inside a context block (`as`, `at`, `be`..).
+
+### `assert`
+
+```slab
+pub fn assert(condition: bool, message: str)
+```
+
+Fail the test with `message` unless `condition` holds. The test goes on after a failure, so
+one run reports every problem.
+
+### `fail`
+
+```slab
+pub fn fail(message: str)
+```
+
+Fail the test with `message`.
+
+### `assert_eq`
+
+```slab
+pub fn assert_eq(actual: int, expected: int, message: str)
+```
+
+Fail the test unless the two numbers are equal; the report shows both.
+
 ## `game::effect`
 
 Status effects (`/effect`). `import game::effect;` then `effect::give(@s, "minecraft:speed", 10s, 1)`.

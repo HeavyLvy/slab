@@ -112,7 +112,7 @@
     },
     "builtins": {
       "comment": "builtin functions in call position, longest names first",
-      "match": "(?:(?<=::)\\s*(?:run_command|setblock|particle|exists|summon|remove|print|clear|kill|give|say|add|has|tp)|\\b(?:run_command|setblock|particle|exists|summon|print|kill|say|tp))\\b(?=\\s*\\()",
+      "match": "(?:(?<=::)\\s*(?:run_command|assert_eq|setblock|particle|exists|summon|remove|assert|print|clear|kill|wait|fail|give|say|add|has|tp)|\\b(?:run_command|setblock|particle|exists|summon|print|kill|say|tp))\\b(?=\\s*\\()",
       "name": "support.function.slab"
     },
     "call": {

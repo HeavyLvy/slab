@@ -114,6 +114,8 @@ pub struct FnDef {
     pub std: bool,
     /// A `task fn`: runs a slice per tick; started with `Stmt::Start`.
     pub task: bool,
+    /// A `#[test]` (always also a `task`): only generated for `slab test`.
+    pub test: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Default)]

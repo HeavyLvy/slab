@@ -298,11 +298,23 @@ pub struct Program {
     /// from `_init`: the game reads the command limit when a chain starts, so a rule changed by the
     /// first function applies to the ones after it.
     pub load_in_own_chains: bool,
+    /// The `#[test]` functions (only in a build for `slab test`).
+    pub tests: Vec<TestInfo>,
+}
+
+/// A `#[test]` function.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TestInfo {
+    /// As written: `check_ring`, or `maps::arena_works` in a module.
+    pub name: String,
+    /// The function that starts it.
+    pub function: String,
+    pub origin: (usize, Span),
 }
 
 impl Program {
     pub fn new(namespace: &str) -> Self {
-        Program { namespace: namespace.to_owned(), description: format!("{namespace} (compiled by slab)"), objectives: Vec::new(), entities: None, uninstall: Vec::new(), globals: Vec::new(), functions: Vec::new(), origins: std::collections::HashMap::new(), load_in_own_chains: false }
+        Program { namespace: namespace.to_owned(), description: format!("{namespace} (compiled by slab)"), objectives: Vec::new(), entities: None, uninstall: Vec::new(), globals: Vec::new(), functions: Vec::new(), origins: std::collections::HashMap::new(), load_in_own_chains: false, tests: Vec::new() }
     }
 
     pub fn global(mut self, name: &str, kind: Kind, init: Expr) -> Self {

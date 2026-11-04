@@ -42,6 +42,8 @@ pub(super) struct TaskCtx {
     dead: bool,
     /// Targets of `continue` and `break` of the enclosing loops that are part of the state graph.
     loops: Vec<(usize, usize)>,
+    /// For a `#[test]`: its name in the `[slab-test] end` line.
+    pub test_name: Option<String>,
 }
 
 fn is_loop(s: &h::Stmt) -> bool {
@@ -62,11 +64,16 @@ fn match_arms(s: &h::Stmt) -> Option<&Vec<h::MatchArm>> {
     }
 }
 
+/// `wait(ticks);`: the task stops here and goes on after that many ticks.
+fn is_wait(s: &h::Stmt) -> bool {
+    matches!(s, h::Stmt::Expr(h::Expr { kind: h::ExprKind::Builtin { name: "wait", .. }, .. }))
+}
+
 /// Whether the statement is or contains a loop that the task could stop in the middle of. A
 /// `Context` body is a function that may run once per entity: loops in it just run.
 fn has_loop(s: &h::Stmt) -> bool {
     let block = |b: &h::Block| b.stmts.iter().any(has_loop);
-    if is_loop(s) {
+    if is_loop(s) || is_wait(s) {
         return true;
     }
     match s {
@@ -193,11 +200,42 @@ impl Gen<'_> {
                 let simple = !loop_body(s).is_some_and(|b| b.stmts.iter().any(has_loop));
                 if simple { self.sliced_loop(s) } else { self.state_loop(s) }
             }
+            h::Stmt::Expr(h::Expr { kind: h::ExprKind::Builtin { name: "wait", args }, span, .. }) => {
+                let ticks = match args.first().map(|a| &a.kind) {
+                    Some(h::ExprKind::Int(n)) if *n >= 1 => *n as u32,
+                    _ => {
+                        self.err(*span, "`wait` needs a number of ticks written out");
+                        1
+                    }
+                };
+                self.twait(ticks);
+            }
             h::Stmt::Return(_) => {
                 self.simple(s);
                 self.t().dead = true;
             }
             _ => self.simple(s),
+        }
+    }
+
+    /// `wait(ticks)`: go on in a new block after that many ticks (the locals stay where they are).
+    fn twait(&mut self, ticks: u32) {
+        let next = self.tnew();
+        let state = self.t().state.clone();
+        let step = self.t().step.clone();
+        let set = self.tset(&state, next as i32);
+        self.tpush(set);
+        self.tpush(ir::Stmt::Command(Command::Schedule(Schedule::Function { function: FunctionRef::Id(step), ticks, mode: None })));
+        self.tpush(ir::Stmt::Suspend);
+        self.t().dead = true;
+        self.tswitch(next);
+    }
+
+    /// What a finished test says, so the test runner knows it is over (nothing for other tasks).
+    pub(super) fn test_end(&self) -> Vec<ir::Stmt> {
+        match self.task.as_ref().and_then(|t| t.test_name.as_ref()) {
+            Some(name) => vec![ir::Stmt::Command(Command::say(format!("[slab-test] end {name}")))],
+            None => Vec::new(),
         }
     }
 
@@ -384,12 +422,15 @@ impl Gen<'_> {
         start_body.push(ir::Stmt::Command(Command::Schedule(Schedule::Function { function: FunctionRef::Id(step.clone()), ticks: 1, mode: None })));
         out.push(ir::Function { name: name.clone(), params, ret: None, body: start_body, entry: None });
 
-        self.task = Some(TaskCtx { state: state.clone(), running: running.clone(), budget: budget.clone(), step, blocks: vec![first_block], cur: 0, dead: false, loops: Vec::new() });
+        self.task = Some(TaskCtx { state: state.clone(), running: running.clone(), budget: budget.clone(), step, blocks: vec![first_block], cur: 0, dead: false, loops: Vec::new(), test_name: self.hir.fns[idx].test.then(|| self.fn_names[idx].clone()) });
         self.tstmts(&f.body.stmts);
         // the end of the body: the task is done
         if !self.task.as_ref().expect("task").dead {
             let off = self.tset(&running, 0);
             self.tpush(off);
+            for st in self.test_end() {
+                self.tpush(st);
+            }
             self.tpush(ir::Stmt::Return(None));
         }
         let ctx = self.task.take().expect("task");

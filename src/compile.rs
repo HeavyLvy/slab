@@ -30,6 +30,18 @@ pub struct Options {
     pub command_limit: Option<i32>,
     /// Commands a `task fn` may use per tick (`--task-budget`; default: `Slab.toml`, else 30,000).
     pub task_budget: Option<i32>,
+    /// Also build the `#[test]` functions (`slab test`).
+    pub tests: bool,
+}
+
+/// A `#[test]` of the built pack.
+pub struct TestCase {
+    /// As written in the source: `ring_closes`, or `maps::ring_closes`.
+    pub name: String,
+    /// The function that starts it.
+    pub function: ResourceLocation,
+    /// `file:line` of the test, for reports.
+    pub at: String,
 }
 
 pub struct Compiled {
@@ -42,6 +54,8 @@ pub struct Compiled {
     pub notices: Vec<String>,
     pub warnings: Vec<Diagnostic>,
     pub sources: SourceMap,
+    /// The `#[test]` functions, when built with `Options::tests`.
+    pub tests: Vec<TestCase>,
 }
 
 pub enum CompileError {
@@ -210,7 +224,7 @@ pub fn compile(entry: &Path, opts: &Options) -> Result<Compiled, CompileError> {
 
     let command_limit = opts.command_limit.or(manifest.as_ref().and_then(|m| m.command_limit));
     let task_budget = opts.task_budget.or(manifest.as_ref().and_then(|m| m.task_budget)).unwrap_or(30_000);
-    let mut gen_opts = codegen::GenOptions { sources: &project.sources, abort_on_unwrap, pack_id, command_limit, task_budget, slice_costs: HashMap::new() };
+    let mut gen_opts = codegen::GenOptions { sources: &project.sources, abort_on_unwrap, pack_id, command_limit, task_budget, slice_costs: HashMap::new(), tests: opts.tests };
     let generate_and_lower = |gen_opts: &codegen::GenOptions| -> Result<(crate::ir::Program, DataPack, lower::LowerInfo), CompileError> {
         let program = codegen::generate(&checked.hir, &namespace, &description, gen_opts).map_err(|errors| CompileError::Source { sources: project.sources.clone(), errors, warnings: checked.warnings.clone() })?;
         let (pack, info) = lower::lower_with_info(&program).map_err(|e| CompileError::Backend(format!("the backend rejected the program: {e}")))?;
@@ -226,6 +240,19 @@ pub fn compile(entry: &Path, opts: &Options) -> Result<Compiled, CompileError> {
         (program, pack, info) = generate_and_lower(&gen_opts)?;
     }
     pack.set_target(target);
+    if opts.tests {
+        // what `slab test` runs before each test: the pack as it is just after loading
+        let id = |name: &str| ResourceLocation::new(&namespace, name).map_err(|e| CompileError::Backend(e.to_string()));
+        let mut reset = crate::datapack::Function::new();
+        reset.push(crate::datapack::Command::call(id("_uninstall")?));
+        reset.push(crate::datapack::Command::call(id("_init")?));
+        if program.load_in_own_chains {
+            for f in program.functions.iter().filter(|f| f.entry == Some(crate::ir::Entry::Load)) {
+                reset.push(crate::datapack::Command::call(id(&f.name)?));
+            }
+        }
+        pack.add_function(id("_test_reset")?, reset).map_err(|e| CompileError::Backend(e.to_string()))?;
+    }
     let mut too_long = limit_warnings(&pack, &info, &program, &namespace, &project.sources, command_limit.map_or(cost::LIMIT, |l| l.max(0) as u64));
     let problems = pack.validate();
     if !problems.is_empty() {
@@ -234,7 +261,16 @@ pub fn compile(entry: &Path, opts: &Options) -> Result<Compiled, CompileError> {
     }
     let mut warnings: Vec<Diagnostic> = checked.warnings.into_iter().filter(|d| d.severity == Severity::Warning).collect();
     warnings.append(&mut too_long);
-    Ok(Compiled { pack, namespace, project_dir, target, notices: target.caveat().into_iter().collect(), warnings, sources: project.sources })
+    let tests = program
+        .tests
+        .iter()
+        .filter_map(|t| {
+            let function = ResourceLocation::new(&namespace, &t.function).ok()?;
+            let at = project.sources.files.get(t.origin.0).map_or_else(String::new, |f| format!("{}:{}", f.name, f.line_col(t.origin.1.start as usize).0));
+            Some(TestCase { name: t.name.clone(), function, at })
+        })
+        .collect();
+    Ok(Compiled { pack, namespace, project_dir, target, notices: target.caveat().into_iter().collect(), warnings, sources: project.sources, tests })
 }
 
 #[cfg(test)]
@@ -315,6 +351,49 @@ mod tests {
             Ok(_) => panic!("expected an error"),
             Err(e) => e.render(),
         }
+    }
+
+    fn build_tests(src: &str) -> Compiled {
+        let d = Dir::new("tt", &[("main.slab", &format!("{PRELUDE}import test::*; {src}"))]);
+        match compile(&d.0, &Options { namespace: Some("t".into()), tests: true, ..Options::default() }) {
+            Ok(c) => c,
+            Err(e) => panic!("{}", e.render()),
+        }
+    }
+
+    #[test]
+    fn tests_are_only_built_for_slab_test_and_wait_splits_them_into_steps() {
+        let src = "#[test] fn ring_closes() { let mut n = 0; n += 1; wait(20); assert_eq(n, 1, \"n\"); wait(5); assert(n == 1, \"still\"); }";
+        let plain = build_main(&format!("import test::*; {src} #[load] fn boot() {{}}"));
+        assert!(plain.tests.is_empty());
+        assert!(plain.pack.function(&ResourceLocation::parse("t:ring_closes").unwrap()).is_none(), "a test is not part of a normal build");
+
+        let c = build_tests(src);
+        assert_eq!(c.tests.len(), 1);
+        assert_eq!((c.tests[0].name.as_str(), c.tests[0].function.to_string().as_str()), ("ring_closes", "t:ring_closes"));
+        // the start function schedules the first step; the steps wait with `schedule`, and the end says so
+        let all: String = c.pack.functions().map(|(_, f)| f.render()).collect::<Vec<_>>().join("\n");
+        assert!(all.contains("schedule function t:ring_closes__step 20t") && all.contains("schedule function t:ring_closes__step 5t"), "{all}");
+        assert!(all.contains("say [slab-test] end ring_closes"), "{all}");
+        assert!(all.contains("[slab-test] FAIL"), "{all}");
+    }
+
+    #[test]
+    fn wait_and_test_are_checked() {
+        let err = |src: &str| {
+            let d = Dir::new("te", &[("main.slab", &format!("{PRELUDE}import test::*; {src}"))]);
+            match compile(&d.0, &Options { namespace: Some("t".into()), tests: true, ..Options::default() }) {
+                Ok(_) => panic!("expected an error"),
+                Err(e) => e.render(),
+            }
+        };
+        assert!(err("fn f() { wait(5); }").contains("only works in a `task fn` or a `#[test]`"));
+        assert!(err("#[test] fn t1() { as @a { wait(5); } }").contains("cannot be inside a context block"));
+        assert!(err("#[test] fn t1(x: int) {}").contains("takes no parameters"));
+        assert!(err("#[test] fn t1() -> int { return 1; }").contains("returns nothing"));
+        assert!(err("#[test] #[load] fn t1() {}").contains("cannot also be an entry point"));
+        assert!(err("#[test] fn t1() {} fn f() { t1(); }").contains("is a test"));
+        assert!(err("#[test] fn t1() { wait(0); }").contains("from 1 to 1000000"));
     }
 
     #[test]

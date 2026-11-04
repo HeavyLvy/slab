@@ -66,6 +66,7 @@ pub const IDS: &[&str] = &[
     "summon",
     "run_command",
     "particle",
+    "wait",
 ];
 
 /// The intrinsic *methods* (`impl<T> Option<T> { #[intrinsic("option.unwrap")] fn unwrap(self) -> T; }`)

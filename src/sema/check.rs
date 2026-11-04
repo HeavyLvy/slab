@@ -220,6 +220,11 @@ struct ConstInfo<'a> {
     state: ConstState,
 }
 
+/// Whether the attributes make a function a `#[test]`.
+fn is_test(attrs: &[ast::Attr]) -> bool {
+    attrs.iter().any(|a| a.name.name == "test")
+}
+
 struct FnCtx {
     locals: Vec<LocalInfo>,
     used: Vec<bool>,
@@ -227,6 +232,8 @@ struct FnCtx {
     ret: Ty,
     loop_depth: usize,
     ctx_depth: usize,
+    /// A `task fn` or a `#[test]`: may stop for a while (`wait`).
+    in_task: bool,
 }
 
 struct Checker<'a> {
@@ -1571,6 +1578,17 @@ impl<'a> Checker<'a> {
             } else {
                 self.entry_of(attrs, f, !params.is_empty(), &ret)
             };
+            if is_test(attrs) {
+                if !params.is_empty() {
+                    self.error(f.name.span, format!("test `{}` takes no parameters", f.name.name));
+                }
+                if ret != Ty::Unit {
+                    self.error(f.name.span, format!("test `{}` returns nothing", f.name.name));
+                }
+                if entry.is_some() {
+                    self.error(f.name.span, format!("test `{}` cannot also be an entry point", f.name.name));
+                }
+            }
             if f.is_task {
                 if self.fns[fi].self_ty.is_some() {
                     self.error(f.name.span, "a method cannot be a task");
@@ -1617,8 +1635,15 @@ impl<'a> Checker<'a> {
                         None => continue,
                     }
                 }
+                // a test is not an entry point: the harness starts it (checked with the signature)
+                "test" => {
+                    if !a.args.is_empty() {
+                        self.error(a.span, "#[test] takes no arguments");
+                    }
+                    continue;
+                }
                 other => {
-                    self.error_hint(a.name.span, format!("unknown attribute `{other}`"), "the attributes are #[load], #[tick] and #[every(N)]");
+                    self.error_hint(a.name.span, format!("unknown attribute `{other}`"), "the attributes are #[load], #[tick], #[every(N)] and #[test]");
                     continue;
                 }
             };
@@ -1976,7 +2001,7 @@ impl<'a> Checker<'a> {
         let decl: &'a ast::FnDecl = self.fns[idx].decl;
         let sig_params = self.fns[idx].params.clone();
         let ret = self.fns[idx].ret.clone();
-        self.f = Some(FnCtx { locals: Vec::new(), used: Vec::new(), scopes: vec![HashMap::new()], ret: ret.clone(), loop_depth: 0, ctx_depth: 0 });
+        self.f = Some(FnCtx { locals: Vec::new(), used: Vec::new(), scopes: vec![HashMap::new()], ret: ret.clone(), loop_depth: 0, ctx_depth: 0, in_task: decl.is_task || is_test(self.fns[idx].attrs) });
         let mut params = Vec::new();
         for (p, ty) in decl.params.iter().zip(sig_params) {
             // parameters are the function's own copies, so they may be assigned
@@ -2004,7 +2029,8 @@ impl<'a> Checker<'a> {
             entry: self.fns[idx].entry,
             span: self.fns[idx].span,
             std: self.mods[self.fns[idx].module].std,
-            task: decl.is_task,
+            task: decl.is_task || is_test(self.fns[idx].attrs),
+            test: is_test(self.fns[idx].attrs),
         });
     }
 
@@ -3158,6 +3184,11 @@ impl<'a> Checker<'a> {
         let params = self.fns[id.0].params.clone();
         let ret = self.fns[id.0].ret.clone();
         let name = self.fns[id.0].decl.name.name.clone();
+        if is_test(self.fns[id.0].attrs) {
+            self.error_hint(span, format!("`{name}` is a test: the test runner starts it, so it is not called"), "move the shared code into an ordinary function and call that");
+            self.args_for_errors(args);
+            return Expr::error(span);
+        }
         if self.fns[id.0].decl.is_task && !self.starting {
             self.error_hint(span, format!("`{name}` is a task: it runs over several ticks, so it is not called"), format!("start it with `start {name}(..);`"));
             self.args_for_errors(args);
@@ -3354,6 +3385,18 @@ impl<'a> Checker<'a> {
             _ => None,
         };
         match name {
+            "wait" => {
+                let span = args.first().map_or(Span::new(0, 0), |a| a.span);
+                if !self.fctx().in_task {
+                    self.error_hint(span, "`wait` stops a function for some ticks, so it only works in a `task fn` or a `#[test]`", "make this a `task fn`, or a `#[test]` function");
+                } else if self.fctx().ctx_depth > 0 {
+                    self.error_hint(span, "`wait` cannot be inside a context block", "a context block may run once per entity: `wait` before or after it");
+                }
+                if let Some((t, sp)) = n(0)
+                    && !(1..=1_000_000).contains(&t) {
+                        self.error(sp, "`wait` needs a number of ticks from 1 to 1000000");
+                    }
+            }
             "say" => {
                 if let Some((m, sp)) = s(0)
                     && (m.contains('\n') || m.contains('\r') || m.is_empty()) {

@@ -197,10 +197,10 @@ fn method_def(type_name: &str, m: &ast::ImplFn) -> Def {
     }
 }
 
-/// `#[load]` / `#[tick]` / `#[every(1s)]` -> `load` / `tick` / `every`.
+/// `#[load]` / `#[tick]` / `#[every(1s)]` / `#[test]` -> `load` / `tick` / `every` / `test`.
 fn entry_attr_name(attr: &ast::Attr) -> Option<String> {
     match attr.name.name.as_str() {
-        "load" | "tick" | "every" => Some(attr.name.name.clone()),
+        "load" | "tick" | "every" | "test" => Some(attr.name.name.clone()),
         _ => None,
     }
 }

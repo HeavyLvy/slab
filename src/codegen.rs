@@ -40,6 +40,8 @@ pub struct GenOptions<'a> {
     /// What one trip of a task's sliced loop (or one task state) costs, by slice number; filled
     /// in by a second code generation pass once the first has been measured (`compile.rs`).
     pub slice_costs: HashMap<u32, u64>,
+    /// Generate the `#[test]` functions too (`slab test`); otherwise they are left out.
+    pub tests: bool,
 }
 
 /// Translates a checked program. Errors are things the language accepts but the backend cannot
@@ -51,7 +53,7 @@ pub fn generate(hir: &h::Hir, namespace: &str, description: &str, opts: &GenOpti
     program.objectives = g.objectives();
     program.globals = g.globals();
     // functions of the standard library are only generated when something reaches them
-    let mut reached: Vec<bool> = hir.fns.iter().map(|f| !f.std).collect();
+    let mut reached: Vec<bool> = hir.fns.iter().map(|f| !f.std && (opts.tests || !f.test)).collect();
     let mut work: Vec<usize> = (0..hir.fns.len()).filter(|&i| reached[i]).collect();
     while let Some(i) = work.pop() {
         let mut calls = Vec::new();
@@ -64,6 +66,13 @@ pub fn generate(hir: &h::Hir, namespace: &str, description: &str, opts: &GenOpti
     }
     for i in (0..hir.fns.len()).filter(|&i| reached[i]) {
         g.function(i, &mut program.functions);
+    }
+    if opts.tests {
+        for (i, f) in hir.fns.iter().enumerate().filter(|(_, f)| f.test) {
+            let module = &hir.modules[f.module];
+            let shown = if module == "main" { f.name.clone() } else { format!("{module}::{}", f.name) };
+            program.tests.push(ir::TestInfo { name: shown, function: g.fn_names[i].clone(), origin: (hir.files[f.module], f.span) });
+        }
     }
     g.watchdog();
     g.command_limit(&mut program);
@@ -625,6 +634,7 @@ impl<'a> Gen<'a> {
                 // leaving a task for good: it is no longer running
                 if let Some(t) = &self.task {
                     out.push(ir::Stmt::Assign { target: ir::VarRef::Global(t.running.clone()), value: ir::Expr::Int(0) });
+                    out.extend(self.test_end());
                 }
                 out.push(ir::Stmt::Return(v));
             }

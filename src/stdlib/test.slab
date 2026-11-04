@@ -1,0 +1,33 @@
+//! Tools for `#[test]` functions, which `slab test` runs on a real Minecraft server.
+//!
+//! A test is a function marked `#[test]` (anywhere in the project, with no parameters). It may take
+//! many ticks: `wait` pauses it, like in a `task fn`. A test fails when an assertion fails or when
+//! the server logs an error while it runs.
+
+import std::*;
+import game::*;
+
+/// Let `ticks` game ticks pass (20 per second), then go on. The number must be written out.
+/// Only works in a `#[test]` or a `task fn`, and not inside a context block (`as`, `at`, `be`..).
+#[intrinsic("wait")]
+pub fn wait(ticks: const int);
+
+/// Fail the test with `message` unless `condition` holds. The test goes on after a failure, so
+/// one run reports every problem.
+pub fn assert(condition: bool, message: str) {
+    if !condition {
+        say(f"[slab-test] FAIL {message}");
+    }
+}
+
+/// Fail the test with `message`.
+pub fn fail(message: str) {
+    say(f"[slab-test] FAIL {message}");
+}
+
+/// Fail the test unless the two numbers are equal; the report shows both.
+pub fn assert_eq(actual: int, expected: int, message: str) {
+    if actual != expected {
+        say(f"[slab-test] FAIL {message}: expected {expected}, got {actual}");
+    }
+}

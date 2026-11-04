@@ -31,6 +31,7 @@ fn boot() {
   the new `start` are used); the old run's locals are overwritten.
 * A task can `start` other tasks, call ordinary functions, use `be`/`as` blocks, `return;` to finish
   early, and have as many loops as it likes, nested or in a row, with `break` and `continue`.
+* `wait(ticks);` (from `import test::*;`) stops the task for that many ticks and goes on afterwards; a `#[test]` function is a task, which is how tests wait (see [Testing](../guide/testing.md)).
 * `task` and `start` are words only where they mean something (`task fn`, `start name(..)`), so
   they remain usable as names.
 * Not (yet): a loop, `break` or `continue` inside a `match` of a task (use `if`/`else`; it is an
